@@ -25,12 +25,14 @@ def _plain(number):
 def reconcile_packing(data):
     """Return calculated totals and discrepancies; printed totals are never overwritten."""
     items = data.get("items") or []
-    issues = []
+    issues, discrepancies = [], []
     quantities = {}
+    quantity_complete = bool(items)
     for index, item in enumerate(items, 1):
         amount = _number(item.get("shipped_quantity") or item.get("quantity") or item.get("paid_quantity"))
         unit = normalize_quantity_unit(item.get("unit"))
         if amount is None or not unit:
+            quantity_complete = False
             issues.append(f"Packing row {index}: quantity and unit must be confirmed")
         else:
             quantities[unit] = quantities.get(unit, Decimal("0")) + amount
@@ -61,19 +63,20 @@ def reconcile_packing(data):
         declared_raw = data.get(declared_field)
         declared = _number(declared_raw)
         if declared_raw not in (None, "") and declared is None:
-            issues.append(f"Source {label} total is invalid")
+            message = f"Source {label} total is invalid"
+            (discrepancies if total is not None else issues).append(message)
         elif total is not None and declared is not None and total != declared:
-            issues.append(f"Source {label} total {_plain(declared)} differs from row sum {_plain(total)}")
+            discrepancies.append(f"Source {label} total {_plain(declared)} differs from row sum {_plain(total)}")
 
     declared_quantity = _number(data.get("declared_total_quantity"))
     declared_unit = normalize_quantity_unit(data.get("declared_total_quantity_unit"))
     if data.get("declared_total_quantity") not in (None, "") and declared_quantity is None:
-        issues.append("Source quantity total is invalid")
+        (discrepancies if quantity_complete else issues).append("Source quantity total is invalid")
     elif declared_quantity is not None:
         if not declared_unit or declared_unit not in quantities:
-            issues.append("Source quantity total unit does not match the item units; confirm the total")
+            discrepancies.append("Source quantity total unit does not match the item units; confirm the total")
         elif quantities[declared_unit] != declared_quantity:
-            issues.append(f"Source quantity total {_plain(declared_quantity)} {declared_unit} differs from row sum {_plain(quantities[declared_unit])} {declared_unit}")
+            discrepancies.append(f"Source quantity total {_plain(declared_quantity)} {declared_unit} differs from row sum {_plain(quantities[declared_unit])} {declared_unit}")
 
     raw_containers = data.get("container_count")
     if raw_containers not in (None, ""):
@@ -82,4 +85,5 @@ def reconcile_packing(data):
             issues.append("Container count must be a non-negative whole number")
 
     return {"quantities": {unit: _plain(value) for unit, value in quantities.items()},
-            "calculated": calculated, "issues": issues}
+            "quantity_complete": quantity_complete, "calculated": calculated,
+            "issues": issues, "discrepancies": discrepancies}

@@ -39,8 +39,9 @@ class PackingWorkflowTests(unittest.TestCase):
         self.assertEqual(result["calculated"]["net_weight_kg"], "10354.56")
         self.assertEqual(result["calculated"]["gross_weight_kg"], "13417.08")
         self.assertEqual(result["calculated"]["volume_cbm"], "35.477")
-        self.assertTrue(any("volume (CBM)" in issue for issue in result["issues"]))
-        self.assertTrue(any("quantity total" in issue for issue in result["issues"]))
+        self.assertEqual(result["issues"], [])
+        self.assertTrue(any("volume (CBM)" in issue for issue in result["discrepancies"]))
+        self.assertTrue(any("quantity total" in issue for issue in result["discrepancies"]))
 
     def test_pl_needs_no_currency_or_prices_and_excel_preserves_packing_columns(self):
         doc = packing_example()
@@ -59,6 +60,22 @@ class PackingWorkflowTests(unittest.TestCase):
         doc = packing_example()
         doc["items"][0]["net_weight_kg"] = None
         self.assertIsNone(reconcile_packing(doc)["calculated"]["net_weight_kg"])
+
+    def test_discrepancies_use_row_totals_without_overwriting_source(self):
+        doc = packing_example()
+        doc["actual_package_count"] = "26"
+        result = validate_and_calculate(doc)
+        self.assertEqual(result["declared_volume_cbm"], "35.475")
+        self.assertEqual(result["declared_total_quantity"], "618400")
+        self.assertFalse(result["ready_for_issue"])
+        self.assertTrue(any("Packing source discrepancy" in issue for issue in result["blocking_issues"]))
+        with ZipFile(BytesIO(_xlsx_bytes(result))) as workbook:
+            sheet = workbook.read("xl/worksheets/sheet1.xml").decode()
+        self.assertIn("35.477", sheet)
+        self.assertIn('>25</t>', sheet)
+        self.assertIn("616,001", sheet)
+        self.assertIn("2,399.48", sheet)
+        self.assertNotIn("35.475", sheet)
 
     def test_invalid_values_and_mixed_package_types_need_review(self):
         doc = packing_example()

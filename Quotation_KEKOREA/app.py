@@ -1,5 +1,6 @@
 """Streamlit interface for KE KOREA trade-document drafts."""
 import json
+import hashlib
 import tempfile
 from pathlib import Path
 import sys
@@ -480,8 +481,8 @@ if raw:
                     item["free_quantity"] = "0"
                 updated_items.append(item)
             data["items"] = updated_items
-            st.caption("Printed totals from the supplier document — edit only after checking the original image.")
-            total_fields = (("actual_package_count", "Total packages"), ("container_count", "Containers"),
+            st.caption("공급처 원본의 합계입니다. 각 행의 값이 모두 있으면 문서에는 자동 계산한 합계를 사용합니다. 원본 인식이 틀렸을 때만 수정하세요.")
+            total_fields = (("actual_package_count", "Source total packages"), ("container_count", "Containers"),
                             ("declared_net_weight_kg", "Source NW (kg)"), ("declared_gross_weight_kg", "Source GW (kg)"),
                             ("declared_volume_cbm", "Source CBM"), ("declared_total_quantity", "Source total quantity"),
                             ("declared_total_quantity_unit", "Source quantity unit"))
@@ -497,9 +498,13 @@ if raw:
             packing_check["issues"].extend(issue for issue in result["blocking_issues"]
                                            if issue.startswith("Shipped quantity must equal paid plus free quantity"))
         if packing_check and packing_check["issues"]:
-            st.error("Packing totals need correction before download:")
+            st.error("포장 항목에서 확인 또는 수정이 필요한 값이 있습니다:")
             for issue in packing_check["issues"]:
                 st.write(f"- {issue}")
+        if packing_check and packing_check["discrepancies"]:
+            st.warning("원본 합계와 품목별 합계가 다릅니다. 문서에는 품목별 합계를 자동으로 사용합니다. 품목별 값이 원본 이미지와 맞는지 확인해 주세요.")
+            for discrepancy in packing_check["discrepancies"]:
+                st.write(f"- {discrepancy}")
         if packing_check:
             calculated = packing_check["calculated"]
             st.caption("Calculated row totals: " + " | ".join(
@@ -507,8 +512,14 @@ if raw:
                 for field, label in (("package_count", "Packages"), ("net_weight_kg", "NW kg"),
                                      ("gross_weight_kg", "GW kg"), ("volume_cbm", "CBM"))))
         packing_image_confirmed = True
-        if packing_check is not None and data.get("source_image_attached"):
-            packing_image_confirmed = st.checkbox("I compared the extracted packing details and totals with the supplier image.", key=f"packing_{page}_confirmed")
+        if packing_check is not None and (data.get("source_image_attached") or packing_check["discrepancies"]):
+            review_fields = ("actual_package_count", "container_count", "declared_net_weight_kg", "declared_gross_weight_kg",
+                             "declared_volume_cbm", "declared_total_quantity", "declared_total_quantity_unit")
+            review_snapshot = {"items": data.get("items", []), **{field: data.get(field) for field in review_fields}}
+            review_digest = hashlib.sha256(json.dumps(review_snapshot, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()[:12]
+            review_label = ("원본과 품목별 값을 확인했고, 차이가 있는 합계는 품목별 합계로 적용합니다."
+                            if packing_check["discrepancies"] else "원본 이미지와 추출된 포장 정보를 확인했습니다.")
+            packing_image_confirmed = st.checkbox(review_label, key=f"packing_{page}_confirmed_{review_digest}")
         bank_keys = ("BENEFICIARY", "BANK_NAME", "BRANCH", "SWIFT", "ACCOUNT_NUMBER", "BANK_ADDRESS")
         bank_details = {key: str(runtime_env.get(f"KEKOREA_USD_{key}", "")).strip() for key in bank_keys}
         missing_bank_keys = [f"KEKOREA_USD_{key}" for key, value in bank_details.items() if not value]
@@ -676,7 +687,7 @@ if raw:
         if unconfirmed_aliases:
             st.warning("Confirm the interpreted order field above before creating the documents.")
         if not packing_image_confirmed:
-            st.warning("Compare the packing details with the supplier image and confirm the checkbox before download.")
+            st.warning("공급처 원본과 품목별 값을 대조한 뒤 확인란을 선택해 주세요.")
         if bank_blockers:
             st.error("PI download is disabled until all six KEKOREA_USD_* bank details are configured in this runtime.")
         if seal_blockers:

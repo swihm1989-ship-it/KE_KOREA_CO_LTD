@@ -646,7 +646,8 @@ def render_trade_document(data, bank_details=None, *, logo_path=None, seal_path=
                 calculated = packing["calculated"]
                 packages = data.get("packages") or []
                 package_lines = []
-                package_lines.append("TOTAL PACKAGES: " + str(data.get("actual_package_count") or calculated.get("package_count") or "TO BE CONFIRMED") +
+                package_total = calculated.get("package_count") or data.get("actual_package_count")
+                package_lines.append("TOTAL PACKAGES: " + (_format_quantity(package_total) if package_total else "TO BE CONFIRMED") +
                                      "  |  CONTAINERS: " + str(data.get("container_count") or "TO BE CONFIRMED"))
                 try:
                     net = calculated.get("net_weight_kg") or data.get("declared_net_weight_kg")

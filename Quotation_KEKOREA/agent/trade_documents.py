@@ -207,6 +207,8 @@ def validate_and_calculate(data):
         packing = reconcile_packing({**data, "items": calculated})
         for issue in packing["issues"]:
             block("Packing: " + issue)
+        for discrepancy in packing["discrepancies"]:
+            block("Packing source discrepancy: " + discrepancy)
         packages = data.get("packages") or []
         has_item_packing = any(item.get("net_weight_kg") or item.get("gross_weight_kg") or item.get("package_count") or item.get("volume_cbm") for item in calculated)
         if not has_item_packing and (not packages or not data.get("actual_package_count")):
