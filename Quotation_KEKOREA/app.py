@@ -47,6 +47,14 @@ def _synchronize_extracted_quantities(draft):
             pass
 
 
+def _format_quantity_display(value):
+    try:
+        rendered = format(Decimal(str(value)), ",f")
+        return rendered.rstrip("0").rstrip(".") if "." in rendered else rendered
+    except (InvalidOperation, TypeError, ValueError):
+        return str(value or "—")
+
+
 def _explicit_remark(prompt):
     """Only use remark text that the user explicitly labels in the prompt."""
     match = re.search(
@@ -97,7 +105,8 @@ def _normalize_quantity_aliases(draft, prompt):
         amount = match.group("amount").replace(",", "")
         label_unit = label if re.fullmatch(r"(?:sets?|boxes?|cartons?|ctns?|packages?|packs?|drums?|rolls?|pallets?)", label, re.I) else None
         basis_unit = re.sub(r"^(?:USD|KRW|EUR|CNY)\s*/?\s*|^PER\s+", "", str(item.get("price_basis") or ""), flags=re.I)
-        raw_unit = match.group("unit") or label_unit or item.get("unit") or basis_unit
+        explicit_unit = match.group("unit") or label_unit
+        raw_unit = explicit_unit or item.get("unit") or basis_unit
         unit = normalize_quantity_unit(raw_unit)
         ambiguous_label = bool(label_unit or re.fullmatch(r"vol(?:ume)?\.?", label, re.I))
         existing = item.get("paid_quantity") or item.get("quantity")
@@ -109,19 +118,16 @@ def _normalize_quantity_aliases(draft, prompt):
                 item["shipped_quantity"] = format(Decimal(amount) + Decimal(str(item["free_quantity"])), "f")
             except (InvalidOperation, TypeError, ValueError):
                 item["shipped_quantity"] = amount
-        if unit:
-            item["unit"] = unit
+        if explicit_unit:
+            item["unit"] = explicit_unit
+        elif not item.get("unit") and raw_unit:
+            item["unit"] = str(raw_unit).strip()
         if ambiguous_label:
             interpretation = (f'{amount} {unit}' if unit else amount)
             reason = "Confirm this is the ordered item quantity/unit and not package count or packaging volume." if label_unit else "Confirm this is ordered quantity, not package or cubic volume."
             pending.append(
                 f'The source uses “{match.group(0).strip()}”. Treat it as {interpretation}? {reason}'
             )
-    # Standardize common unit spellings even when the model extracted the quantity correctly.
-    for item in items:
-        canonical = normalize_quantity_unit(item.get("unit"))
-        if canonical:
-            item["unit"] = canonical
     draft["pending_confirmations"] = pending
     return draft
 
@@ -371,9 +377,25 @@ if raw:
         apply_verified_eclado_prices(data, active_catalog)
         result = validate_and_calculate(data)
         bank_keys = ("BENEFICIARY", "BANK_NAME", "BRANCH", "SWIFT", "ACCOUNT_NUMBER", "BANK_ADDRESS")
-        bank_details = {key: runtime_env.get(f"KEKOREA_USD_{key}", "") for key in bank_keys}
-        if expected_type == "PI" and any(not value for value in bank_details.values()):
-            issue = "KE Korea USD bank profile is incomplete; configure all KEKOREA_USD_* values before creating the PI"
+        bank_details = {key: str(runtime_env.get(f"KEKOREA_USD_{key}", "")).strip() for key in bank_keys}
+        missing_bank_keys = [f"KEKOREA_USD_{key}" for key, value in bank_details.items() if not value]
+        encoded_seal = str(runtime_env.get("KEKOREA_COMPANY_SEAL_BASE64", "")).strip()
+        seal_bytes = None
+        if encoded_seal:
+            try:
+                seal_bytes = base64.b64decode(encoded_seal, validate=True)
+            except (ValueError, TypeError):
+                seal_bytes = None
+        local_seal_path = ROOT / "private" / "company_seal.png"
+        missing_seal = seal_bytes is None and not local_seal_path.is_file()
+        if expected_type == "PI" and missing_bank_keys:
+            issue = "KE Korea USD bank profile is incomplete; missing runtime keys: " + ", ".join(missing_bank_keys)
+            if issue not in result["blocking_issues"]:
+                result["blocking_issues"].append(issue)
+            result["ready_for_issue"] = False
+            result["status"] = "DRAFT"
+        if missing_seal:
+            issue = "KE Korea company seal is unavailable; configure KEKOREA_COMPANY_SEAL_BASE64 or provide the private seal image"
             if issue not in result["blocking_issues"]:
                 result["blocking_issues"].append(issue)
             result["ready_for_issue"] = False
@@ -398,7 +420,7 @@ if raw:
                 unit_totals.setdefault(unit, Decimal("0"))
                 unit_totals[unit] += Decimal(str(item.get("shipped_quantity") or item.get("quantity") or "0"))
         quantity_summary = " · ".join(
-            f"{format(amount, 'f').rstrip('0').rstrip('.') if '.' in format(amount, 'f') else format(amount, 'f')} {unit}"
+            f"{_format_quantity_display(amount)} {unit}"
             for unit, amount in unit_totals.items()) or "—"
         if any("paid quantity for item" in issue.lower() for issue in calculation_blockers):
             quantity_summary = "Quantity required"
@@ -445,8 +467,8 @@ if raw:
                 "Product": item.get("product_name") or "Not provided",
                 "Capacity / Spec.": item.get("capacity") or "—",
                 "Paid Qty": ("Not provided" if quantity_missing else
-                             f"{item.get('paid_quantity', item.get('quantity', ''))} {item.get('unit') or ''}".strip()),
-                "Free Qty": f"{item.get('free_quantity', '0')} {item.get('unit') or ''}".strip(),
+                             f"{_format_quantity_display(item.get('paid_quantity', item.get('quantity', '')))} {item.get('unit') or ''}".strip()),
+                "Free Qty": f"{_format_quantity_display(item.get('free_quantity', '0'))} {item.get('unit') or ''}".strip(),
                 "Unit Price": unit_price,
                 "Discount": "Not confirmed" if discount_missing else f"{item.get('discount_percent', '0')}%",
                 "Line Total": line_total,
@@ -499,28 +521,30 @@ if raw:
 
         pdf_col, excel_col = st.columns(2)
         bank_blockers = [issue for issue in result["blocking_issues"] if "bank profile is incomplete" in issue.lower()]
+        seal_blockers = [issue for issue in result["blocking_issues"] if "company seal is unavailable" in issue.lower()]
         financial_blockers = calculation_blockers + discount_blockers
-        export_blocked = bool(financial_blockers or bank_blockers or unconfirmed_aliases)
+        export_blocked = bool(financial_blockers or bank_blockers or seal_blockers or unconfirmed_aliases)
         if financial_blockers:
             st.error("Confirm valid quantities, unit prices, and discounts before creating a PDF or Excel file.")
         if unconfirmed_aliases:
             st.warning("Confirm the interpreted order field above before creating the documents.")
         if bank_blockers:
             st.error("PI download is disabled until all six KEKOREA_USD_* bank details are configured in this runtime.")
+        if seal_blockers:
+            st.error("Document download is disabled until the company seal is available in this runtime.")
         make_pdf = pdf_col.button("Create PDF", type="primary", use_container_width=True,
                                   disabled=export_blocked)
         make_excel = excel_col.button("Create Excel", use_container_width=True,
                                      disabled=export_blocked)
         if make_pdf or make_excel:
             logo_path = ROOT / "assets" / "company_logo.png"
-            seal_path = ROOT / "private" / "company_seal.png"
-            encoded_seal = runtime_env.get("KEKOREA_COMPANY_SEAL_BASE64")
+            seal_path = local_seal_path
             try:
                 (ROOT / "outputs").mkdir(parents=True, exist_ok=True)
-                if encoded_seal:
+                if seal_bytes is not None:
                     with tempfile.TemporaryDirectory(dir=ROOT / "outputs") as temp_dir:
                         seal_path = Path(temp_dir) / "company_seal.png"
-                        seal_path.write_bytes(base64.b64decode(encoded_seal, validate=True))
+                        seal_path.write_bytes(seal_bytes)
                         outputs = render_files(result, ROOT / "outputs", bank_details=bank_details,
                                                logo_path=logo_path, seal_path=seal_path)
                         if create_cipl_bundle:

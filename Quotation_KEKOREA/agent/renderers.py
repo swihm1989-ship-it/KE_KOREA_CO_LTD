@@ -18,6 +18,15 @@ def _english(value):
     return value
 
 
+def _format_quantity(value):
+    try:
+        amount = Decimal(str(value))
+        rendered = format(amount, ",f")
+        return rendered.rstrip("0").rstrip(".") if "." in rendered else rendered
+    except Exception:
+        return str(value or "")
+
+
 def format_currency_amount(value, currency):
     """Format transaction money with KRW whole units and two decimal places otherwise."""
     currency = str(currency or "").upper()
@@ -44,15 +53,15 @@ def _rows(doc):
                 amount = format_currency_amount(amount, doc.get("currency"))
         if float(item.get("free_quantity") or 0):
             rows.append([str(i), _english(item.get("product_name")) + " (PAID)", _english(item.get("capacity")),
-                         item.get("paid_quantity", ""), _english(item.get("unit")), price,
+                         _format_quantity(item.get("paid_quantity", "")), _english(item.get("unit")), price,
                          item.get("discount_percent", "0") + "%", amount])
             rows.append([str(i), _english(item.get("product_name")) + " (FREE OF CHARGE)", _english(item.get("capacity")),
-                         item.get("free_quantity", ""), _english(item.get("unit")),
+                         _format_quantity(item.get("free_quantity", "")), _english(item.get("unit")),
                          format_currency_amount("0", doc.get("currency")) if doc.get("product_family") == "cosmetics" else "0",
                          "FOC", format_currency_amount("0", doc.get("currency")) if doc.get("product_family") == "cosmetics" else "0"])
         else:
             rows.append([str(i), _english(item.get("product_name")), _english(item.get("capacity")),
-                         item.get("display_quantity", item.get("shipped_quantity", item.get("quantity", ""))), _english(item.get("unit")), price,
+                         _format_quantity(item.get("display_quantity", item.get("shipped_quantity", item.get("quantity", "")))), _english(item.get("unit")), price,
                          item.get("discount_percent", "0") + "%", amount])
     return rows
 

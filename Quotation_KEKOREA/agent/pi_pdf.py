@@ -41,8 +41,10 @@ class _Canvas:
     def line(self, x1, top1, x2, top2, color=MUTED, width=0.7):
         self.commands.extend([self._rgb(color) + " RG", f"{width} w {x1} {PAGE_H-top1} m {x2} {PAGE_H-top2} l S"])
 
-    def text(self, x, top, value, size=8, bold=False, color=INK):
+    def text(self, x, top, value, size=8, bold=False, color=INK, *, align="left"):
         value = str(value or "")
+        if align == "center":
+            x -= _text_width(value, size) / 2
         if re.search(r"[\u3400-\u9fff]", value):
             encoded = value.encode("utf-16-be").hex().upper()
             font = "F3"
@@ -79,6 +81,20 @@ class _Canvas:
         else:
             self.commands.extend(["q", clip + f"{draw_w:.2f} 0 0 {draw_h:.2f} {image_x:.2f} {y:.2f} cm", f"/Im{image_id} Do", "Q"])
         return True
+
+
+def _text_width(value, size):
+    """Estimate Helvetica point width for numeric/Latin text to center summary labels."""
+    widths = {
+        " ": 278, ",": 278, ".": 278, ":": 278, ";": 278, "!": 278,
+        "(": 333, ")": 333, "-": 333, "+": 564, "$": 556, "/": 278,
+        "0": 556, "1": 556, "2": 556, "3": 556, "4": 556, "5": 556, "6": 556, "7": 556, "8": 556, "9": 556,
+        "A": 667, "B": 667, "C": 722, "D": 722, "E": 667, "F": 611, "G": 778, "H": 722,
+        "I": 278, "J": 500, "K": 667, "L": 556, "M": 833, "N": 722, "O": 778, "P": 667,
+        "Q": 778, "R": 722, "S": 667, "T": 611, "U": 722, "V": 667, "W": 944, "X": 667,
+        "Y": 667, "Z": 611,
+    }
+    return sum(widths.get(char.upper(), 556) for char in str(value)) * size / 1000
 
 
 def _read_png_rgb(path):
@@ -328,6 +344,32 @@ def _document_title(document_type):
             "CI": "COMMERCIAL INVOICE", "PL": "PACKING LIST"}.get(document_type, "TRADE DOCUMENT")
 
 
+def _format_quantity(value):
+    try:
+        rendered = format(Decimal(str(value)), ",f")
+        return rendered.rstrip("0").rstrip(".") if "." in rendered else rendered
+    except (InvalidOperation, TypeError, ValueError):
+        return str(value or "-")
+
+
+def _total_quantity_summary(items):
+    totals = {}
+    for item in items:
+        try:
+            paid = Decimal(str(item.get("paid_quantity") or item.get("quantity") or "0"))
+            free = Decimal(str(item.get("free_quantity") or "0"))
+            quantity = Decimal(str(item.get("shipped_quantity") or paid + free))
+        except (InvalidOperation, TypeError, ValueError):
+            continue
+        unit = str(item.get("unit") or "PCS").strip()
+        key = unit.upper()
+        if key not in totals:
+            totals[key] = [Decimal("0"), unit]
+        totals[key][0] += quantity
+    return " | ".join(f"{_format_quantity(amount)} {unit}".strip()
+                      for amount, unit in totals.values()) or "TO BE CONFIRMED"
+
+
 def _formatted_money(value, currency):
     try:
         amount = Decimal(str(value)).quantize(Decimal("1") if currency == "KRW" else Decimal("0.01"), rounding=ROUND_HALF_UP)
@@ -415,10 +457,16 @@ def _party_panel(canvas, x, title, party):
 def _document_row(item, is_packing_list, currency):
     name = str(item.get("product_name") or "TO BE CONFIRMED")
     capacity = str(item.get("capacity") or item.get("specification") or "-")
-    quantity = str(item.get("display_quantity") or item.get("paid_quantity") or item.get("quantity") or "-")
-    if float(item.get("free_quantity") or 0):
-        quantity += f" + {item.get('free_quantity')} FOC"
+    quantity = _format_quantity(item.get("display_quantity") or item.get("paid_quantity") or item.get("quantity") or "-")
     unit = str(item.get("unit") or "PCS")
+    try:
+        free_quantity = Decimal(str(item.get("free_quantity") or "0"))
+    except (InvalidOperation, TypeError, ValueError):
+        free_quantity = Decimal("0")
+    if free_quantity:
+        quantity += f" + {_format_quantity(free_quantity)} FOC"
+    if not is_packing_list:
+        quantity = f"{quantity} {unit}".strip()
     row = {"name": name, "capacity": capacity, "quantity": quantity, "unit": unit}
     row["name_lines"] = _wrap(name, 52)
     row["capacity_lines"] = _wrap(capacity, 23)
@@ -440,7 +488,7 @@ def _document_row(item, is_packing_list, currency):
 def _paginate_rows(rows, first_table_top, review_height, is_packing_list):
     """Fit measured row heights around reserved totals, review, signature, and footer areas."""
     content_bottom = 752
-    last_page_reserve = (120 if is_packing_list else 132) + review_height
+    last_page_reserve = (130 if is_packing_list else 132) + review_height
     first_final_capacity = content_bottom - first_table_top - 17 - last_page_reserve
     if sum(row["height"] for row in rows) <= first_final_capacity:
         return [rows]
@@ -481,6 +529,8 @@ def _paginate_rows(rows, first_table_top, review_height, is_packing_list):
 
 def render_trade_document(data, bank_details=None, *, logo_path=None, seal_path=None):
     """Render all trade documents with measured rows, safe footer space, and automatic pagination."""
+    if not seal_path or not Path(seal_path).is_file():
+        raise ValueError("KE KOREA company seal is required to create a trade-document PDF")
     doc_type = str(data.get("document_type") or "PI").upper()
     title = _document_title(doc_type)
     is_packing_list = doc_type == "PL"
@@ -507,8 +557,7 @@ def render_trade_document(data, bank_details=None, *, logo_path=None, seal_path=
     canvases = []
     number = str(data.get("document_number") or "DRAFT - TBD")
     issue_date = str(data.get("issue_date") or "TO CONFIRM")
-    total_quantity = sum(float(item.get("quantity") or item.get("paid_quantity") or 0) +
-                         float(item.get("free_quantity") or 0) for item in items)
+    total_quantity = _total_quantity_summary(items)
 
     for page_index, page_rows in enumerate(chunks):
         canvas = _Canvas()
@@ -549,7 +598,7 @@ def render_trade_document(data, bank_details=None, *, logo_path=None, seal_path=
         canvas.text(left, table_top - 7, "PACKING DETAILS" if is_packing_list else "PRODUCT & PRICING", 6.5, True, BRAND_BLUE)
         canvas.rect(left, table_top, 542, 17, NAVY)
         labels = (["PRODUCT DESCRIPTION", "CAPACITY / SPEC.", "QUANTITY", "UNIT", "PACKAGES"] if is_packing_list else
-                  ["PRODUCT DESCRIPTION", "CAPACITY / SPEC.", "QUANTITY", f"UNIT PRICE ({currency})", f"AMOUNT ({currency})"])
+                  ["PRODUCT DESCRIPTION", "CAPACITY / SPEC.", "QUANTITY / UNIT", f"UNIT PRICE ({currency})", f"AMOUNT ({currency})"])
         for column_index, label in enumerate(labels):
             canvas.text(xs[column_index] + 3, table_top + 11, label, 5.2, True, (1, 1, 1))
 
@@ -594,12 +643,18 @@ def render_trade_document(data, bank_details=None, *, logo_path=None, seal_path=
                 for line_index, line in enumerate(package_lines):
                     canvas.text(left, bottom + 8 + line_index * 8, line, 5.8, True, MUTED)
                 bottom += 20
+                canvas.text(left, bottom + 8, "TOTAL QUANTITY: " + total_quantity, 5.8, True, MUTED)
+                bottom += 8
             else:
                 total_text = _formatted_money(data.get("total") or "0", currency)
                 canvas.rect(374, bottom - 4, 203, 27, NAVY)
-                canvas.text(384, bottom + 6, f"TOTAL AMOUNT ({currency})", 5.8, True, (0.8, 0.9, 1))
-                canvas.text(384, bottom + 17, total_text[:24], 8.7, True, (1, 1, 1))
-                canvas.text(left, bottom + 10, f"TOTAL QUANTITY: {total_quantity:g}", 6.0, True, MUTED)
+                box_center = 475.5
+                canvas.text(box_center, bottom + 7, f"TOTAL AMOUNT ({currency})", 5.8, True,
+                            (0.8, 0.9, 1), align="center")
+                canvas.text(box_center, bottom + 19, total_text, 8.7, True, (1, 1, 1), align="center")
+                quantity_lines = _wrap("TOTAL QUANTITY: " + total_quantity, 82)
+                for line_index, line in enumerate(quantity_lines):
+                    canvas.text(left, bottom + 10 + line_index * 7, line, 6.0, True, MUTED)
                 bottom += 31
 
             canvas.rect(35, bottom, 542, review_height, (1, 1, 1), PALE, 0.7)
@@ -629,8 +684,9 @@ def render_trade_document(data, bank_details=None, *, logo_path=None, seal_path=
             canvas.text(sign_x + 10, bottom + 17, "AUTHORIZED REPRESENTATIVE", 5.3, True, MUTED)
             canvas.text(sign_x + 10, bottom + 32, "DAVID, SEOKWON IHM", 6.3, True, INK)
             canvas.text(sign_x + 10, bottom + 42, "KE KOREA CO. LTD", 5.8, False, INK)
-            if not canvas.image(seal_path, sign_x + 104, bottom + 31, 60, 49, crop_box=(748, 148, 120, 120)):
-                canvas.text(sign_x + 10, bottom + 68, "Company seal", 5.0, False, MUTED)
+            if not canvas.image(seal_path, sign_x + 10, bottom + 47, 38, 34,
+                                crop_box=(748, 148, 120, 120)):
+                raise ValueError("KE KOREA company seal could not be embedded in the PDF")
             if bottom + 86 > 752:
                 raise ValueError("Document content exceeds the reserved footer area; add a page break or shorten the source information")
 
