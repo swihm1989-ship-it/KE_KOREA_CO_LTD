@@ -15,7 +15,7 @@ sys.path.insert(0, str(REPOSITORY_ROOT))
 from Quotation_KEKOREA.agent.extractor import extract_trade_data, load_env, verify_item_quotes
 from Quotation_KEKOREA.agent.pricing import apply_verified_eclado_prices, load_local_seed, load_supabase_catalog
 from Quotation_KEKOREA.agent.renderers import format_currency_amount, render_files
-from Quotation_KEKOREA.agent.trade_documents import apply_promotion, validate_and_calculate
+from Quotation_KEKOREA.agent.trade_documents import apply_promotion, normalize_quantity_unit, validate_and_calculate
 
 
 def _synchronize_extracted_quantities(draft):
@@ -50,7 +50,7 @@ def _synchronize_extracted_quantities(draft):
 def _explicit_remark(prompt):
     """Only use remark text that the user explicitly labels in the prompt."""
     match = re.search(
-        r"\bREMARKS?\s*:\s*(.*?)(?=\s+(?:BUYER|SELLER|PRODUCT|QUANTITY|PRICE|DELIVERY|PAYMENT|INCOTERMS|CURRENCY|SHIPMENT|SHIP\s+TO|BILL\s+TO|CONTACT)\s*:|$)",
+        r"\b(?:REMARKS?|NOTES?|SPECIAL\s+INSTRUCTIONS?|ADDITIONAL\s+TERMS?)\s*[:=]\s*(.*?)(?=\s+(?:BUYER|PURCHASER|CUSTOMER|SELLER|SUPPLIER|VENDOR|PRODUCT|ITEM|GOODS|MATERIAL|DESCRIPTION|QUANTITY|QTY|Q['’]?TY|ORDER\s+QTY|ORDERED\s+QUANTITY|VOLUME|VOL\.?|UNIT\s+PRICE|PRICE|RATE|INCOTERMS?|SHIPPING\s+TERMS?|TERMS\s+OF\s+SHIPPING|SHIP(?:PING)?\s+CONDITIONS?|DELIVERY(?:\s+TERMS?|\s+CONDITIONS?)?|TERMS\s+OF\s+DELIVERY|PAYMENT(?:\s+TERMS?|\s+CONDITIONS?)?|TERMS\s+OF\s+PAYMENT|CURRENCY|SHIPMENT|SHIP\s+TO|DELIVER\s+TO|CONSIGNEE|BILL\s+TO|CONTACT|ATTN|TEL|PHONE|MOBILE|EMAIL)\s*(?::|=)|$)",
         prompt or "", flags=re.IGNORECASE | re.DOTALL)
     return (match.group(1).strip(" \t\r\n;,") or "N/A") if match else "N/A"
 
@@ -71,6 +71,59 @@ def _discount_instruction(prompt):
     if correction:
         return rates[-1], None
     return None, "Multiple discount rates were requested; specify one rate for this invoice."
+
+
+def _normalize_quantity_aliases(draft, prompt):
+    """Recover explicitly labeled quantities the extractor left empty and flag Volume for confirmation."""
+    items = draft.get("items", [])
+    pending = []
+    unit_pattern = r"KG|KGS|KILOGRAMS?|MT|MTS|METRIC\s+TONS?|TONNES?|PCS?|PIECES?|UNITS?|SETS?|BOXES?|BOX|CTNS?|CARTONS?|DRUMS?|ROLLS?|PALLETS?|GRAMS?|G|LITRES?|LITERS?|M3|CBM|WP|W"
+    label_pattern = r"(?:quantity|qty|q['’]?ty|ordered\s+(?:quantity|qty|units?)|order\s+(?:quantity|qty|volume)|volume|vol\.?|sets?|boxes?|cartons?|ctns?|packages?|packs?|drums?|rolls?|pallets?)"
+    quantity_pattern = re.compile(
+        rf"(?<![A-Z])(?P<label>{label_pattern})(?![A-Z])\s*(?:[:=#-])?\s*"
+        rf"(?P<amount>\d[\d,]*(?:\.\d+)?)\s*(?P<unit>{unit_pattern})?\b",
+        re.IGNORECASE)
+    for item in items:
+        source = str(item.get("source") or "")
+        if len(items) == 1 or not source:
+            source = source or (prompt or "")
+        matches = list(quantity_pattern.finditer(source))
+        if not matches and len(items) == 1:
+            matches = list(quantity_pattern.finditer(prompt or ""))
+        if len(matches) != 1:
+            continue
+        match = matches[0]
+        label = match.group("label")
+        amount = match.group("amount").replace(",", "")
+        label_unit = label if re.fullmatch(r"(?:sets?|boxes?|cartons?|ctns?|packages?|packs?|drums?|rolls?|pallets?)", label, re.I) else None
+        basis_unit = re.sub(r"^(?:USD|KRW|EUR|CNY)\s*/?\s*|^PER\s+", "", str(item.get("price_basis") or ""), flags=re.I)
+        raw_unit = match.group("unit") or label_unit or item.get("unit") or basis_unit
+        unit = normalize_quantity_unit(raw_unit)
+        ambiguous_label = bool(label_unit or re.fullmatch(r"vol(?:ume)?\.?", label, re.I))
+        existing = item.get("paid_quantity") or item.get("quantity")
+        if existing in (None, ""):
+            item["quantity"] = amount
+            item["paid_quantity"] = amount
+            item["free_quantity"] = item.get("free_quantity") or "0"
+            try:
+                item["shipped_quantity"] = format(Decimal(amount) + Decimal(str(item["free_quantity"])), "f")
+            except (InvalidOperation, TypeError, ValueError):
+                item["shipped_quantity"] = amount
+        if unit:
+            item["unit"] = unit
+        if ambiguous_label:
+            interpretation = (f'{amount} {unit}' if unit else amount)
+            reason = "Confirm this is the ordered item quantity/unit and not package count or packaging volume." if label_unit else "Confirm this is ordered quantity, not package or cubic volume."
+            pending.append(
+                f'The source uses “{match.group(0).strip()}”. Treat it as {interpretation}? {reason}'
+            )
+    # Standardize common unit spellings even when the model extracted the quantity correctly.
+    for item in items:
+        canonical = normalize_quantity_unit(item.get("unit"))
+        if canonical:
+            item["unit"] = canonical
+    draft["pending_confirmations"] = pending
+    return draft
 
 
 def _requested_document_type(prompt):
@@ -203,6 +256,7 @@ prompt = st.text_area("거래 조건을 입력하세요", height=180,
 uploaded_images = st.file_uploader("바이어 주문 이미지 첨부", type=["png", "jpg", "jpeg", "webp"], accept_multiple_files=True,
     help="이미지 최대 5개, 파일당 10 MB, 총 20 MB까지 첨부할 수 있습니다.")
 st.caption("For ECLADO, the entered discount is applied to the Supabase list price. If no discount is stated, the full list price (0% discount) is used. Enter one discount rate per invoice.")
+st.caption("Common labels such as Qty/Q'ty/Volume, Unit Price/Rate, Shipping Terms/Delivery Terms, and Payment Conditions are interpreted by meaning. Volume and package-count labels may require your confirmation.")
 if uploaded_images:
     st.caption(f"첨부 이미지 {len(uploaded_images)}개 · Extract를 누를 때 OpenAI로 전송됩니다.")
     st.image([upload.getvalue() for upload in uploaded_images], caption=[upload.name for upload in uploaded_images], use_container_width=True)
@@ -217,6 +271,9 @@ if extract_clicked:
                 f"Your prompt requests {requested_type}, but the sidebar is set to {selected_type}. "
                 "Choose the matching document menu, then extract again."
             )
+        for state_key in list(st.session_state):
+            if str(state_key).startswith(f"confirm_source_alias_{page}_"):
+                del st.session_state[state_key]
         image_inputs = []
         if len(uploaded_images or []) > 5:
             raise ValueError("Attach no more than 5 order images at a time")
@@ -231,6 +288,7 @@ if extract_clicked:
             raise ValueError("Order images exceed the 20 MB combined limit")
         with st.spinner("Extracting candidate fields. No document is issued."):
             draft = extract_trade_data(prompt or f"Use the attached order image as source for a {title}.", images=image_inputs, env=runtime_env)
+            draft = _normalize_quantity_aliases(draft, prompt)
             # The selected sidebar workflow is authoritative, even if the order image mentions another form.
             draft["document_type"] = expected_type
             draft = verify_item_quotes(draft, prompt, image_context=bool(image_inputs))
@@ -353,6 +411,11 @@ if raw:
             })
         st.dataframe(display_rows, hide_index=True, use_container_width=True)
 
+        unconfirmed_aliases = []
+        for index, confirmation in enumerate(data.get("pending_confirmations", []), 1):
+            if not st.checkbox(confirmation, key=f"confirm_source_alias_{page}_{index}"):
+                unconfirmed_aliases.append(confirmation)
+
         delivery_cols = st.columns(4)
         delivery_values = (
             ("Delivery terms", result.get("incoterms")),
@@ -383,6 +446,7 @@ if raw:
                 try:
                     corrected = json.loads(edited_json)
                     corrected["document_type"] = expected_type
+                    corrected.pop("pending_confirmations", None)
                     apply_verified_eclado_prices(corrected, active_catalog)
                     st.session_state["trade_draft"] = corrected
                     st.session_state["rendered_paths"] = {}
@@ -393,12 +457,15 @@ if raw:
 
         pdf_col, excel_col = st.columns(2)
         financial_blockers = calculation_blockers + discount_blockers
+        export_blocked = bool(financial_blockers or unconfirmed_aliases)
         if financial_blockers:
             st.error("Confirm valid quantities, unit prices, and discounts before creating a PDF or Excel file.")
+        if unconfirmed_aliases:
+            st.warning("Confirm the interpreted order field above before creating the documents.")
         make_pdf = pdf_col.button("Create PDF", type="primary", use_container_width=True,
-                                  disabled=bool(financial_blockers))
+                                  disabled=export_blocked)
         make_excel = excel_col.button("Create Excel", use_container_width=True,
-                                     disabled=bool(financial_blockers))
+                                     disabled=export_blocked)
         if make_pdf or make_excel:
             logo_path = ROOT / "assets" / "company_logo.png"
             seal_path = ROOT / "private" / "company_seal.png"

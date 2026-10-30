@@ -9,6 +9,20 @@ MONEY_QUANTUM = Decimal("0.01")
 PRICE_QUANTUM = Decimal("0.000001")
 
 
+def normalize_quantity_unit(value):
+    """Normalize common singular/plural spellings for comparison and display."""
+    unit = re.sub(r"\s+", " ", str(value or "").strip().upper().rstrip("."))
+    aliases = {
+        "KGS": "KG", "KILOGRAM": "KG", "KILOGRAMS": "KG",
+        "MTS": "MT", "METRIC TON": "MT", "METRIC TONS": "MT", "TONNE": "MT", "TONNES": "MT",
+        "PC": "PCS", "PIECE": "PCS", "PIECES": "PCS", "UNIT": "PCS", "UNITS": "PCS",
+        "SETS": "SET", "BOXES": "BOX", "CTNS": "CTN", "CARTON": "CTN", "CARTONS": "CTN",
+        "DRUMS": "DRUM", "ROLLS": "ROLL", "PALLETS": "PALLET",
+        "GRAM": "G", "GRAMS": "G", "LITRE": "L", "LITRES": "L", "LITER": "L", "LITERS": "L",
+    }
+    return aliases.get(unit, unit)
+
+
 def _decimal(value, field, issues, *, allow_zero=True):
     try:
         result = Decimal(str(value))
@@ -146,7 +160,8 @@ def validate_and_calculate(data):
         if data.get("product_family") == "cosmetics" and item.get("master_price") is not True and not item.get("price_override_confirmed"):
             block(f"Cosmetics price for {name or f'item {i}'} must match the verified price master")
         basis = str(item.get("price_basis") or "").upper().replace("USD/", "").replace("KRW/", "").replace("PER ", "").strip()
-        unit = str(item.get("unit") or "").upper().strip()
+        basis = normalize_quantity_unit(basis)
+        unit = normalize_quantity_unit(item.get("unit"))
         if data.get("product_family") in {"polysilicon", "wafer", "solar_cell", "solar_module"} and basis and unit and basis not in {unit, "SET"}:
             block(f"Price basis {basis} does not match quantity unit {unit} for {name or f'item {i}'}")
         unit_quantum = money_quantum if data.get("product_family") == "cosmetics" else PRICE_QUANTUM
