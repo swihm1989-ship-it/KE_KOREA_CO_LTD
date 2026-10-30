@@ -155,6 +155,11 @@ def apply_verified_eclado_prices(draft, seed=None):
             draft.setdefault("missing_fields", []).append(
                 f"Verified {currency or 'currency'} catalog price for {product.get('item_name')}")
             continue
+        if not draft.get("currency"):
+            # When an exact product/counterparty catalog lookup returns one
+            # currency only, use that catalog currency instead of asking the
+            # model to infer it from the order screenshot.
+            draft["currency"] = price.get("currency")
         provided = item.get("unit_price")
         try:
             price_differs = provided not in (None, "") and Decimal(str(provided)) != Decimal(str(price["unit_price"]))

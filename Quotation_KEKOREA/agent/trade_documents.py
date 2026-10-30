@@ -149,7 +149,8 @@ def validate_and_calculate(data):
         unit = str(item.get("unit") or "").upper().strip()
         if data.get("product_family") in {"polysilicon", "wafer", "solar_cell", "solar_module"} and basis and unit and basis not in {unit, "SET"}:
             block(f"Price basis {basis} does not match quantity unit {unit} for {name or f'item {i}'}")
-        final = (base * (Decimal("1") - discount / Decimal("100"))).quantize(PRICE_QUANTUM, rounding=ROUND_HALF_UP)
+        unit_quantum = money_quantum if data.get("product_family") == "cosmetics" else PRICE_QUANTUM
+        final = (base * (Decimal("1") - discount / Decimal("100"))).quantize(unit_quantum, rounding=ROUND_HALF_UP)
         line = (quantity * final).quantize(money_quantum, rounding=ROUND_HALF_UP)
         free = _decimal(item.get("free_quantity", 0), f"free quantity for item {i}", issues)
         shipped = _decimal(item.get("shipped_quantity", quantity + free), f"shipped quantity for item {i}", issues)

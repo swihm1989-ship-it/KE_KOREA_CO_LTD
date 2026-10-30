@@ -5,7 +5,7 @@ from pathlib import Path
 import re
 import zipfile
 from xml.sax.saxutils import escape as xml_escape
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 
 
 def _english(value):
@@ -18,6 +18,18 @@ def _english(value):
     return value
 
 
+def format_currency_amount(value, currency):
+    """Format transaction money with KRW whole units and two decimal places otherwise."""
+    currency = str(currency or "").upper()
+    quantum = Decimal("1") if currency == "KRW" else Decimal("0.01")
+    try:
+        amount = Decimal(str(value or "0")).quantize(quantum, rounding=ROUND_HALF_UP)
+    except Exception:
+        return str(value or "")
+    rendered = f"{amount:,.0f}" if currency == "KRW" else f"{amount:,.2f}"
+    return f"${rendered}" if currency == "USD" else f"{currency} {rendered}".strip()
+
+
 def _rows(doc):
     rows = [["Line", "Product", "Capacity / Specification", "Qty", "Unit", "Unit Price", "Discount", "Amount"]]
     for i, item in enumerate(doc.get("items", []), 1):
@@ -27,12 +39,17 @@ def _rows(doc):
         else:
             price = item.get("final_unit_price", "")
             amount = item.get("line_total", "")
+            if doc.get("product_family") == "cosmetics":
+                price = format_currency_amount(price, doc.get("currency"))
+                amount = format_currency_amount(amount, doc.get("currency"))
         if float(item.get("free_quantity") or 0):
             rows.append([str(i), _english(item.get("product_name")) + " (PAID)", _english(item.get("capacity")),
                          item.get("paid_quantity", ""), _english(item.get("unit")), price,
                          item.get("discount_percent", "0") + "%", amount])
             rows.append([str(i), _english(item.get("product_name")) + " (FREE OF CHARGE)", _english(item.get("capacity")),
-                         item.get("free_quantity", ""), _english(item.get("unit")), "0", "FOC", "0"])
+                         item.get("free_quantity", ""), _english(item.get("unit")),
+                         format_currency_amount("0", doc.get("currency")) if doc.get("product_family") == "cosmetics" else "0",
+                         "FOC", format_currency_amount("0", doc.get("currency")) if doc.get("product_family") == "cosmetics" else "0"])
         else:
             rows.append([str(i), _english(item.get("product_name")), _english(item.get("capacity")),
                          item.get("display_quantity", item.get("shipped_quantity", item.get("quantity", ""))), _english(item.get("unit")), price,
@@ -57,7 +74,7 @@ def _under_1000(n):
 
 
 def amount_in_english(amount, currency):
-    value = Decimal(str(amount)).quantize(Decimal("1") if currency == "KRW" else Decimal("0.01"))
+    value = Decimal(str(amount)).quantize(Decimal("1") if currency == "KRW" else Decimal("0.01"), rounding=ROUND_HALF_UP)
     integer = int(value)
     fraction = int((value - integer) * 100)
     groups = (("TRILLION", 10**12), ("BILLION", 10**9), ("MILLION", 10**6), ("THOUSAND", 10**3))
@@ -77,7 +94,7 @@ def amount_in_english(amount, currency):
     return result + " ONLY"
 
 
-def document_lines(doc):
+def document_lines(doc, bank_details=None):
     status = doc.get("status", "DRAFT")
     dtype = doc.get("document_type", "TRADE DOCUMENT")
     lines = [status.replace("_", " "), "KE KOREA CO. LTD - REVIEW DRAFT", "", dtype, "".join(["Document No.: ", _english(doc.get("document_number") or "TBD")]),
@@ -86,7 +103,7 @@ def document_lines(doc):
              "Currency: " + _english(doc.get("currency") or "TBD"), "", "SELLER / SUPPLIER"]
     lines.extend([_english((doc.get("seller") or {}).get(k)) for k in ("legal_name", "address", "contact", "phone", "email") if (doc.get("seller") or {}).get(k)])
     lines += ["", "BUYER / CUSTOMER"]
-    lines.extend([_english((doc.get("buyer") or {}).get(k)) for k in ("legal_name", "address", "contact", "phone", "email") if (doc.get("buyer") or {}).get(k)])
+    lines.extend([_english((doc.get("buyer") or {}).get(k)) for k in ("legal_name", "address", "contact", "phone", "email", "registration_details") if (doc.get("buyer") or {}).get(k)])
     for label, field in (("Bill To", "bill_to"), ("Ship To", "ship_to"), ("Incoterms", "incoterms"),
                          ("Payment Terms", "payment_terms"), ("Shipment Reference", "shipment_reference"),
                          ("Country of Origin", "country_of_origin")):
@@ -96,7 +113,10 @@ def document_lines(doc):
     for row in _rows(doc)[1:]:
         lines.append(" | ".join(_english(cell) for cell in row))
     if doc.get("document_type") != "PL":
-        lines += ["", "TOTAL: " + _english(doc.get("currency") or "") + " " + _english(doc.get("total", "0"))]
+        total_display = (format_currency_amount(doc.get("total", "0"), doc.get("currency"))
+                         if doc.get("product_family") == "cosmetics"
+                         else _english(doc.get("currency") or "") + " " + _english(doc.get("total", "0")))
+        lines += ["", "TOTAL: " + _english(total_display)]
         lines.append("AMOUNT IN WORDS: " + amount_in_english(doc.get("total", "0"), doc.get("currency") or ""))
     if doc.get("actual_package_count"):
         lines.append("Actual Package Count: " + _english(doc["actual_package_count"]))
@@ -111,6 +131,18 @@ def document_lines(doc):
             lines.append("TOTAL PACKAGE WEIGHTS: REVIEW REQUIRED")
     if doc.get("remarks"):
         lines += ["", "REMARKS", _english(doc["remarks"])]
+    if doc.get("document_type") == "PI":
+        bank_details = bank_details or {}
+        lines += ["", "BANK INFORMATION"]
+        for label, key in (("Beneficiary", "BENEFICIARY"), ("Bank Name", "BANK_NAME"),
+                           ("Branch Name", "BRANCH"), ("SWIFT Code", "SWIFT"),
+                           ("Account Number", "ACCOUNT_NUMBER"), ("Bank Address", "BANK_ADDRESS")):
+            value = bank_details.get(key)
+            if key == "ACCOUNT_NUMBER" and value:
+                value = str(value) + " (USD)"
+            lines.append(f"{label}: {_english(value or '[BANK DETAIL REQUIRED]')}")
+    lines += ["", "AUTHORIZED SIGNATURE", "DAVID, SEOKWON IHM", "KE KOREA CO. LTD",
+              "[OFFICIAL COMPANY SEAL TO BE INSERTED]"]
     if doc.get("blocking_issues"):
         lines += ["", "OPEN ITEMS - DO NOT ISSUE"]
         for issue in doc["blocking_issues"]:
@@ -152,17 +184,27 @@ def _pdf_bytes(lines):
     return bytes(output)
 
 
-def _xlsx_bytes(doc):
+def _xlsx_bytes(doc, bank_details=None):
     rows = [[doc.get("document_type", "DRAFT"), "STATUS", doc.get("status", "DRAFT")],
             ["Currency", doc.get("currency") or "TBD", "Product Family", doc.get("product_family") or "TBD"],
             ["Document Number", doc.get("document_number") or "TBD", "Issue Date", doc.get("issue_date") or "TBD"],
             ["Seller", (doc.get("seller") or {}).get("legal_name") or "TBD"],
             ["Seller Address", (doc.get("seller") or {}).get("address") or "TBD"],
             ["Buyer", (doc.get("buyer") or {}).get("legal_name") or "TBD"],
-            ["Buyer Address", (doc.get("buyer") or {}).get("address") or "TBD"], [], *_rows(doc),
-            ["", "", "", "", "", "TOTAL", doc.get("currency") or "", doc.get("total", "0")],
+            ["Buyer Address", (doc.get("buyer") or {}).get("address") or "TBD"],
+            ["Buyer Registration Details", (doc.get("buyer") or {}).get("registration_details") or ""], [], *_rows(doc),
+            ["", "", "", "", "", "TOTAL", doc.get("currency") or "",
+             format_currency_amount(doc.get("total", "0"), doc.get("currency")) if doc.get("product_family") == "cosmetics" else doc.get("total", "0")],
             ["Incoterms", doc.get("incoterms") or "TBD"], ["Payment Terms", doc.get("payment_terms") or "TBD"],
             ["Remarks", doc.get("remarks") or ""]]
+    if doc.get("document_type") == "PI":
+        bank_details = bank_details or {}
+        rows += [["Bank Information", "Beneficiary", bank_details.get("BENEFICIARY") or "[BANK DETAIL REQUIRED]"],
+                 ["", "Bank Name", bank_details.get("BANK_NAME") or "[BANK DETAIL REQUIRED]"],
+                 ["", "Branch Name", bank_details.get("BRANCH") or "[BANK DETAIL REQUIRED]"],
+                 ["", "SWIFT Code", bank_details.get("SWIFT") or "[BANK DETAIL REQUIRED]"],
+                 ["", "Account Number (USD)", bank_details.get("ACCOUNT_NUMBER") or "[BANK DETAIL REQUIRED]"],
+                 ["", "Bank Address", bank_details.get("BANK_ADDRESS") or "[BANK DETAIL REQUIRED]"]]
     xml_rows = []
     for ri, row in enumerate(rows, 1):
         cells = []
@@ -189,7 +231,7 @@ def _xlsx_bytes(doc):
         return buf.getvalue()
 
 
-def render_files(doc, output_dir):
+def render_files(doc, output_dir, *, bank_details=None, logo_path=None, seal_path=None):
     """Write draft outputs (even incomplete ones carry a DRAFT status and open-items list)."""
     dtype = re.sub(r"[^A-Za-z0-9_-]", "_", str(doc.get("document_type") or "DRAFT"))
     stamp = re.sub(r"[^0-9-]", "", str(doc.get("issue_date") or "")) or date.today().isoformat()
@@ -197,11 +239,18 @@ def render_files(doc, output_dir):
     directory.mkdir(parents=True, exist_ok=True)
     run_id = datetime.now().strftime("%Y%m%d%H%M%S%f")
     stem = f"{dtype}_{stamp}_DRAFT_{run_id}"
-    lines = document_lines(doc)
+    lines = document_lines(doc, bank_details)
     html_rows = "".join("<tr>" + "".join(f"<td>{escape(_english(v))}</td>" for v in row) + "</tr>" for row in _rows(doc))
     html_doc = "<!doctype html><meta charset='utf-8'><title>Trade Document Draft</title><h1>" + escape(dtype) + "</h1><h2>" + escape(doc.get("status", "DRAFT")) + "</h2><table border='1'>" + html_rows + "</table><pre>" + escape("\n".join(lines)) + "</pre>"
     paths = {"pdf": directory / f"{stem}.pdf", "xlsx": directory / f"{stem}.xlsx", "html": directory / f"{stem}.html"}
-    paths["pdf"].write_bytes(_pdf_bytes(lines))
-    paths["xlsx"].write_bytes(_xlsx_bytes(doc))
+    if doc.get("document_type") == "PI":
+        try:
+            from .pi_pdf import render_charcoal_gold_pi
+        except ImportError:
+            from agent.pi_pdf import render_charcoal_gold_pi
+        paths["pdf"].write_bytes(render_charcoal_gold_pi(doc, bank_details or {}, logo_path=logo_path, seal_path=seal_path))
+    else:
+        paths["pdf"].write_bytes(_pdf_bytes(lines))
+    paths["xlsx"].write_bytes(_xlsx_bytes(doc, bank_details))
     paths["html"].write_text(html_doc, encoding="utf-8")
     return paths
