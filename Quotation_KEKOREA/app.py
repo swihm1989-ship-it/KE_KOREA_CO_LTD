@@ -6,11 +6,12 @@ import sys
 import streamlit as st
 
 ROOT = Path(__file__).resolve().parent
-sys.path.insert(0, str(ROOT))
-from agent.extractor import extract_trade_data, load_env, verify_item_quotes
-from agent.pricing import apply_verified_eclado_prices, load_local_seed, load_supabase_catalog
-from agent.renderers import render_files
-from agent.trade_documents import validate_and_calculate
+REPOSITORY_ROOT = ROOT.parent
+sys.path.insert(0, str(REPOSITORY_ROOT))
+from Quotation_KEKOREA.agent.extractor import extract_trade_data, load_env, verify_item_quotes
+from Quotation_KEKOREA.agent.pricing import apply_verified_eclado_prices, load_local_seed, load_supabase_catalog
+from Quotation_KEKOREA.agent.renderers import render_files
+from Quotation_KEKOREA.agent.trade_documents import validate_and_calculate
 
 
 st.set_page_config(page_title="KE KOREA Trade Documents", layout="wide")
