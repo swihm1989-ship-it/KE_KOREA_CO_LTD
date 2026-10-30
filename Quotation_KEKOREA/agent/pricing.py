@@ -123,7 +123,7 @@ def apply_verified_eclado_prices(draft, seed=None):
     price_table = "purchase_prices" if draft.get("document_type") == "PO" else "buyer_prices"
     default_currency = "KRW" if draft.get("document_type") == "PO" else None
     counterparty_role = "seller" if draft.get("document_type") == "PO" else "buyer"
-    counterparty = re.sub(r"\b(CO|COMPANY|LTD|LIMITED|INC|CORP|CORPORATION)\b", " ",
+    counterparty = re.sub(r"\b(CO|COMPANY|PTE|LTD|LIMITED|INC|CORP|CORPORATION)\b", " ",
                           str((draft.get(counterparty_role) or {}).get("legal_name") or "").upper())
     counterparty = " ".join(re.findall(r"[A-Z0-9]+", counterparty))
     expected_party = "ECLADO" if draft.get("document_type") == "PO" else "DEAR GLOW"
