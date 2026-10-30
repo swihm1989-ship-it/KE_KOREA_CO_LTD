@@ -91,12 +91,12 @@ def load_supabase_catalog(env, *, opener=urllib.request.urlopen, timeout=20):
 
 
 def match_eclado_product(name, capacity=None, products=None):
-    """Match exact English item and, when supplied, exact capacity. Never fuzzy-match."""
+    """Match exact English item ignoring whitespace and exact capacity ignoring whitespace."""
     products = products if products is not None else load_local_catalog()
-    key = " ".join(str(name or "").split()).casefold()
+    key = re.sub(r"\s+", "", str(name or "")).casefold()
     capacity_key = re.sub(r"\s+", "", str(capacity or "")).casefold() or None
     exact = [p for p in products if p.get("brand") == "ECLADO" and
-             " ".join(str(p.get("item_name") or "").split()).casefold() == key]
+             re.sub(r"\s+", "", str(p.get("item_name") or "")).casefold() == key]
     if capacity_key is not None:
         exact = [p for p in exact if re.sub(r"\s+", "", str(p.get("capacity") or "")).casefold() == capacity_key]
     if len(exact) != 1:
@@ -125,9 +125,10 @@ def apply_verified_eclado_prices(draft, seed=None):
     counterparty_role = "seller" if draft.get("document_type") == "PO" else "buyer"
     counterparty = re.sub(r"\b(CO|COMPANY|PTE|LTD|LIMITED|INC|CORP|CORPORATION)\b", " ",
                           str((draft.get(counterparty_role) or {}).get("legal_name") or "").upper())
-    counterparty = " ".join(re.findall(r"[A-Z0-9]+", counterparty))
+    counterparty = "".join(re.findall(r"[A-Z0-9]+", counterparty))
     expected_party = "ECLADO" if draft.get("document_type") == "PO" else "DEAR GLOW"
-    party_matches = counterparty in {expected_party, expected_party.replace(" ", "")}
+    party_matches = ("ECLADO" in counterparty if draft.get("document_type") == "PO"
+                     else "DEARGLOW" in counterparty)
     for item in draft.get("items", []):
         if draft.get("product_family") != "cosmetics":
             item["master_price"] = False
