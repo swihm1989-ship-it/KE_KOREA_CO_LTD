@@ -143,15 +143,22 @@ def _normalize_currency_alias(draft, prompt):
     if not found:
         return draft
     currency = found[0]
-    current = str(draft.get("currency") or "").upper()
-    if current and current != currency:
+    current_raw = str(draft.get("currency") or "").strip().upper()
+    current_match = re.match(r"^(USD|KRW|EUR|CNY)\b", current_raw)
+    current = current_match.group(1) if current_match else current_raw
+    if current and found and current != currency:
         draft.setdefault("conflicts", []).append(
             f"Extracted currency {current} conflicts with explicit {currency} price evidence; confirm the currency")
         return draft
+    currency = currency if found else current
+    if currency not in {"USD", "KRW", "EUR", "CNY"}:
+        return draft
     draft["currency"] = currency
-    if currency == "USD" and not re.search(r"\bUSD\b|\bUS\s*\$", text, re.I):
+    bare_dollar = currency == "USD" and not re.search(r"\bUSD\b|\bUS\s*\$", text, re.I) and "$" in text
+    model_uncertain = bool(re.search(r"candidate|confirm|ambiguous|uncertain", current_raw, re.I))
+    if bare_dollar or model_uncertain:
         draft.setdefault("pending_confirmations", []).append(
-            "The source uses '$'. Confirm that this means USD (US dollars), not another dollar currency.")
+            "The currency was identified as USD but marked uncertain or shown with '$'. Confirm USD (US dollars) before calculating the total.")
     return draft
 
 
