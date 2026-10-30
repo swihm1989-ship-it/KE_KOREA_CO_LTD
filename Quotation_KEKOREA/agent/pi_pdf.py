@@ -1,6 +1,7 @@
 """KE Korea blue-brand Proforma Invoice PDF layout with PI-only bank details."""
 from io import BytesIO
 from pathlib import Path
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import re
 import textwrap
 import struct
@@ -320,3 +321,337 @@ def render_charcoal_gold_pi(data, bank_details, *, logo_path=None, seal_path=Non
     for offset in offsets[1:]: output.extend(f"{offset:010} 00000 n \n".encode())
     output.extend(f"trailer\n<< /Size {len(objects)+1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode())
     return bytes(output)
+
+
+def _document_title(document_type):
+    return {"PO": "PURCHASE ORDER", "PI": "PROFORMA INVOICE",
+            "CI": "COMMERCIAL INVOICE", "PL": "PACKING LIST"}.get(document_type, "TRADE DOCUMENT")
+
+
+def _formatted_money(value, currency):
+    try:
+        amount = Decimal(str(value)).quantize(Decimal("1") if currency == "KRW" else Decimal("0.01"), rounding=ROUND_HALF_UP)
+    except (InvalidOperation, TypeError, ValueError):
+        return "TO BE CONFIRMED"
+    if currency == "USD":
+        return "$" + f"{amount:,.2f}"
+    return f"{currency} {amount:,.0f}" if currency == "KRW" else f"{currency} {amount:,.2f}"
+
+
+def _serialize_trade_pages(canvases):
+    """Serialize all branded pages, assigning page references after image objects."""
+    objects = [b"<< /Type /Catalog /Pages 2 0 R >>", b"",  # Pages object filled after image count is known.
+               b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+               b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>",
+               b"<< /Type /Font /Subtype /Type0 /BaseFont /STSong-Light /Encoding /UniGB-UCS2-H /DescendantFonts [6 0 R] >>",
+               b"<< /Type /Font /Subtype /CIDFontType0 /BaseFont /STSong-Light /CIDSystemInfo << /Registry (Adobe) /Ordering (GB1) /Supplement 4 >> /DW 1000 >>",
+               b"<< /Type /ExtGState /ca 0.075 /CA 0.075 >>",
+               b"<< /Type /ExtGState /ca 1 /CA 1 >>"]
+    page_image_ids = []
+    for canvas in canvases:
+        ids = []
+        for image in canvas.images:
+            ids.append(len(objects) + 1)
+            raw = image["bytes"]
+            objects.append(b"<< /Type /XObject /Subtype /Image /Width " + str(image["width"]).encode() +
+                           b" /Height " + str(image["height"]).encode() +
+                           b" /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /FlateDecode /Length " +
+                           str(len(raw)).encode() + b" >>\nstream\n" + raw + b"\nendstream")
+        page_image_ids.append(ids)
+
+    first_page_id = len(objects) + 1
+    page_ids = [first_page_id + 2 * i for i in range(len(canvases))]
+    objects[1] = ("<< /Type /Pages /Kids [" + " ".join(f"{page_id} 0 R" for page_id in page_ids) +
+                  f"] /Count {len(page_ids)} >>").encode()
+    for i, canvas in enumerate(canvases):
+        page_id, stream_id = page_ids[i], page_ids[i] + 1
+        xobjects = " ".join(f"/Im{j + 1} {image_id} 0 R" for j, image_id in enumerate(page_image_ids[i]))
+        resources = (f"<< /Font << /F1 3 0 R /F2 4 0 R /F3 5 0 R >> "
+                     f"/ExtGState << /GS1 7 0 R /GS2 8 0 R >> /XObject << {xobjects} >> >>")
+        objects.append(f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources {resources} /Contents {stream_id} 0 R >>".encode())
+        stream = ("\n".join(canvas.commands) + "\n").encode("ascii")
+        objects.append(b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n" + stream + b"endstream")
+
+    output = bytearray(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n")
+    offsets = [0]
+    for object_number, obj in enumerate(objects, 1):
+        offsets.append(len(output))
+        output.extend(f"{object_number} 0 obj\n".encode() + obj + b"\nendobj\n")
+    xref = len(output)
+    output.extend(f"xref\n0 {len(objects) + 1}\n0000000000 65535 f \n".encode())
+    for offset in offsets[1:]:
+        output.extend(f"{offset:010} 00000 n \n".encode())
+    output.extend(f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode())
+    return bytes(output)
+
+
+def _party_panel(canvas, x, title, party):
+    panel_top, panel_width = 136, 262
+    name_lines = _wrap(party.get("legal_name") or "TO BE CONFIRMED", 48)
+    details = [("Address", party.get("address")), ("Tel", party.get("phone")),
+               ("Email", party.get("email")), ("Representative", party.get("contact"))]
+    if party.get("registration_details"):
+        details.append(("Registration", party["registration_details"]))
+    value_x, wrap_width = x + 66, 58
+    detail_lines = [(label, _wrap(value or "Not provided", wrap_width)) for label, value in details]
+    y = panel_top + 34 + max(1, len(name_lines)) * 8.6 + 3
+    for _, lines in detail_lines:
+        y += max(8, len(lines) * 7.0)
+    panel_height = max(92, y - panel_top + 7)
+    canvas.rect(x, panel_top, panel_width, panel_height, (1, 1, 1), PALE, 0.8)
+    canvas.line(x, panel_top, x + panel_width, panel_top, BRAND_BLUE, 1.3)
+    canvas.text(x + 10, panel_top + 15, title, 6.5, True, BRAND_BLUE)
+    for line_index, line in enumerate(name_lines):
+        canvas.text(x + 10, panel_top + 34 + line_index * 8.6, line, 8.0, True)
+    y = panel_top + 34 + max(1, len(name_lines)) * 8.6 + 3
+    for label, lines in detail_lines:
+        canvas.text(x + 10, y, label + ":", 5.5, False, INK)
+        for line_index, line in enumerate(lines):
+            canvas.text(value_x, y + line_index * 7.0, line, 5.5, False, INK)
+        y += max(8, len(lines) * 7.0)
+    return panel_top + panel_height
+
+
+def _document_row(item, is_packing_list, currency):
+    name = str(item.get("product_name") or "TO BE CONFIRMED")
+    capacity = str(item.get("capacity") or item.get("specification") or "-")
+    quantity = str(item.get("display_quantity") or item.get("paid_quantity") or item.get("quantity") or "-")
+    if float(item.get("free_quantity") or 0):
+        quantity += f" + {item.get('free_quantity')} FOC"
+    unit = str(item.get("unit") or "PCS")
+    row = {"name": name, "capacity": capacity, "quantity": quantity, "unit": unit}
+    row["name_lines"] = _wrap(name, 52)
+    row["capacity_lines"] = _wrap(capacity, 23)
+    row["quantity_lines"] = _wrap(quantity, 16)
+    if not is_packing_list:
+        row["price"] = _formatted_money(item.get("final_unit_price", item.get("unit_price", "")), currency)
+        row["amount"] = _formatted_money(item.get("line_total", ""), currency)
+        if currency != "USD" and row["price"].startswith(currency + " "):
+            row["price"] = row["price"][len(currency) + 1:]
+        if currency != "USD" and row["amount"].startswith(currency + " "):
+            row["amount"] = row["amount"][len(currency) + 1:]
+        row["price_lines"] = _wrap(row["price"], 16)
+        row["amount_lines"] = _wrap(row["amount"], 17)
+    line_count = max(len(row[key]) for key in row if key.endswith("_lines"))
+    row["height"] = max(13.5, 4.5 + line_count * 7.0)
+    return row
+
+
+def _paginate_rows(rows, first_table_top, review_height, is_packing_list):
+    """Fit measured row heights around reserved totals, review, signature, and footer areas."""
+    content_bottom = 752
+    last_page_reserve = (120 if is_packing_list else 132) + review_height
+    first_final_capacity = content_bottom - first_table_top - 17 - last_page_reserve
+    if sum(row["height"] for row in rows) <= first_final_capacity:
+        return [rows]
+
+    first_capacity = content_bottom - first_table_top - 21
+    chunks, remaining = [], list(rows)
+    used = 0
+    while remaining and used + remaining[0]["height"] <= first_capacity:
+        row = remaining.pop(0)
+        chunks.append(row)
+        used += row["height"]
+    if not remaining and chunks:
+        remaining.append(chunks.pop())
+    elif not chunks and remaining and first_capacity >= remaining[0]["height"]:
+        chunks.append(remaining.pop(0))
+    chunks = [chunks]
+
+    continuation_table_top = 166
+    continuation_final_capacity = content_bottom - continuation_table_top - 17 - last_page_reserve
+    continuation_capacity = content_bottom - continuation_table_top - 21
+    while remaining:
+        if sum(row["height"] for row in remaining) <= continuation_final_capacity:
+            chunks.append(remaining)
+            remaining = []
+            break
+        page, used = [], 0
+        while remaining and used + remaining[0]["height"] <= continuation_capacity:
+            row = remaining.pop(0)
+            page.append(row)
+            used += row["height"]
+        if not remaining and page:
+            remaining.append(page.pop())
+        if not page and remaining:
+            page.append(remaining.pop(0))
+        chunks.append(page)
+    return chunks
+
+
+def render_trade_document(data, bank_details=None, *, logo_path=None, seal_path=None):
+    """Render all trade documents with measured rows, safe footer space, and automatic pagination."""
+    doc_type = str(data.get("document_type") or "PI").upper()
+    title = _document_title(doc_type)
+    is_packing_list = doc_type == "PL"
+    currency = str(data.get("currency") or "TO CONFIRM").upper()
+    items = data.get("items") or []
+    rows = [_document_row(item, is_packing_list, currency) for item in items]
+    open_items = data.get("blocking_issues") or data.get("missing_fields") or []
+    review_parts = ["Confirm: " + "; ".join(str(value) for value in open_items)] if open_items else []
+    if data.get("remarks"):
+        review_parts.append("Remarks: " + str(data["remarks"]))
+    if not review_parts:
+        review_parts.append("Review all commercial and shipping details before approval.")
+    review_lines = []
+    for part in review_parts:
+        review_lines.extend(_wrap(part.replace("\n", " "), 145))
+    review_height = max(40, 22 + len(review_lines) * 6.5)
+
+    logo_path = Path(logo_path) if logo_path else None
+    seal_path = Path(seal_path) if seal_path else None
+    # Party details expand naturally; the resulting table start feeds the page-fit calculation.
+    probe = _Canvas()
+    seller_bottom = _party_panel(probe, 35, "SELLER / SUPPLIER", data.get("seller") or {})
+    buyer_bottom = _party_panel(probe, 315, "BUYER / CUSTOMER", data.get("buyer") or {})
+    terms_top = max(seller_bottom, buyer_bottom) + 8
+    terms_values = [data.get("incoterms") or "TO BE CONFIRMED",
+                    data.get("payment_terms") or "TO BE CONFIRMED",
+                    data.get("ship_to") or data.get("country_of_origin") or "TO BE CONFIRMED"]
+    terms_lines = [_wrap(str(value), 25) for value in terms_values]
+    terms_height = max(38, 18 + max(map(len, terms_lines)) * 7.0)
+    first_table_top = terms_top + terms_height + 12
+    chunks = _paginate_rows(rows, first_table_top, review_height, is_packing_list)
+    canvases = []
+    number = str(data.get("document_number") or "DRAFT - TBD")
+    issue_date = str(data.get("issue_date") or "TO CONFIRM")
+    total_quantity = sum(float(item.get("quantity") or item.get("paid_quantity") or 0) +
+                         float(item.get("free_quantity") or 0) for item in items)
+
+    for page_index, page_rows in enumerate(chunks):
+        canvas = _Canvas()
+        canvases.append(canvas)
+        canvas.rect(0, 0, PAGE_W, PAGE_H, (1, 1, 1))
+        canvas.rect(0, 0, PAGE_W, 94, (1, 1, 1))
+        canvas.rect(0, 91, PAGE_W, 3, BRAND_BLUE)
+        has_logo = canvas.image(logo_path, 30, 4, 235, 84, crop_box=(290, 145, 1190, 620))
+        canvas.text(376, 40, title, 14.2, True, NAVY)
+        canvas.rect(376, 52, 202, 23, MID_BLUE)
+        canvas.text(388, 68, f"DRAFT  |  NO. {number}"[:38], 6.7, True, (0.90, 0.95, 0.99))
+        canvas.text(35, 109, "DOCUMENT NUMBER", 5.8, True, MUTED)
+        canvas.text(35, 123, number[:25], 7.2, True, INK)
+        canvas.text(220, 109, "ISSUE DATE", 5.8, True, MUTED)
+        canvas.text(220, 123, issue_date, 7.2, True, INK)
+        canvas.text(430, 109, "CURRENCY", 5.8, True, MUTED)
+        canvas.text(430, 123, currency, 7.2, True, INK)
+
+        if page_index == 0:
+            _party_panel(canvas, 35, "SELLER / SUPPLIER", data.get("seller") or {})
+            _party_panel(canvas, 315, "BUYER / CUSTOMER", data.get("buyer") or {})
+            canvas.rect(35, terms_top, 542, terms_height, PALE)
+            columns = [(47, "DELIVERY TERMS"), (225, "PAYMENT TERMS"), (410, "SHIP TO / ORIGIN")]
+            for column_index, (x, label) in enumerate(columns):
+                canvas.text(x, terms_top + 12, label, 5.6, True, MUTED)
+                for line_index, line in enumerate(terms_lines[column_index]):
+                    canvas.text(x, terms_top + 24 + line_index * 7, line, 5.8, True, INK)
+            table_top = first_table_top
+        else:
+            canvas.text(35, 147, f"{title} - CONTINUED", 7.2, True, BRAND_BLUE)
+            table_top = 166
+
+        left = 35
+        widths = [225, 90, 62, 78, 87]
+        xs = [left]
+        for width in widths:
+            xs.append(xs[-1] + width)
+        canvas.text(left, table_top - 7, "PACKING DETAILS" if is_packing_list else "PRODUCT & PRICING", 6.5, True, BRAND_BLUE)
+        canvas.rect(left, table_top, 542, 17, NAVY)
+        labels = (["PRODUCT DESCRIPTION", "CAPACITY / SPEC.", "QUANTITY", "UNIT", "PACKAGES"] if is_packing_list else
+                  ["PRODUCT DESCRIPTION", "CAPACITY / SPEC.", "QUANTITY", f"UNIT PRICE ({currency})", f"AMOUNT ({currency})"])
+        for column_index, label in enumerate(labels):
+            canvas.text(xs[column_index] + 3, table_top + 11, label, 5.2, True, (1, 1, 1))
+
+        y = table_top + 17
+        for row_index, row in enumerate(page_rows):
+            height = row["height"]
+            if row_index % 2 == 0:
+                canvas.rect(left, y, 542, height, PALE)
+            canvas.line(left, y + height, left + 542, y + height, (0.86, 0.88, 0.90), 0.4)
+            for column, key in enumerate(("name_lines", "capacity_lines", "quantity_lines")):
+                for line_index, line in enumerate(row[key]):
+                    canvas.text(xs[column] + 3, y + 8 + line_index * 7, line, 5.4, False, INK)
+            if is_packing_list:
+                canvas.text(xs[3] + 3, y + 8, row["unit"][:12], 5.4, False, INK)
+                canvas.text(xs[4] + 3, y + 8, "SEE SUMMARY", 5.1, False, MUTED)
+            else:
+                for column, key in ((3, "price_lines"), (4, "amount_lines")):
+                    for line_index, line in enumerate(row[key]):
+                        canvas.text(xs[column] + 3, y + 8 + line_index * 7, line,
+                                    5.2 if column == 3 else 5.3, column == 4, INK)
+            y += height
+
+        last_page = page_index == len(chunks) - 1
+        if last_page:
+            bottom = y + 8
+            if is_packing_list:
+                packages = data.get("packages") or []
+                package_lines = []
+                if data.get("actual_package_count"):
+                    package_lines.append("TOTAL PACKAGES: " + str(data["actual_package_count"]))
+                else:
+                    package_lines.append("TOTAL PACKAGES: TO BE CONFIRMED")
+                try:
+                    net = sum(Decimal(str(p.get("net_weight_kg") or 0)) for p in packages)
+                    gross = sum(Decimal(str(p.get("gross_weight_kg") or 0)) for p in packages)
+                    if packages and net > 0 and gross > 0:
+                        package_lines.append(f"NET WEIGHT: {net:,.2f} KG  |  GROSS WEIGHT: {gross:,.2f} KG")
+                    else:
+                        package_lines.append("NET WEIGHT / GROSS WEIGHT: TO BE CONFIRMED")
+                except (InvalidOperation, TypeError, ValueError):
+                    package_lines.append("NET WEIGHT / GROSS WEIGHT: TO BE CONFIRMED")
+                for line_index, line in enumerate(package_lines):
+                    canvas.text(left, bottom + 8 + line_index * 8, line, 5.8, True, MUTED)
+                bottom += 20
+            else:
+                total_text = _formatted_money(data.get("total") or "0", currency)
+                canvas.rect(374, bottom - 4, 203, 27, NAVY)
+                canvas.text(384, bottom + 6, f"TOTAL AMOUNT ({currency})", 5.8, True, (0.8, 0.9, 1))
+                canvas.text(384, bottom + 17, total_text[:24], 8.7, True, (1, 1, 1))
+                canvas.text(left, bottom + 10, f"TOTAL QUANTITY: {total_quantity:g}", 6.0, True, MUTED)
+                bottom += 31
+
+            canvas.rect(35, bottom, 542, review_height, (1.0, 0.97, 0.94))
+            canvas.rect(35, bottom, 3, review_height, WARNING)
+            canvas.text(45, bottom + 11, "DRAFT - REVIEW REQUIRED BEFORE ISSUE", 5.7, True, WARNING)
+            for line_index, line in enumerate(review_lines):
+                canvas.text(45, bottom + 22 + line_index * 6.5, line, 5.0, False, INK)
+            bottom += review_height + 7
+
+            if doc_type == "PI":
+                panel_top, panel_height = bottom, 86
+                canvas.rect(35, panel_top, 350, panel_height, (1, 1, 1), PALE, 0.7)
+                canvas.rect(35, panel_top, 350, 15, PALE)
+                canvas.text(44, panel_top + 11, "USD BANK INFORMATION - PI ONLY", 5.8, True, BRAND_BLUE)
+                bank_rows = [("BENEFICIARY", "BENEFICIARY"), ("BANK NAME", "BANK_NAME"), ("BRANCH NAME", "BRANCH"),
+                             ("SWIFT CODE", "SWIFT"), ("ACCOUNT NUMBER", "ACCOUNT_NUMBER"), ("BANK ADDRESS", "BANK_ADDRESS")]
+                for index, (label, key) in enumerate(bank_rows):
+                    value = (bank_details or {}).get(key) or "[BANK DETAIL REQUIRED]"
+                    if key == "ACCOUNT_NUMBER" and value != "[BANK DETAIL REQUIRED]":
+                        value += " (USD)"
+                    canvas.text(44, panel_top + 25 + index * 9, label, 5.0, True, MUTED)
+                    canvas.text(136, panel_top + 25 + index * 9, value, 5.0, key == "ACCOUNT_NUMBER", INK)
+                sign_x, sign_width = 398, 179
+            else:
+                sign_x, sign_width = 398, 179
+            canvas.rect(sign_x, bottom, sign_width, 86, (1, 1, 1), PALE, 0.7)
+            canvas.text(sign_x + 10, bottom + 17, "AUTHORIZED REPRESENTATIVE", 5.3, True, MUTED)
+            canvas.text(sign_x + 10, bottom + 32, "DAVID, SEOKWON IHM", 6.3, True, INK)
+            canvas.text(sign_x + 10, bottom + 42, "KE KOREA CO. LTD", 5.8, False, INK)
+            if not canvas.image(seal_path, sign_x + 104, bottom + 31, 60, 49, crop_box=(748, 148, 120, 120)):
+                canvas.text(sign_x + 10, bottom + 68, "Company seal", 5.0, False, MUTED)
+            if bottom + 86 > 752:
+                raise ValueError("Document content exceeds the reserved footer area; add a page break or shorten the source information")
+
+        canvas.line(35, 778, 577, 778, (0.86, 0.85, 0.82), 0.5)
+        footer = f"DRAFT - NOT FOR ISSUE  |  PAGE {page_index + 1} OF {len(chunks)}"
+        if not has_logo:
+            canvas.text(468, 788, "LOGO ASSET PENDING", 5.0, True, BRAND_BLUE)
+        canvas.text(35, 788, footer, 5.3, False, MUTED)
+
+    return _serialize_trade_pages(canvases)
+
+
+def render_charcoal_gold_pi(data, bank_details, *, logo_path=None, seal_path=None):
+    """Backward-compatible name; all documents now share the same branded renderer."""
+    data = {**data, "document_type": "PI"}
+    return render_trade_document(data, bank_details, logo_path=logo_path, seal_path=seal_path)

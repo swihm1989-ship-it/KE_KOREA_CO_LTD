@@ -243,14 +243,12 @@ def render_files(doc, output_dir, *, bank_details=None, logo_path=None, seal_pat
     html_rows = "".join("<tr>" + "".join(f"<td>{escape(_english(v))}</td>" for v in row) + "</tr>" for row in _rows(doc))
     html_doc = "<!doctype html><meta charset='utf-8'><title>Trade Document Draft</title><h1>" + escape(dtype) + "</h1><h2>" + escape(doc.get("status", "DRAFT")) + "</h2><table border='1'>" + html_rows + "</table><pre>" + escape("\n".join(lines)) + "</pre>"
     paths = {"pdf": directory / f"{stem}.pdf", "xlsx": directory / f"{stem}.xlsx", "html": directory / f"{stem}.html"}
-    if doc.get("document_type") == "PI":
-        try:
-            from .pi_pdf import render_charcoal_gold_pi
-        except ImportError:
-            from agent.pi_pdf import render_charcoal_gold_pi
-        paths["pdf"].write_bytes(render_charcoal_gold_pi(doc, bank_details or {}, logo_path=logo_path, seal_path=seal_path))
-    else:
-        paths["pdf"].write_bytes(_pdf_bytes(lines))
+    try:
+        from .pi_pdf import render_trade_document
+    except ImportError:
+        from agent.pi_pdf import render_trade_document
+    paths["pdf"].write_bytes(render_trade_document(
+        doc, bank_details or {}, logo_path=logo_path, seal_path=seal_path))
     paths["xlsx"].write_bytes(_xlsx_bytes(doc, bank_details))
     paths["html"].write_text(html_doc, encoding="utf-8")
     return paths
