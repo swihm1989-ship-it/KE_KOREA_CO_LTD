@@ -10,7 +10,7 @@ SPEC = importlib.util.spec_from_file_location("trade_documents", ROOT / "agent" 
 trade = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(trade)
 from Quotation_KEKOREA.agent.pricing import apply_verified_eclado_prices, load_local_seed, match_eclado_product, resolve_price
-from Quotation_KEKOREA.agent.renderers import amount_in_english, render_files
+from Quotation_KEKOREA.agent.renderers import amount_in_english, document_lines, render_files, _pdf_bytes, _xlsx_bytes
 
 
 def sample_trade(**updates):
@@ -61,6 +61,37 @@ class TradeDocumentTests(unittest.TestCase):
         data["buyer"]["legal_name"] = "가상의 구매자"
         result = trade.validate_and_calculate(data)
         self.assertIn("Buyer legal name must be English", result["blocking_issues"])
+
+    def test_chinese_company_name_and_address_require_original_plus_english(self):
+        data = sample_trade()
+        data["buyer"]["legal_name"] = "华星贸易有限公司"
+        data["buyer"]["address"] = "上海市浦东新区"
+        result = trade.validate_and_calculate(data)
+        self.assertIn("Buyer Chinese legal name must include its English translation in parentheses", result["blocking_issues"])
+        self.assertIn("Buyer Chinese address must include its English translation in parentheses", result["blocking_issues"])
+
+    def test_chinese_company_name_and_address_with_english_translation_are_allowed(self):
+        data = sample_trade()
+        data["buyer"]["legal_name"] = "华星贸易有限公司 (Huaxing Trading Co., Ltd.)"
+        data["buyer"]["address"] = "上海市浦东新区 (Pudong New Area, Shanghai)"
+        result = trade.validate_and_calculate(data)
+        self.assertNotIn("Buyer Chinese legal name must include its English translation in parentheses", result["blocking_issues"])
+        self.assertNotIn("Buyer Chinese address must include its English translation in parentheses", result["blocking_issues"])
+
+    def test_chinese_remarks_must_be_translated_to_english_only(self):
+        data = sample_trade(remarks="尽快发货")
+        result = trade.validate_and_calculate(data)
+        self.assertIn("Remarks must be translated into English", result["blocking_issues"])
+
+    def test_chinese_company_name_is_preserved_in_review_files(self):
+        data = sample_trade()
+        data["buyer"]["legal_name"] = "华星贸易有限公司 (Huaxing Trading Co., Ltd.)"
+        data["buyer"]["address"] = "上海市浦东新区 (Pudong New Area, Shanghai)"
+        result = trade.validate_and_calculate(data)
+        pdf = _pdf_bytes(document_lines(result))
+        self.assertIn("华星贸易有限公司".encode("utf-16-be").hex().upper().encode(), pdf)
+        with zipfile.ZipFile(__import__("io").BytesIO(_xlsx_bytes(result))) as workbook:
+            self.assertIn("华星贸易有限公司".encode("utf-8"), workbook.read("xl/worksheets/sheet1.xml"))
 
     def test_po_and_pi_party_roles_are_checked(self):
         data = sample_trade(document_type="PO")

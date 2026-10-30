@@ -1,7 +1,7 @@
 # KE KOREA 무역 문서 생성 AI Agent 설계안
 
 작성일: 2026-10-30 (Asia/Seoul)  
-상태: ECLADO 가격 SQL 준비와 로컬 텍스트 프롬프트 기반의 초안 Agent/파일 출력 1차 코드가 있다. Supabase에 SQL은 적용되지 않았고, 실제 업무 서식 재현·첨부자료 판독·실API 호출·발행 절차는 미완료다. 모든 출력은 현재 검토용 초안이다.
+상태: ECLADO 가격 SQL과 로컬 텍스트 프롬프트 기반 초안 Agent가 준비되어 있으며, 앱에 Supabase REST 카탈로그 조회를 연결했다. 실제 Supabase/Cloud 연결은 아직 확인되지 않았다. 업무 서식 재현·첨부자료 판독·발행 절차는 미완료이며 모든 출력은 검토용 초안이다.
 
 ## 1. 이해한 목표
 
@@ -15,7 +15,7 @@ KE KOREA CO. LTD의 실제 거래 정보를 받아 제품군에 맞는 Purchase 
 - 입력: 직접 타이핑, 이메일 복사·붙여넣기, 거래처 대화 캡처, PDF 및 향후 허용하는 첨부 파일.
 - 출력 추천: 발송·인쇄용 PDF와 수정 가능한 Excel(XLSX). 지원 형식은 구현 전에 확정한다.
 - 소스 코드와 서식 정의는 Git에서 관리한다. 실제 거래 자료와 발행 결과물은 별도 보관한다.
-- **모든 업무 산출물은 영문이다.** PO, PI, CI, PL 및 재고 명세 첨부의 제목·표·날짜·거래 조건·REMARK·금액 영문 표기를 영어로 생성한다. 한글 입력은 허용하되 영문 초안을 확인하며, 법인 영문명은 추측하지 않는다.
+- **모든 업무 산출물은 영문이다.** 중국어·인도네시아어·한국어·영어 거래 입력을 GPT가 해석하여 번역하고, 문서의 제목·표·날짜·조건·REMARK·금액을 영어로 작성한다. 중국어 회사명과 주소만 `中文原文 (English translation)` 형식으로 원문을 병기한다. 번역은 원문 근거와 함께 검토하며, 등록 영문 법인명이라고 추측하지 않는다.
 - 원자재는 제품명·가격·선적 조건을 거래별로 입력하고 확인한다. 화장품은 제공된 가격표를 기준 마스터로 사용하고, 선택한 할인·행사 조건을 거래별로 적용한다.
 
 ### ECLADO 가격표 및 SQL 준비 현황 (2026-10-30)
@@ -246,176 +246,54 @@ API 기반 판독을 선택하면 어떤 자료가 외부로 전송되는지 표
 
 현재 문서는 요구사항 분석과 설계이며, 위 검증이 통과했다는 보고가 아니다. 구현 후에는 합성 자료의 자동 검증과 승인된 실제 샘플의 비공개 시각 검토를 구분해 기록한다.
 
-## 12. 1차 구현과 검증 상태 (2026-10-30)
-
-### Implemented
-
-- `app.py`: one-user local Streamlit screen for pasting a transaction request, reviewing/editing extracted JSON, seeing blockers, and downloading review files.
-- `agent/extractor.py`: OpenAI Responses API request with strict structured JSON output and `OPENAI_MODEL` from `.env`. The prompt is sent to OpenAI only after the user clicks Extract. Typed text only is supported in this build.
-- `agent/pricing.py`: exact ECLADO product-name/capacity matching against the local private seed; PO uses purchase prices only for an ECLADO supplier; PI/CI use Dear Glow buyer prices only for a Dear Glow buyer. Other counterparties need an explicit transaction price. Ambiguous matches do not auto-select.
-- `agent/trade_documents.py`: `Decimal` calculations, discount once, paid/free/shipped quantity separation, party direction checks, English-field checks, price-basis checks, explicit blockers for unknown terms, and actual PL package/weight checks.
-- `agent/renderers.py`: English-only draft PDF, XLSX and HTML outputs. Every filename and document is marked `DRAFT`; these are generic layouts and have not passed visual matching against approved company stationery.
-- `tests/`: synthetic unit tests for catalog separation, price roles, pricing arithmetic, source quotation guards, required information, FOC promotions, and basic PDF/XLSX container creation.
-
-### Run locally
-
-First rebuild the private catalog seed locally if `private/eclado/002_eclado_catalog_seed.sql` is missing. The workbooks remain outside Git:
-
-```powershell
-python scripts\build_eclado_seed.py --purchase "C:\Users\Playdata\OneDrive\바탕 화면\KE KOREA\에끌라두\260511_ECLADO_Price_List_KRW.xlsx" --buyer "C:\Users\Playdata\OneDrive\바탕 화면\KE KOREA\에끌라두\260511_ECLADO_Price_List_KE KOREA - DEAR GLOW.xlsx"
-```
-
-Then, from `Quotation_KEKOREA/`, install the project and start the UI:
-
-```powershell
-python -m venv .venv
-.venv\Scripts\Activate.ps1
-python -m pip install -e .
-streamlit run app.py
-```
-
-Keep API keys in the ignored `.env`; `OPENAI_MODEL=gpt-6-luna` is unquoted. The prompt screen identifies that text is sent to OpenAI. Generated files go under ignored `outputs/`.
-
-Run the local synthetic checks from the repository root:
-
-```powershell
-python -m unittest discover -s Quotation_KEKOREA/tests -v
-```
-
-### Verification run
-
-- Existing price-import tests and new draft-generation tests: **28 passed** using Python's built-in `unittest` on 2026-10-30.
-- Local private ECLADO seed: **157 products** found by the code; no price values are printed in test output.
-- The model request shape was checked with a mocked HTTP response. The workspace could not reach the OpenAI or Supabase endpoints, so live API-key/model access and live Supabase status remain unverified.
-- Streamlit, ReportLab, pypdf and Poppler are not installed in the current Python environment. The automated checks confirm file signatures/ZIP contents only. The Streamlit screen was not launched; the generated PDF was not visually rendered and the XLSX was not opened in Excel.
-- SQL files remain prepared locally only; no Supabase migration or seed was applied.
-
-### Not ready for business issue
-
-- The sample PDFs and current company/partner/bank profiles are not copied into this project as approved machine-readable templates. The generic renderer does not yet reproduce the TENGYAO solar or DEAR GLOW cosmetics layouts, signatures, seals, bank block, logo, inventory annex or page-break rules.
-- No real purchase order template or cosmetics CI/PL samples were supplied. The generated PO and cosmetics CI/PL are requirements-based drafts only.
-- Text prompt only: image/screenshot, scanned PDF, XLSX/email ingestion and source-page coordinate evidence are not implemented. Extracted fields are shown for manual review; the source-quote guard is only a blocker, not proof that every interpretation is correct.
-- Company address, tax identifiers, bank accounts, contact details, shipping templates and approved numbering rules are not configured. The company name may be filled from the user's stated English name, but other company facts are never inferred.
-- The Agent does not issue/finalize documents, reserve numbers, record shipment snapshots, reconcile partial shipments, upload data to Supabase or send messages. CI/PL cross-document validation is not yet wired as one shipment workflow.
-- The basic PDF generator uses a generic text layout and Latin-only output. It needs replacement with a professionally laid out renderer and visual QA before customs or counterparties receive any file.
-
-Next verification should use anonymized/synthetic transaction text first, then approved sample layouts and company data. Do not treat a generated draft as customs-ready until the layout, company profile, prices, shipment facts and matching document totals are reviewed and confirmed.
 
 ## 11. 사용자가 확정할 사항
 
-이번 설계는 아래를 미확정으로 명시해 먼저 저장한다. 설계 저장을 위해 답변을 기다릴 필요는 없지만 관련 구현·배포 전에 정해야 한다.
+- 초기 운영은 본인 PC의 단일 사용자로 시작한다.
+- 결과물은 PDF+Excel을 우선 제공한다.
+- 이미지·이메일 내용을 OpenAI API에 보내기 전에 화면에서 고지한다.
+- 회사 서식, 은행 정보, 날인 자산, 자동 채번 정책은 확인 전까지 추측하지 않는다.
 
-- 초기 운영을 본인 PC의 단일 사용자로 시작할지, 직원 공동 사용이 바로 필요한지.
-- 결과물을 PDF+Excel로 제공할지, Word 등 다른 편집 형식이 필요한지.
-- 이미지·이메일의 외부 AI API 전송 허용 범위와 모델 선택.
-- PO의 회사 서식, 화장품 CI/PL의 레이아웃, 은행·날인 자산 사용 정책.
-- 회사·은행·제품 마스터의 현행 값, 자동 채번 규칙, 통화별 반올림·할인·운임 처리 방식.
+## 12. 1차 구현과 Supabase 연결 상태 (2026-10-30)
 
-초기 화면 배치·세부 코드 구조·오류 메시지·라이브러리 고정 버전은 구현자가 검증해 정할 수 있다. 회사의 거래 조건·계좌·법적 대표자·서식 승인 여부는 구현자가 추정하지 않는다.
+### 구현 범위
 
-## 12. 1차 구현과 검증 상태 (2026-10-30)
+- `app.py`: Streamlit 화면에서 거래 프롬프트 입력, 추출 JSON 검토·수정, 검증 오류 확인 및 PDF/XLSX/HTML 초안 다운로드.
+- `agent/extractor.py`: OpenAI Responses API의 strict structured output. 사용자가 Extract를 눌렀을 때만 프롬프트 본문을 OpenAI로 전송한다.
+- 입력 언어: 중국어·인도네시아어·한국어를 GPT가 해석해 영문 필드로 정리한다. 중국어 회사명·주소는 중국어 원문 뒤에 영문 번역을 괄호로 병기하고, 나머지 중국어는 영문만 남긴다. PDF는 중국어 글리프용 CID 폰트 인코딩으로 병기 이름·주소를 보존한다.
+- `agent/pricing.py`: Supabase REST API에서 최신 `kekorea_catalog_imports` ID, ECLADO 제품, 해당 import의 매입가·판매가를 서버에서 조회한다. ECLADO 공급 PO에는 매입가만, Dear Glow 판매 PI/CI에는 해당 구매처 판매가만 exact match로 적용한다. 구매처·공급처/통화가 다르면 해당 가격을 쓰지 않는다.
+- Supabase 신형 `SUPABASE_SECRET_KEY`는 HTTPS REST 요청의 `apikey` 헤더로만 전달한다. 브라우저 코드, URL, 로그에 키를 노출하지 않는다. Secret key는 전체 DB 접근 권한이 있으므로 Streamlit 앱 공개 범위를 반드시 비공개로 설정한다.
+- Supabase 연결 설정이 없으면 개발용 로컬 seed를 사용할 수 있으나, Cloud에서는 seed를 Git에서 제외하므로 Supabase 비밀 키가 필요하다. Supabase 조회 실패 시 오래된 로컬 가격으로 조용히 대체하지 않는다.
+- `agent/trade_documents.py`: Decimal 계산, 할인·FOC 분리, 거래 역할·통화·가격 기준·포장 검증. 필수값 누락/충돌이면 DRAFT 상태로 막는다.
+- `agent/renderers.py`: English-only PDF/XLSX/HTML review drafts. 회사 승인 템플릿과 시각 대조는 미완료다.
 
-### Implemented
+### 로컬 실행
 
-- `app.py`: local Streamlit screen for pasting transaction text, reviewing/editing extracted JSON, seeing blockers, and downloading review files.
-- `agent/extractor.py`: OpenAI Responses API request with strict structured JSON output and `OPENAI_MODEL` from `.env`. The prompt is sent to OpenAI only after clicking Extract. Typed text only is supported in this build.
-- `agent/pricing.py`: exact ECLADO product-name/capacity matching against the local private seed; PO uses purchase prices only for an ECLADO supplier; PI/CI use Dear Glow buyer prices only for a Dear Glow buyer. Other counterparties need an explicit transaction price. Ambiguous matches do not auto-select.
-- `agent/trade_documents.py`: `Decimal` calculations, discount once, paid/free/shipped quantity separation, party direction checks, English-field checks, price-basis checks, explicit blockers for unknown terms, and actual PL package/weight checks.
-- `agent/renderers.py`: English-only PDF, XLSX and HTML review drafts. Every filename and document is marked `DRAFT`; these generic layouts have not passed visual matching against approved company stationery.
-- `tests/`: synthetic unit tests for catalog separation, price roles, pricing arithmetic, source quotation guards, required information, FOC promotions, and basic PDF/XLSX container creation.
-
-### Run locally
-
-From `Quotation_KEKOREA/`, install the app dependency and start the UI:
+저장소 최상위 폴더에서:
 
 ```powershell
-python -m venv .venv
-.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
-streamlit run app.py
+uv run --with-requirements .\Quotation_KEKOREA\requirements.txt streamlit run .\Quotation_KEKOREA\app.py
 ```
 
-Keep local API keys in the ignored `.env`; `OPENAI_MODEL=gpt-6-luna` is unquoted. Streamlit Community Cloud reads API keys from **App settings > Secrets** (TOML), not from the developer's local `.env`. The prompt screen states that text is sent to OpenAI. Generated files go under ignored `outputs/`.
+또는 `Quotation_KEKOREA/` 폴더에서 `python -m pip install -r requirements.txt` 후 `streamlit run app.py`를 실행한다. API 키는 `.env`에만 둔다.
 
-For Streamlit Community Cloud, set the main file to `Quotation_KEKOREA/app.py`. This app's `requirements.txt` sits beside that entrypoint. After pushing code updates to the selected GitHub branch, Cloud redeploys from that branch. Add the OpenAI credentials in **Manage app > Settings > Secrets**, for example:
+### Streamlit Community Cloud 설정
+
+메인 파일은 `Quotation_KEKOREA/app.py`로 두고, 앱이 연결된 GitHub 브랜치에 코드 변경을 push한다. Manage app → Settings → Secrets에 다음 값을 비밀로 등록한다. 실제 키는 이 채팅에 보내지 않는다.
 
 ```toml
-OPENAI_API_KEY = "your-rotated-key"
+OPENAI_API_KEY = "새로 발급한 OpenAI 키"
 OPENAI_MODEL = "gpt-6-luna"
+SUPABASE_URL = "https://jusozufdsnpdxezxptfp.supabase.co"
+SUPABASE_SECRET_KEY = "새로 발급한 Supabase Secret key"
 ```
 
-Do not upload `.env` or the private ECLADO price seed to GitHub. The price seed is excluded by `.gitignore`; it will therefore be missing on Community Cloud and the app will show a warning. The current version has no secure cloud price-catalog connection, so ECLADO pricing will stay blocked there until that integration is implemented.
+앱 접근 범위는 **Only specific people can view this app**로 제한한다. Supabase Secret key는 RLS를 우회하는 서버 전용 키이며 공개 Streamlit 앱에 두면 안 된다. 로컬 `.env`와 `private/` 가격 seed는 Git에서 제외한다.
 
-Run the local synthetic checks from the repository root:
+### 검증과 미완료 사항
 
-```powershell
-python -m unittest discover -s Quotation_KEKOREA/tests -v
-```
-
-### Verification run
-
-- Existing price-import tests and new draft-generation tests: **32 passed** using Python `unittest` on 2026-10-30.
-- Local private ECLADO seed: **157 products** found by the code; no price values are printed in test output.
-- The model request shape was checked with a mocked HTTP response. The workspace could not reach OpenAI or Supabase endpoints, so live API-key/model access and Supabase status remain unverified.
-- Streamlit, ReportLab, pypdf and Poppler are not installed in the current Python environment. Automated checks confirm file signatures/ZIP contents only. The Streamlit screen was not launched; the PDF was not visually rendered and the XLSX was not opened in Excel.
-- SQL files remain prepared locally only; no Supabase migration or seed was applied.
-
-### Not ready for business issue
-
-- Approved company/partner/bank profiles and machine-readable stationery are not configured. The generic renderer does not reproduce TENGYAO solar or DEAR GLOW cosmetics layouts, signatures, seals, bank block, logo, inventory annex, or page-break rules.
-- No actual purchase order template or cosmetics CI/PL samples were supplied. These are requirements-based drafts only.
-- Text prompt only: image/screenshot, scanned PDF, spreadsheet/email ingestion and source-page evidence are not implemented. Source-quote checks are blockers, not proof that every interpretation is correct.
-- Company address, tax identifiers, bank accounts, contact details, approved numbering rules and actual shipping facts are not configured. The company name can use the English name stated by the user; other company facts are not inferred.
-- The Agent does not issue/finalize documents, reserve numbers, record shipment snapshots, reconcile partial shipments, upload data to Supabase or send messages. CI/PL cross-document validation is not yet wired as one shipment workflow.
-- The basic PDF generator uses a generic text layout and Latin-only output. It needs a professionally laid out renderer and visual QA before any generated file is sent to customs or counterparties.
-
-Next verification should use synthetic transaction text first, then approved sample layouts and company data. Do not treat a generated draft as customs-ready until the layout, company profile, prices, shipment facts and totals are reviewed and confirmed.
-
-## 12. 1차 구현과 검증 상태 (2026-10-30)
-
-### Implemented
-
-- `app.py`: local Streamlit screen for pasting transaction text, reviewing/editing extracted JSON, seeing blockers, and downloading review files.
-- `agent/extractor.py`: OpenAI Responses API request with strict structured JSON output and `OPENAI_MODEL` from `.env`. The prompt is sent to OpenAI only after clicking Extract. Typed text only is supported in this build.
-- `agent/pricing.py`: exact ECLADO product-name/capacity matching against the local private seed; PO uses purchase prices only for an ECLADO supplier; PI/CI use Dear Glow buyer prices only for a Dear Glow buyer. Other counterparties need an explicit transaction price. Ambiguous matches do not auto-select.
-- `agent/trade_documents.py`: `Decimal` calculations, discount once, paid/free/shipped quantity separation, party direction checks, English-field checks, price-basis checks, explicit blockers for unknown terms, and actual PL package/weight checks.
-- `agent/renderers.py`: English-only PDF, XLSX and HTML review drafts. Every filename and document is marked `DRAFT`; these generic layouts have not passed visual matching against approved company stationery.
-- `tests/`: synthetic unit tests for catalog separation, price roles, pricing arithmetic, source quotation guards, required information, FOC promotions, and basic PDF/XLSX container creation.
-
-### Run locally
-
-From `Quotation_KEKOREA/`, install the project and start the UI:
-
-```powershell
-python -m venv .venv
-.venv\Scripts\Activate.ps1
-python -m pip install -e .
-streamlit run app.py
-```
-
-Keep API keys in the ignored `.env`; `OPENAI_MODEL=gpt-6-luna` is unquoted. The prompt screen states that text is sent to OpenAI. Generated files go under ignored `outputs/`.
-
-Run the local synthetic checks from the repository root:
-
-```powershell
-python -m unittest discover -s Quotation_KEKOREA/tests -v
-```
-
-### Verification run
-
-- Existing price-import tests and new draft-generation tests: **28 passed** using Python `unittest` on 2026-10-30.
-- Local private ECLADO seed: **157 products** found by the code; no price values are printed in test output.
-- The model request shape was checked with a mocked HTTP response. The workspace could not reach OpenAI or Supabase endpoints, so live API-key/model access and Supabase status remain unverified.
-- Streamlit, ReportLab, pypdf and Poppler are not installed in the current Python environment. Automated checks confirm file signatures/ZIP contents only. The Streamlit screen was not launched; the PDF was not visually rendered and the XLSX was not opened in Excel.
-- SQL files remain prepared locally only; no Supabase migration or seed was applied.
-
-### Not ready for business issue
-
-- Approved company/partner/bank profiles and machine-readable stationery are not configured. The generic renderer does not reproduce TENGYAO solar or DEAR GLOW cosmetics layouts, signatures, seals, bank block, logo, inventory annex, or page-break rules.
-- No actual purchase order template or cosmetics CI/PL samples were supplied. These are requirements-based drafts only.
-- Text prompt only: image/screenshot, scanned PDF, spreadsheet/email ingestion and source-page evidence are not implemented. Source-quote checks are blockers, not proof that every interpretation is correct.
-- Company address, tax identifiers, bank accounts, contact details, approved numbering rules and actual shipping facts are not configured. The company name can use the English name stated by the user; other company facts are not inferred.
-- The Agent does not issue/finalize documents, reserve numbers, record shipment snapshots, reconcile partial shipments, upload data to Supabase or send messages. CI/PL cross-document validation is not yet wired as one shipment workflow.
-- The basic PDF generator uses a generic text layout and Latin-only output. It needs a professionally laid out renderer and visual QA before any generated file is sent to customs or counterparties.
-
-Next verification should use synthetic transaction text first, then approved sample layouts and company data. Do not treat a generated draft as customs-ready until the layout, company profile, prices, shipment facts and totals are reviewed and confirmed.
+- Python `unittest`에서 SQL importer·계산·렌더러·OpenAI 모의요청·Supabase REST 모의요청 검증을 실행한다. 모의 테스트는 실제 Supabase 인증이나 실제 테이블 상태를 증명하지 않는다.
+- 앱이 실제 Supabase에 연결되면 화면에 최근 catalog import 시각과 제품 수를 표시한다. “No ECLADO catalog import”는 테이블은 있어도 seed rows가 없을 때, HTTP 401/403은 키 또는 권한 문제, 404는 API 노출/테이블명 문제를 뜻한다.
+- 실제 Supabase key, DB row, Streamlit Cloud Secrets로 라이브 연결은 아직 확인하지 않았다. 이 환경에서는 외부 Supabase endpoint에 접속하지 않고 비밀 키 없이 모의 응답으로만 검증한다.
+- 이미지·PDF·XLSX 입력, 승인 회사 양식, 은행/회사 프로필, 최종 채번·발행, CI/PL 선적 연동은 미완료다. 현재 출력은 검토용 DRAFT라 통관/거래처 제출용이 아니다.
+- PDF 화면 렌더링과 Excel 앱 검증은 미완료다. 회사 템플릿에 맞춘 편집 전 시각 검수가 필요하다.

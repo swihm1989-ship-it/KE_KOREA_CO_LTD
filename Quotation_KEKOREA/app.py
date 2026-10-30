@@ -8,7 +8,7 @@ import streamlit as st
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 from agent.extractor import extract_trade_data, load_env, verify_item_quotes
-from agent.pricing import apply_verified_eclado_prices, load_local_seed
+from agent.pricing import apply_verified_eclado_prices, load_local_seed, load_supabase_catalog
 from agent.renderers import render_files
 from agent.trade_documents import validate_and_calculate
 
@@ -18,6 +18,7 @@ st.title("KE KOREA Trade Document Drafts")
 st.caption("English document drafts: PO · PI · Commercial Invoice · Packing List")
 st.warning("Drafts require your review. This app does not send orders, issue documents, email customers, or file customs declarations.")
 st.info("When you click Extract, the prompt text is sent to OpenAI using the configured API key and model. Use local .env on your computer or App settings > Secrets on Streamlit Cloud. Do not include information you do not want sent to the configured API.")
+st.caption("You may enter transaction details in Chinese, Indonesian, Korean, or English. Document content is translated into English. Chinese company names and addresses retain the Chinese original followed by the English translation in parentheses.")
 
 cloud_secrets = {}
 try:
@@ -29,11 +30,30 @@ except Exception:
 runtime_env = load_env(secrets=cloud_secrets)
 if not runtime_env.get("OPENAI_API_KEY"):
     st.error("OPENAI_API_KEY is missing. Set it in local .env or Streamlit Cloud Settings > Secrets.")
-if not load_local_seed().get("products"):
-    st.warning("The private ECLADO catalog seed is unavailable in this deployment. ECLADO catalog prices cannot be verified until a secure catalog source is connected.")
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _cached_supabase_catalog(project_url, _secret_key):
+    return load_supabase_catalog({"SUPABASE_URL": project_url, "SUPABASE_SECRET_KEY": _secret_key})
+
+active_catalog = {"products": [], "purchase_prices": [], "buyer_prices": []}
+if runtime_env.get("SUPABASE_URL") and runtime_env.get("SUPABASE_SECRET_KEY"):
+    try:
+        with st.spinner("Loading the latest ECLADO catalog from Supabase..."):
+            active_catalog = _cached_supabase_catalog(runtime_env["SUPABASE_URL"], runtime_env["SUPABASE_SECRET_KEY"])
+        catalog_import = active_catalog.get("import", {})
+        st.caption(f"ECLADO catalog connected: {len(active_catalog['products'])} products; import {catalog_import.get('imported_at', 'date unavailable')}.")
+    except (ValueError, RuntimeError) as exc:
+        st.error(f"Supabase catalog is unavailable: {exc}")
+else:
+    local_catalog = load_local_seed()
+    if local_catalog.get("products"):
+        active_catalog = local_catalog
+        st.warning("Supabase credentials are not configured; using the private local catalog snapshot, which may be out of date.")
+    else:
+        st.error("Supabase catalog credentials are missing. Set SUPABASE_URL and SUPABASE_SECRET_KEY in Streamlit Cloud Settings > Secrets.")
 
 with st.expander("Supported in this first verification build"):
-    st.write("Paste a transaction request as text. PDF, screenshot, email, Supabase live lookup, company/bank profiles, official company templates, and automatic final numbering are not connected yet.")
+    st.write("Paste a transaction request as text. ECLADO prices are read from the latest Supabase catalog import. PDF, screenshot, email, company/bank profiles, official company templates, and automatic final numbering are not connected yet.")
 
 prompt = st.text_area("Transaction details", height=220,
     placeholder="Example: Create a draft PI for [buyer legal name and address]. ECLADO [exact item and capacity], [quantity] PCS, [discount or confirm none], [currency], ship to [address], [Incoterms and named place], payment [terms].")
@@ -48,7 +68,7 @@ if st.button("Extract draft from prompt", type="primary", disabled=not prompt.st
             if not company.get("legal_name"):
                 company["legal_name"] = "KE Korea Co. LTD"
             draft[company_role] = company
-            apply_verified_eclado_prices(st.session_state["trade_draft"], load_local_seed())
+            apply_verified_eclado_prices(st.session_state["trade_draft"], active_catalog)
             st.session_state["prompt_snapshot"] = prompt
             st.session_state.pop("rendered_paths", None)
             st.session_state.pop("rendered_json", None)
@@ -62,7 +82,7 @@ if raw:
     edited = st.text_area("Draft data (JSON)", value=json.dumps(raw, ensure_ascii=False, indent=2), height=480, key="draft_json")
     try:
         data = json.loads(edited)
-        apply_verified_eclado_prices(data, load_local_seed())
+        apply_verified_eclado_prices(data, active_catalog)
         result = validate_and_calculate(data)
         if result["blocking_issues"]:
             st.error("DRAFT ONLY — resolve these items before using the document:")

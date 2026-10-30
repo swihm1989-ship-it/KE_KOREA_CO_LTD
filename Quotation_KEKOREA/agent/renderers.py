@@ -13,8 +13,8 @@ def _english(value):
         return ""
     value = str(value)
     value = value.translate(str.maketrans({"\u2013": "-", "\u2014": "-", "\u2018": "'", "\u2019": "'", "\u201c": '"', "\u201d": '"'}))
-    if any(ord(ch) > 255 for ch in value):
-        raise ValueError("Document values must be English or Latin-1; provide an approved English transliteration before rendering")
+    if any(ord(ch) > 255 and not ("\u3400" <= ch <= "\u9fff") for ch in value):
+        raise ValueError("Document values must be English or Latin-1; translate non-Chinese text before rendering")
     return value
 
 
@@ -125,17 +125,18 @@ def document_lines(doc):
 def _pdf_bytes(lines):
     pages = [lines[i:i + 48] for i in range(0, len(lines), 48)] or [[]]
     objects = [b"<< /Type /Catalog /Pages 2 0 R >>"]
-    page_ids = [4 + 2 * i for i in range(len(pages))]
+    page_ids = [5 + 2 * i for i in range(len(pages))]
     objects.append(("<< /Type /Pages /Kids [" + " ".join(f"{n} 0 R" for n in page_ids) + f"] /Count {len(pages)} >>").encode())
-    objects.append(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
+    objects.append(b"<< /Type /Font /Subtype /Type0 /BaseFont /STSong-Light /Encoding /UniGB-UCS2-H /DescendantFonts [4 0 R] >>")
+    objects.append(b"<< /Type /Font /Subtype /CIDFontType0 /BaseFont /STSong-Light /CIDSystemInfo << /Registry (Adobe) /Ordering (GB1) /Supplement 4 >> /DW 1000 >>")
     for i, page_lines in enumerate(pages):
-        page_id, stream_id = 4 + 2 * i, 5 + 2 * i
+        page_id, stream_id = 5 + 2 * i, 6 + 2 * i
         commands = ["BT", "/F1 9 Tf", "50 790 Td", "14 TL"]
         for line in page_lines:
-            safe = _english(line).replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")[:180]
-            commands.append(f"({safe}) Tj T*")
+            safe = _english(line)[:180].encode("utf-16-be").hex().upper()
+            commands.append(f"<{safe}> Tj T*")
         commands.append("ET")
-        stream = "\n".join(commands).encode("latin-1", errors="replace")
+        stream = "\n".join(commands).encode("ascii")
         objects.append(f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R >> >> /Contents {stream_id} 0 R >>".encode())
         objects.append(b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n" + stream + b"\nendstream")
     output = bytearray(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n")

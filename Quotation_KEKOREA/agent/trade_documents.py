@@ -24,6 +24,14 @@ def _has_korean(value):
     return isinstance(value, str) and re.search(r"[\uac00-\ud7a3]", value) is not None
 
 
+def _has_chinese(value):
+    return isinstance(value, str) and re.search(r"[\u3400-\u9fff]", value) is not None
+
+
+def _has_english_parenthetical(value):
+    return isinstance(value, str) and re.search(r"\([^()]*[A-Za-z][^()]*\)", value) is not None
+
+
 def _plain_decimal(value):
     rendered = format(value, "f")
     return rendered.rstrip("0").rstrip(".") if "." in rendered else rendered
@@ -77,6 +85,11 @@ def validate_and_calculate(data):
                 block(f"{display} {label} is required")
             elif _has_korean(value):
                 block(f"{display} {label} must be English")
+            elif _has_chinese(value) and not _has_english_parenthetical(value):
+                block(f"{display} Chinese {label} must include its English translation in parentheses")
+        for field in ("contact", "phone", "email"):
+            if _has_chinese(party.get(field)):
+                block(f"{display} {field} must be English only")
 
     if doc_type == "PO":
         buyer = (data.get("buyer") or {}).get("legal_name", "").upper()
@@ -111,6 +124,11 @@ def validate_and_calculate(data):
             block(f"Product name is required for item {i}")
         elif _has_korean(name):
             block(f"Product name for item {i} must be English")
+        elif _has_chinese(name):
+            block(f"Product name for item {i} must be translated into English")
+        for field in ("capacity", "unit", "price_basis", "promotion", "price_source"):
+            if _has_chinese(item.get(field)):
+                block(f"{field.replace('_', ' ').title()} for item {i} must be translated into English")
         if not item.get("unit"):
             block(f"Quantity unit for item {i}")
         if doc_type != "PL" and not item.get("price_basis"):
@@ -179,6 +197,14 @@ def validate_and_calculate(data):
 
     if doc_type == "CI" and not data.get("country_of_origin"):
         block("Country of origin must be confirmed")
+    for field in ("incoterms", "payment_terms", "remarks", "ship_to", "bill_to", "country_of_origin",
+                  "document_number", "issue_date", "shipment_reference", "actual_package_count"):
+        if _has_chinese(data.get(field)):
+            block(f"{field.replace('_', ' ').title()} must be translated into English")
+    for i, package in enumerate(data.get("packages") or [], 1):
+        for field in ("package_type", "dimensions", "shipping_marks"):
+            if _has_chinese(package.get(field)):
+                block(f"Package {i} {field.replace('_', ' ')} must be translated into English")
     for issue in data.get("conflicts", []):
         block(f"Resolve conflicting information: {issue}")
     for field in data.get("missing_fields", []):

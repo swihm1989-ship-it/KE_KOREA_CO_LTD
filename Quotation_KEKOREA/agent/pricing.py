@@ -3,6 +3,10 @@ import json
 from pathlib import Path
 import re
 from decimal import Decimal, InvalidOperation
+import json as json_module
+import urllib.error
+import urllib.parse
+import urllib.request
 
 
 def load_local_seed(seed_path=None):
@@ -18,6 +22,72 @@ def load_local_seed(seed_path=None):
 
 def load_local_catalog(seed_path=None):
     return load_local_seed(seed_path).get("products", [])
+
+
+def load_supabase_catalog(env, *, opener=urllib.request.urlopen, timeout=20):
+    """Load one consistent catalog snapshot using a server-only Supabase secret key."""
+    base_url = str(env.get("SUPABASE_URL", "")).rstrip("/")
+    secret_key = str(env.get("SUPABASE_SECRET_KEY", ""))
+    parsed = urllib.parse.urlparse(base_url)
+    if parsed.scheme != "https" or not parsed.hostname or not parsed.hostname.endswith(".supabase.co") or parsed.query or parsed.fragment:
+        raise ValueError("SUPABASE_URL must be the HTTPS URL of this Supabase project")
+    if not secret_key:
+        raise ValueError("SUPABASE_SECRET_KEY is not configured")
+
+    def get_rows(table, params):
+        query = urllib.parse.urlencode(params)
+        url = f"{base_url}/rest/v1/{table}?{query}"
+        request = urllib.request.Request(url, headers={"apikey": secret_key, "Accept": "application/json"}, method="GET")
+        try:
+            with opener(request, timeout=timeout) as response:
+                rows = json_module.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            raise RuntimeError(f"Supabase catalog request failed (HTTP {exc.code}); check the server key, API exposure, and table permissions") from None
+        except (urllib.error.URLError, TimeoutError):
+            raise RuntimeError("Supabase could not be reached; check the project URL and network") from None
+        except (UnicodeDecodeError, json_module.JSONDecodeError):
+            raise RuntimeError("Supabase returned an invalid catalog response") from None
+        if not isinstance(rows, list):
+            raise RuntimeError("Supabase returned an unexpected catalog response")
+        return rows
+
+    imports = get_rows("kekorea_catalog_imports", [
+        ("select", "id,source_label,imported_at,payload_sha256"),
+        ("order", "imported_at.desc"), ("limit", "1")])
+    if not imports:
+        raise RuntimeError("No ECLADO catalog import was found in Supabase")
+    import_id = imports[0].get("id")
+    if not import_id:
+        raise RuntimeError("The latest Supabase catalog import has no ID")
+
+    products = get_rows("kekorea_products", [
+        ("select", "id,brand,kind,source_code,item_name,capacity,group_name,metadata"),
+        ("brand", "eq.ECLADO"), ("limit", "1000")])
+    prices_query = [("select", "id,import_id,product_id,supplier_key,currency,unit_price,price_basis,source_row,source_column,effective_from,effective_to"),
+                    ("import_id", f"eq.{import_id}"), ("limit", "1000")]
+    purchase_prices = get_rows("kekorea_purchase_prices", prices_query)
+    buyer_query = [("select", "id,import_id,product_id,buyer_key,currency,unit_price,price_basis,reference_discount_percent,reference_discounted_price,source_row,source_column,effective_from,effective_to"),
+                   ("import_id", f"eq.{import_id}"), ("limit", "1000")]
+    buyer_prices = get_rows("kekorea_buyer_prices", buyer_query)
+
+    product_ids = {row.get("id") for row in products}
+    if not product_ids:
+        raise RuntimeError("No ECLADO products were found in Supabase")
+    for table, rows in (("purchase", purchase_prices), ("buyer", buyer_prices)):
+        if not rows:
+            raise RuntimeError(f"The latest Supabase import has no {table} prices")
+        for row in rows:
+            if row.get("import_id") != import_id or row.get("product_id") not in product_ids:
+                raise RuntimeError(f"Supabase {table} prices do not match the selected catalog import")
+            try:
+                amount = Decimal(str(row.get("unit_price")))
+            except (InvalidOperation, TypeError, ValueError):
+                raise RuntimeError(f"Supabase {table} catalog contains an invalid price") from None
+            if not amount.is_finite() or amount < 0:
+                raise RuntimeError(f"Supabase {table} catalog contains an invalid price")
+
+    return {"import": imports[0], "products": products,
+            "purchase_prices": purchase_prices, "buyer_prices": buyer_prices}
 
 
 def match_eclado_product(name, capacity=None, products=None):

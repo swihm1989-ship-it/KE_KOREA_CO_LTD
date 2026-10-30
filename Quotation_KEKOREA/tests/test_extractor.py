@@ -22,6 +22,28 @@ class FakeResponse:
 
 
 class ExtractorTests(unittest.TestCase):
+    def test_translation_rules_are_in_openai_instructions(self):
+        self.assertIn("Chinese", extractor.SYSTEM_PROMPT)
+        self.assertIn("(English translation)", extractor.SYSTEM_PROMPT)
+        self.assertIn("Indonesian", extractor.SYSTEM_PROMPT)
+
+    def test_verified_translations_are_not_rejected_as_nonverbatim(self):
+        source = "买方：华星贸易有限公司，地址：上海市浦东新区。Mohon kirim Solar Cell 20 pcs."
+        draft = {
+            "buyer": {"legal_name": "华星贸易有限公司 (Huaxing Trading Co., Ltd.)",
+                      "address": "上海市浦东新区 (Pudong New Area, Shanghai)"},
+            "items": [{"product_name": "Solar Cell", "capacity": None,
+                       "quantity": "20", "unit_price": None,
+                       "source": "Mohon kirim Solar Cell 20 pcs."}],
+            "source_notes": [source], "conflicts": []}
+        result = extractor.verify_item_quotes(draft, source)
+        self.assertEqual(result["conflicts"], [])
+
+    def test_source_notes_must_be_verbatim_evidence(self):
+        draft = {"items": [], "source_notes": ["invented source"], "conflicts": []}
+        result = extractor.verify_item_quotes(draft, "Buyer asks for PI")
+        self.assertTrue(any("source note" in issue.lower() for issue in result["conflicts"]))
+
     def test_cloud_secrets_override_file_values_without_printing_them(self):
         with __import__("tempfile").NamedTemporaryFile(mode="w", encoding="utf-8", suffix=".env", delete=False) as file:
             file.write("OPENAI_MODEL=gpt-6-luna\n")

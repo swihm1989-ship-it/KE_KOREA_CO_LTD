@@ -2,7 +2,7 @@
 
 Target project: `jusozufdsnpdxezxptfp`  
 Project URL: https://jusozufdsnpdxezxptfp.supabase.co  
-Status: SQL prepared locally. No remote connection, table creation or data upload has occurred.
+Status: The app now has a server-side Supabase REST catalog reader. The remote database contents and live credentials have not been verified from this workspace. Run the migration and seed only if the expected tables/data are not already present.
 
 ## Local API credentials
 
@@ -10,11 +10,11 @@ The ignored local [`.env` file](../.env) has placeholders for the OpenAI API and
 
 1. Create an OpenAI project API key in the [OpenAI API platform](https://platform.openai.com/api-keys). Paste it into `OPENAI_API_KEY`. Set `OPENAI_MODEL` to a model enabled for that API project.
 2. In the Supabase dashboard for project `jusozufdsnpdxezxptfp`, open **Settings → API Keys**. Copy the publishable key to `SUPABASE_PUBLISHABLE_KEY` if public/client access is later needed. Copy the secret key to `SUPABASE_SECRET_KEY` only for server-side code with its own access checks.
-3. `SUPABASE_URL` is already set to the project URL supplied by the user.
+3. `SUPABASE_URL` is already set to the project URL supplied by the user. The Streamlit app reads the catalog using `SUPABASE_SECRET_KEY`; keep it server-side and make the Cloud app private.
 
-The Supabase secret key has elevated access and bypasses RLS, so never put it in browser code or source control. The current database grants in the prepared migration are also separate from these API credentials; the migration and seed still need to be run in the dashboard SQL Editor. An API key by itself does not apply SQL migrations.
+The Supabase secret key has elevated access and bypasses RLS, so never put it in browser code or source control. An API key does not apply SQL migrations. The app reads these exposed REST tables: `kekorea_catalog_imports`, `kekorea_products`, `kekorea_purchase_prices`, and `kekorea_buyer_prices`.
 
-No API keys were created, retrieved, or saved here. Once you paste your keys into `.env`, the Python application can load them as environment variables after its API client configuration is implemented.
+Do not paste keys into chat or source files. For local use, put them in the ignored `.env`; for Streamlit Cloud, add them under Manage app → Settings → Secrets. The app queries the latest import and displays its timestamp and product count when successful. A missing import, missing table, invalid key, or inaccessible REST endpoint is shown as a sanitized status error.
 
 ## Files and application order
 
@@ -76,7 +76,7 @@ Future invoices should show paid and `Free of Charge (FOC)` quantities distinctl
 
 ## English document requirement
 
-All generated PO, PI, CI, PL and inventory annexes must use English headings, product descriptions, dates, terms, remarks and amount-in-words text. Retain verified registered company names and source technical symbols. Translate Korean free text into a reviewable English draft; do not invent legal company names. Korean input remains supported. Internal developer notes may remain Korean.
+All generated PO, PI, CI, PL and inventory annexes must use English headings, product descriptions, dates, terms, remarks and amount-in-words text. Chinese, Indonesian and Korean transaction input is supported and translated into English for document fields. The sole Chinese exception is a counterparty's company name and address: preserve the Chinese original, followed by its English translation in parentheses, in the form `中文名称 (English translation)`. Indonesian company names and addresses are translated into English only. Keep original source wording in review notes; do not invent registered legal names. Internal developer notes may remain Korean.
 
 ## Access and verification limits
 
