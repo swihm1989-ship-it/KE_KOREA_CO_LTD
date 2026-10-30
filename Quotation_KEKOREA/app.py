@@ -21,6 +21,8 @@ from Quotation_KEKOREA.agent.trade_documents import apply_promotion, validate_an
 def _synchronize_extracted_quantities(draft):
     """Use one paid quantity consistently and calculate shipped quantities."""
     for item in draft.get("items", []):
+        if draft.get("product_family") == "cosmetics" and not item.get("unit"):
+            item["unit"] = "PCS"
         # The order quantity is the source of truth unless a promotion explicitly
         # separates paid units from free units. The validator calculates totals
         # from paid_quantity, so keep both quantity fields synchronized.
@@ -226,7 +228,8 @@ if raw:
         calculation_blockers = [issue for issue in result["blocking_issues"]
                                 if issue.startswith("Valid positive number required for paid quantity")
                                 or issue.startswith("Valid positive number required for unit price")]
-        total_display = ("Cannot calculate" if calculation_blockers else
+        discount_blockers = [issue for issue in result["blocking_issues"] if "discount" in issue.lower()]
+        total_display = ("Cannot calculate" if calculation_blockers or discount_blockers else
                          format_currency_amount(result.get("total", "0"), result.get("currency")))
         unit_totals = {}
         for item in result.get("items", []):
@@ -263,13 +266,15 @@ if raw:
         for index, item in enumerate(result.get("items", []), 1):
             quantity_missing = any(f"paid quantity for item {index}" in issue.lower() for issue in calculation_blockers)
             price_missing = any(f"unit price for item {index}" in issue.lower() for issue in calculation_blockers)
+            source_item = (data.get("items") or [])[index - 1]
+            discount_missing = bool(discount_blockers) or source_item.get("discount_percent") is None
             if result.get("product_family") == "cosmetics":
                 unit_price = format_currency_amount(item.get("final_unit_price", "0"), result.get("currency"))
             else:
                 unit_price = f"{result.get('currency') or ''} {item.get('final_unit_price', '')}".strip()
             if price_missing:
                 unit_price = "Not provided"
-            line_total = ("Cannot calculate" if quantity_missing or price_missing else
+            line_total = ("Cannot calculate" if quantity_missing or price_missing or discount_missing else
                           format_currency_amount(item.get("line_total", "0"), result.get("currency")))
             display_rows.append({
                 "No.": index,
@@ -279,7 +284,7 @@ if raw:
                              f"{item.get('paid_quantity', item.get('quantity', ''))} {item.get('unit') or ''}".strip()),
                 "Free Qty": f"{item.get('free_quantity', '0')} {item.get('unit') or ''}".strip(),
                 "Unit Price": unit_price,
-                "Discount": f"{item.get('discount_percent', '0')}%",
+                "Discount": "Not confirmed" if discount_missing else f"{item.get('discount_percent', '0')}%",
                 "Line Total": line_total,
             })
         st.dataframe(display_rows, hide_index=True, use_container_width=True)
@@ -323,12 +328,13 @@ if raw:
                     st.error(f"Could not apply corrections: {exc}")
 
         pdf_col, excel_col = st.columns(2)
-        if calculation_blockers:
-            st.error("Enter a valid quantity and unit price before creating a PDF or Excel file; the total cannot be calculated yet.")
+        financial_blockers = calculation_blockers + discount_blockers
+        if financial_blockers:
+            st.error("Confirm valid quantities, unit prices, and discounts before creating a PDF or Excel file.")
         make_pdf = pdf_col.button("Create PDF", type="primary", use_container_width=True,
-                                  disabled=bool(calculation_blockers))
+                                  disabled=bool(financial_blockers))
         make_excel = excel_col.button("Create Excel", use_container_width=True,
-                                     disabled=bool(calculation_blockers))
+                                     disabled=bool(financial_blockers))
         if make_pdf or make_excel:
             logo_path = ROOT / "assets" / "company_logo.png"
             seal_path = ROOT / "private" / "company_seal.png"
