@@ -6,6 +6,7 @@ import re
 import textwrap
 import struct
 import zlib
+from .trade_documents import current_issue_date
 
 
 PAGE_W, PAGE_H = 612, 792
@@ -549,14 +550,15 @@ def render_trade_document(data, bank_details=None, *, logo_path=None, seal_path=
     terms_top = max(seller_bottom, buyer_bottom) + 8
     terms_values = [data.get("incoterms") or "TO BE CONFIRMED",
                     data.get("payment_terms") or "TO BE CONFIRMED",
-                    data.get("ship_to") or data.get("country_of_origin") or "TO BE CONFIRMED"]
+                    data.get("ship_to") or "N/A"]
     terms_lines = [_wrap(str(value), 25) for value in terms_values]
     terms_height = max(38, 18 + max(map(len, terms_lines)) * 7.0)
     first_table_top = terms_top + terms_height + 12
     chunks = _paginate_rows(rows, first_table_top, review_height, is_packing_list)
     canvases = []
-    number = str(data.get("document_number") or "DRAFT - TBD")
-    issue_date = str(data.get("issue_date") or "TO CONFIRM")
+    number = str(data.get("document_number") or "TBD")
+    issue_date = current_issue_date()
+    number_label = {"PI": "INVOICE #", "CI": "INVOICE #", "PO": "PO #", "PL": "PACKING LIST #"}.get(doc_type, "DOCUMENT #")
     total_quantity = _total_quantity_summary(items)
 
     for page_index, page_rows in enumerate(chunks):
@@ -568,8 +570,8 @@ def render_trade_document(data, bank_details=None, *, logo_path=None, seal_path=
         has_logo = canvas.image(logo_path, 30, 4, 235, 84, crop_box=(290, 145, 1190, 620))
         canvas.text(376, 40, title, 14.2, True, NAVY)
         canvas.rect(376, 52, 202, 23, MID_BLUE)
-        canvas.text(388, 68, f"DRAFT  |  NO. {number}"[:38], 6.7, True, (0.90, 0.95, 0.99))
-        canvas.text(35, 109, "DOCUMENT NUMBER", 5.8, True, MUTED)
+        canvas.text(388, 68, f"{number_label} {number}"[:38], 6.7, True, (0.90, 0.95, 0.99))
+        canvas.text(35, 109, number_label.replace("#", "NUMBER").strip(), 5.8, True, MUTED)
         canvas.text(35, 123, number[:25], 7.2, True, INK)
         canvas.text(220, 109, "ISSUE DATE", 5.8, True, MUTED)
         canvas.text(220, 123, issue_date, 7.2, True, INK)
@@ -580,7 +582,7 @@ def render_trade_document(data, bank_details=None, *, logo_path=None, seal_path=
             _party_panel(canvas, 35, "SELLER / SUPPLIER", data.get("seller") or {})
             _party_panel(canvas, 315, "BUYER / CUSTOMER", data.get("buyer") or {})
             canvas.rect(35, terms_top, 542, terms_height, PALE)
-            columns = [(47, "DELIVERY TERMS"), (225, "PAYMENT TERMS"), (410, "SHIP TO / ORIGIN")]
+            columns = [(47, "DELIVERY TERMS"), (225, "PAYMENT TERMS"), (410, "SHIP TO")]
             for column_index, (x, label) in enumerate(columns):
                 canvas.text(x, terms_top + 12, label, 5.6, True, MUTED)
                 for line_index, line in enumerate(terms_lines[column_index]):

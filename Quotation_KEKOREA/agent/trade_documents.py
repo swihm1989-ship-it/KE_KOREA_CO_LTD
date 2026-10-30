@@ -1,12 +1,22 @@
 """Deterministic calculations and validation for English trade document drafts."""
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from datetime import datetime
 import re
+from zoneinfo import ZoneInfo
 
 
 DOC_TYPES = {"PO", "PI", "CI", "PL"}
 FAMILIES = {"cosmetics", "polysilicon", "wafer", "solar_cell", "solar_module", "other"}
 MONEY_QUANTUM = Decimal("0.01")
 PRICE_QUANTUM = Decimal("0.000001")
+
+
+def current_issue_date():
+    """Current English issue date in the company's Asia/Seoul time zone."""
+    today = datetime.now(ZoneInfo("Asia/Seoul")).date()
+    month = ("January", "February", "March", "April", "May", "June",
+             "July", "August", "September", "October", "November", "December")[today.month - 1]
+    return f"{today.day} {month} {today.year}"
 
 
 def normalize_quantity_unit(value):
@@ -71,6 +81,8 @@ def apply_promotion(paid_quantity, promotion):
 
 def validate_and_calculate(data):
     """Validate extracted user data, calculate sums, and identify issue blockers."""
+    # Issue date is a system field: the issue date is always the current Seoul date.
+    data = {**data, "issue_date": current_issue_date()}
     issues, blocking = [], []
 
     def block(message):
@@ -118,8 +130,6 @@ def validate_and_calculate(data):
 
     if not data.get("document_number"):
         block("Document number is required or must be marked DRAFT")
-    if not data.get("issue_date"):
-        block("Issue date is required")
     if not data.get("incoterms"):
         block("Incoterms and named place")
     if doc_type in {"PO", "PI"} and not data.get("payment_terms"):

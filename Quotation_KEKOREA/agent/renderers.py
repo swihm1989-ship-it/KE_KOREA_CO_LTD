@@ -6,6 +6,7 @@ import re
 import zipfile
 from xml.sax.saxutils import escape as xml_escape
 from decimal import Decimal, ROUND_HALF_UP
+from .trade_documents import current_issue_date
 
 
 def _english(value):
@@ -242,6 +243,8 @@ def _xlsx_bytes(doc, bank_details=None):
 
 def render_files(doc, output_dir, *, bank_details=None, logo_path=None, seal_path=None):
     """Write draft outputs (even incomplete ones carry a DRAFT status and open-items list)."""
+    # Keep the date and destination defaults consistent across PDF, Excel, and HTML.
+    doc = {**doc, "issue_date": current_issue_date(), "ship_to": doc.get("ship_to") or "N/A"}
     dtype = re.sub(r"[^A-Za-z0-9_-]", "_", str(doc.get("document_type") or "DRAFT"))
     stamp = re.sub(r"[^0-9-]", "", str(doc.get("issue_date") or "")) or date.today().isoformat()
     directory = Path(output_dir)

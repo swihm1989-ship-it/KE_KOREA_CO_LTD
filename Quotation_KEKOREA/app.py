@@ -15,7 +15,7 @@ sys.path.insert(0, str(REPOSITORY_ROOT))
 from Quotation_KEKOREA.agent.extractor import extract_trade_data, load_env, verify_item_quotes
 from Quotation_KEKOREA.agent.pricing import apply_verified_eclado_prices, load_local_seed, load_supabase_catalog
 from Quotation_KEKOREA.agent.renderers import format_currency_amount, render_files
-from Quotation_KEKOREA.agent.trade_documents import apply_promotion, normalize_quantity_unit, validate_and_calculate
+from Quotation_KEKOREA.agent.trade_documents import apply_promotion, current_issue_date, normalize_quantity_unit, validate_and_calculate
 
 
 def _synchronize_extracted_quantities(draft):
@@ -61,6 +61,20 @@ def _explicit_remark(prompt):
         r"\b(?:REMARKS?|NOTES?|SPECIAL\s+INSTRUCTIONS?|ADDITIONAL\s+TERMS?)\s*[:=]\s*(.*?)(?=\s+(?:BUYER|PURCHASER|CUSTOMER|SELLER|SUPPLIER|VENDOR|PRODUCT|ITEM|GOODS|MATERIAL|DESCRIPTION|QUANTITY|QTY|Q['’]?TY|ORDER\s+QTY|ORDERED\s+QUANTITY|VOLUME|VOL\.?|UNIT\s+PRICE|PRICE|RATE|INCOTERMS?|SHIPPING\s+TERMS?|TERMS\s+OF\s+SHIPPING|SHIP(?:PING)?\s+CONDITIONS?|DELIVERY(?:\s+TERMS?|\s+CONDITIONS?)?|TERMS\s+OF\s+DELIVERY|PAYMENT(?:\s+TERMS?|\s+CONDITIONS?)?|TERMS\s+OF\s+PAYMENT|CURRENCY|SHIPMENT|SHIP\s+TO|DELIVER\s+TO|CONSIGNEE|BILL\s+TO|CONTACT|ATTN|TEL|PHONE|MOBILE|EMAIL)\s*(?::|=)|$)",
         prompt or "", flags=re.IGNORECASE | re.DOTALL)
     return (match.group(1).strip(" \t\r\n;,") or "N/A") if match else "N/A"
+
+
+def _has_explicit_ship_to(prompt):
+    """Require an explicitly labeled destination before treating text as ship-to."""
+    labels = (
+        r"ship\s*to(?:\s+address)?", r"deliver(?:ed)?\s+to(?:\s+address)?",
+        r"delivery\s+to(?:\s+address)?", r"delivery\s+address", r"destination(?:\s+address)?",
+        r"consignee\s+address", r"shipping\s+address", r"delivery\s+location",
+        r"ship\s+destination", r"납품처", r"배송지", r"도착지", r"인도\s*장소",
+        r"送货地址", r"收货地址", r"交付地址", r"目的地",
+        r"alamat\s+(?:pengiriman|pengantaran|tujuan)", r"tujuan\s+pengiriman",
+    )
+    label_pattern = "(?:" + "|".join(labels) + ")"
+    return bool(re.search(label_pattern, prompt or "", re.IGNORECASE))
 
 
 def _discount_instruction(prompt):
@@ -335,6 +349,13 @@ if extract_clicked:
             # The selected sidebar workflow is authoritative, even if the order image mentions another form.
             draft["document_type"] = expected_type
             draft = verify_item_quotes(draft, prompt, image_context=bool(image_inputs))
+            draft["issue_date"] = current_issue_date()
+            if not image_inputs and not _has_explicit_ship_to(prompt):
+                draft["ship_to"] = None
+            elif re.fullmatch(r"\s*(?:N/?A|NONE|NOT\s+PROVIDED|TO\s+CONFIRM|TBC|TBD|UNKNOWN)\s*[.!]?\s*", str(draft.get("ship_to") or ""), re.IGNORECASE):
+                draft["ship_to"] = None
+            draft["missing_fields"] = [field for field in draft.get("missing_fields", [])
+                                       if not re.search(r"issue\s+date|date\s+of\s+issue", str(field), re.IGNORECASE)]
             auto_remark = draft.get("remarks")
             _keep_delivery_note_in_terms(draft, auto_remark)
             draft["remarks"] = _explicit_remark(prompt)
@@ -484,13 +505,13 @@ if raw:
         delivery_values = (
             ("Delivery terms", result.get("incoterms")),
             ("Payment terms", result.get("payment_terms")),
-            ("Ship to", result.get("ship_to")),
+            ("Ship to", result.get("ship_to") or "N/A"),
             ("Shipment reference", result.get("shipment_reference")),
         )
         for column, (label, value) in zip(delivery_cols, delivery_values):
             with column:
                 st.markdown(f"**{label}**")
-                st.write(value or "To confirm")
+                st.write(value or ("N/A" if label == "Ship to" else "To confirm"))
         if result.get("remarks"):
             st.markdown("**Remarks**")
             st.write(result["remarks"])
