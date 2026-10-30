@@ -315,11 +315,11 @@ The solar PI header displays the supplied company logo in a white brand panel. T
 ## Brand assets and Cloud secrets
 
 - The solar PI displays the supplied logo in a white header area. Navy and blue replace the previous charcoal and gold theme. No body watermark is used.
-- `assets/company_logo.png` is tracked. `private/company_seal.png`, `.env`, generated outputs, and catalog seed data are excluded from Git.
-- Streamlit Cloud uses `KEKOREA_COMPANY_SEAL_BASE64` for the private seal and the six `KEKOREA_USD_*` variables for PI bank details. Generate the seal value in PowerShell from the repository root with:
+- `assets/company_logo.png` is tracked. The source seal `assets/명판직인.png` is used automatically in local runs; `private/company_seal.png`, the seal asset, `.env`, generated outputs, and catalog seed data are excluded from Git.
+- The GitHub repository is public, so keep the company seal out of Git. Streamlit Cloud uses `KEKOREA_COMPANY_SEAL_BASE64` for the seal and the six `KEKOREA_USD_*` variables for PI bank details. Generate the seal value in PowerShell from the repository root with:
 
 ```powershell
-[Convert]::ToBase64String([IO.File]::ReadAllBytes('.\Quotation_KEKOREA\private\company_seal.png')) | Set-Clipboard
+[Convert]::ToBase64String([IO.File]::ReadAllBytes('.\Quotation_KEKOREA\assets\명판직인.png')) | Set-Clipboard
 ```
 
 Copy the resulting value into Streamlit Cloud Secrets. Bank details appear on PI only.

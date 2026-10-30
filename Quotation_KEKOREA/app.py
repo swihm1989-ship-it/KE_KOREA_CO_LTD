@@ -408,7 +408,11 @@ if raw:
                 seal_bytes = base64.b64decode(encoded_seal, validate=True)
             except (ValueError, TypeError):
                 seal_bytes = None
-        local_seal_path = ROOT / "private" / "company_seal.png"
+        # Prefer the company-provided seal asset in every local document flow;
+        # keep the private copy as a backward-compatible fallback.
+        seal_asset_path = ROOT / "assets" / "\uBA85\uD310\uC9C1\uC778.png"
+        private_seal_path = ROOT / "private" / "company_seal.png"
+        local_seal_path = next((path for path in (seal_asset_path, private_seal_path) if path.is_file()), seal_asset_path)
         missing_seal = seal_bytes is None and not local_seal_path.is_file()
         if expected_type == "PI" and missing_bank_keys:
             issue = "KE Korea USD bank profile is incomplete; missing runtime keys: " + ", ".join(missing_bank_keys)
@@ -417,7 +421,7 @@ if raw:
             result["ready_for_issue"] = False
             result["status"] = "DRAFT"
         if missing_seal:
-            issue = "KE Korea company seal is unavailable; configure KEKOREA_COMPANY_SEAL_BASE64 or provide the private seal image"
+            issue = "KE Korea company seal is unavailable; add KEKOREA_COMPANY_SEAL_BASE64 to Streamlit Cloud Secrets"
             if issue not in result["blocking_issues"]:
                 result["blocking_issues"].append(issue)
             result["ready_for_issue"] = False
@@ -553,7 +557,7 @@ if raw:
         if bank_blockers:
             st.error("PI download is disabled until all six KEKOREA_USD_* bank details are configured in this runtime.")
         if seal_blockers:
-            st.error("Document download is disabled until the company seal is available in this runtime.")
+            st.error("Document download is disabled because this deployment has no local seal asset. Set KEKOREA_COMPANY_SEAL_BASE64 in Streamlit Cloud Secrets from assets/명판직인.png.")
         make_pdf = pdf_col.button("Create PDF", type="primary", use_container_width=True,
                                   disabled=export_blocked)
         make_excel = excel_col.button("Create Excel", use_container_width=True,
