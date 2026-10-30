@@ -1,0 +1,12 @@
+{
+  "publisher": "NASA Exoplanet Archive / Caltech-IPAC",
+  "table": "ps",
+  "query": "select pl_name,hostname,discoverymethod,disc_year,pl_rade from ps where default_flag=1 and (pl_radelim=0 or pl_rade is null) order by pl_name",
+  "download_url": "https://exoplanetarchive.ipac.caltech.edu/TAP/sync?query=select+pl_name%2Chostname%2Cdiscoverymethod%2Cdisc_year%2Cpl_rade+from+ps+where+default_flag%3D1+and+%28pl_radelim%3D0+or+pl_rade+is+null%29+order+by+pl_name&format=csv",
+  "retrieved_at_utc": "2026-10-27T07:10:48.603803+00:00",
+  "rows": 6446,
+  "sha256": "2c98a05cc067b3654098fdb9dfc2e941bea13cd9c86e46b6385d2bfafc9de129",
+  "documentation": "https://exoplanetarchive.ipac.caltech.edu/docs/API_PS_columns.html",
+  "radius_unit": "Earth radii",
+  "scope": "Default planetary solutions; radius upper/lower limits excluded, missing radii retained."
+}

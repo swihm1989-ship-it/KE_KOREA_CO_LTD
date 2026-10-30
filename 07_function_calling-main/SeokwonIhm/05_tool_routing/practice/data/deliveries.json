@@ -1,0 +1,30 @@
+[
+  {
+    "tracking_number": "D100",
+    "status": "in_transit",
+    "status_note": "지역 배송 거점에서 이동 중입니다.",
+    "pickup_point_id": null,
+    "updated_at": "2026-10-29T09:00:00+09:00"
+  },
+  {
+    "tracking_number": "D200",
+    "status": "ready_for_pickup",
+    "status_note": "수령소에 도착해 방문 수령할 수 있습니다.",
+    "pickup_point_id": "S001",
+    "updated_at": "2026-10-29T09:00:00+09:00"
+  },
+  {
+    "tracking_number": "D300",
+    "status": "delivered",
+    "status_note": "수령인에게 전달을 완료했습니다.",
+    "pickup_point_id": null,
+    "updated_at": "2026-10-29T09:00:00+09:00"
+  },
+  {
+    "tracking_number": "D400",
+    "status": "ready_for_pickup",
+    "status_note": "수령소에 도착해 방문 수령할 수 있습니다.",
+    "pickup_point_id": "S002",
+    "updated_at": "2026-10-29T09:00:00+09:00"
+  }
+]

@@ -1,0 +1,14 @@
+{
+  "normal": {
+    "delays": {"central": 0.3, "east": 0.1, "west": 0.2},
+    "failures": []
+  },
+  "east_error": {
+    "delays": {"central": 0.3, "east": 0.1, "west": 0.2},
+    "failures": ["east"]
+  },
+  "all_error": {
+    "delays": {"central": 0.3, "east": 0.1, "west": 0.2},
+    "failures": ["central", "east", "west"]
+  }
+}

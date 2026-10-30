@@ -1,0 +1,16 @@
+.venv/
+.env
+.env.*
+!.env.example
+
+outputs/
+results/
+incident-data/
+
+__pycache__/
+*.pyc
+.uv-cache/
+.pytest_cache/
+pytest-cache-files-*/
+.vscode/
+.DS_Store

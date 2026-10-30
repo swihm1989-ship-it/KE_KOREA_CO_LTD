@@ -1,0 +1,7 @@
+product_id,name,category,price_won,stock,description,reference_url
+P001,USB 키보드 A,키보드,22000,12,수업용 가상 품목. USB 입력장치 검토 예시.,https://learn.microsoft.com/en-us/windows-hardware/drivers/usbcon/
+P002,블루투스 키보드 B,키보드,28000,0,수업용 가상 품목. 블루투스 입력장치 검토 예시.,https://learn.microsoft.com/en-us/windows-hardware/drivers/bluetooth/
+P003,USB 마우스 A,마우스,15000,20,수업용 가상 품목. USB 입력장치 검토 예시.,https://learn.microsoft.com/en-us/windows-hardware/drivers/usbcon/
+P004,블루투스 마우스 B,마우스,24000,4,수업용 가상 품목. 블루투스 입력장치 검토 예시.,https://learn.microsoft.com/en-us/windows-hardware/drivers/bluetooth/
+P005,USB 허브 A,허브,29000,8,수업용 가상 품목. USB 연결장치 검토 예시.,https://learn.microsoft.com/en-us/windows-hardware/drivers/usbcon/
+P006,USB 허브 B,허브,45000,3,수업용 가상 품목. USB 연결장치 검토 예시.,https://learn.microsoft.com/en-us/windows-hardware/drivers/usbcon/

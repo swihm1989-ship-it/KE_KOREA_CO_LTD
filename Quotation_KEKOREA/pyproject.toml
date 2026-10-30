@@ -1,0 +1,9 @@
+[project]
+name = "quotation-kekorea"
+version = "0.1.0"
+description = "English-first trade document draft generator for KE KOREA"
+requires-python = ">=3.11"
+dependencies = ["streamlit>=1.40,<2"]
+
+[tool.unittest]
+test-dir = "tests"

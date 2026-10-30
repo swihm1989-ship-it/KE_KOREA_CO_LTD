@@ -1,0 +1,618 @@
+[
+  {
+    "request": "내 택배 어디까지 왔어?",
+    "follow_up": [
+      "D100"
+    ],
+    "expected": [
+      "lookup_delivery"
+    ],
+    "actual": [
+      "lookup_delivery"
+    ],
+    "path_passed": true,
+    "events": [
+      "예상 경로: 번호 질문 → 배송 도구 0회",
+      "안내: 운송장번호를 알려주시면 배송 상태를 확인해 드릴게요.",
+      "예상 경로: lookup_delivery → 보관소 도착이면 lookup_pickup_point",
+      "모델의 도구 요청: [{\"name\": \"lookup_delivery\", \"args\": {\"tracking_number\": \"D100\"}, \"id\": \"call_ANiVtH8Xe2Hd9BGM7KXoytVI\", \"type\": \"tool_call\"}]",
+      "Python 실행 결과: {\"name\": \"lookup_delivery\", \"args\": {\"tracking_number\": \"D100\"}, \"executed\": true, \"status\": \"success\", \"payload\": {\"found\": true, \"tracking_number\": \"D100\", \"status\": \"in_transit\", \"status_note\": \"지역 배송 거점에서 이동 중입니다.\", \"pickup_point_id\": null, \"updated_at\": \"2026-10-29T09:00:00+09:00\"}}",
+      "최종 안내: D100 택배는 지역 배송 거점에서 이동 중입니다. 확인 기준 시각은 2026-10-29T09:00:00+09:00입니다."
+    ],
+    "answer": "D100 택배는 지역 배송 거점에서 이동 중입니다. 확인 기준 시각은 2026-10-29T09:00:00+09:00입니다.",
+    "trace": [
+      {
+        "name": "lookup_delivery",
+        "args": {
+          "tracking_number": "D100"
+        },
+        "executed": true,
+        "status": "success",
+        "payload": {
+          "found": true,
+          "tracking_number": "D100",
+          "status": "in_transit",
+          "status_note": "지역 배송 거점에서 이동 중입니다.",
+          "pickup_point_id": null,
+          "updated_at": "2026-10-29T09:00:00+09:00"
+        }
+      }
+    ],
+    "state": {
+      "tracking_number": "D100",
+      "delivery": {
+        "found": true,
+        "tracking_number": "D100",
+        "status": "in_transit",
+        "status_note": "지역 배송 거점에서 이동 중입니다.",
+        "pickup_point_id": null,
+        "updated_at": "2026-10-29T09:00:00+09:00"
+      },
+      "pickup": null,
+      "calls": 1,
+      "attempts": 1,
+      "error": null,
+      "limit_reached": false
+    }
+  },
+  {
+    "request": "D100 배송 상태 알려 줘.",
+    "follow_up": [],
+    "expected": [
+      "lookup_delivery"
+    ],
+    "actual": [
+      "lookup_delivery"
+    ],
+    "path_passed": true,
+    "events": [
+      "예상 경로: lookup_delivery → 보관소 도착이면 lookup_pickup_point",
+      "모델의 도구 요청: [{\"name\": \"lookup_delivery\", \"args\": {\"tracking_number\": \"D100\"}, \"id\": \"call_WEoY7p74Ye3BnkKFZthfNnwR\", \"type\": \"tool_call\"}]",
+      "Python 실행 결과: {\"name\": \"lookup_delivery\", \"args\": {\"tracking_number\": \"D100\"}, \"executed\": true, \"status\": \"success\", \"payload\": {\"found\": true, \"tracking_number\": \"D100\", \"status\": \"in_transit\", \"status_note\": \"지역 배송 거점에서 이동 중입니다.\", \"pickup_point_id\": null, \"updated_at\": \"2026-10-29T09:00:00+09:00\"}}",
+      "최종 안내: 운송장 D100은 지역 배송 거점에서 이동 중입니다. 기준 시각은 2026-10-29T09:00:00+09:00입니다."
+    ],
+    "answer": "운송장 D100은 지역 배송 거점에서 이동 중입니다. 기준 시각은 2026-10-29T09:00:00+09:00입니다.",
+    "trace": [
+      {
+        "name": "lookup_delivery",
+        "args": {
+          "tracking_number": "D100"
+        },
+        "executed": true,
+        "status": "success",
+        "payload": {
+          "found": true,
+          "tracking_number": "D100",
+          "status": "in_transit",
+          "status_note": "지역 배송 거점에서 이동 중입니다.",
+          "pickup_point_id": null,
+          "updated_at": "2026-10-29T09:00:00+09:00"
+        }
+      }
+    ],
+    "state": {
+      "tracking_number": "D100",
+      "delivery": {
+        "found": true,
+        "tracking_number": "D100",
+        "status": "in_transit",
+        "status_note": "지역 배송 거점에서 이동 중입니다.",
+        "pickup_point_id": null,
+        "updated_at": "2026-10-29T09:00:00+09:00"
+      },
+      "pickup": null,
+      "calls": 1,
+      "attempts": 1,
+      "error": null,
+      "limit_reached": false
+    }
+  },
+  {
+    "request": "D200 어디서 받아?",
+    "follow_up": [],
+    "expected": [
+      "lookup_delivery",
+      "lookup_pickup_point"
+    ],
+    "actual": [
+      "lookup_delivery",
+      "lookup_pickup_point"
+    ],
+    "path_passed": true,
+    "events": [
+      "예상 경로: lookup_delivery → 보관소 도착이면 lookup_pickup_point",
+      "모델의 도구 요청: [{\"name\": \"lookup_delivery\", \"args\": {\"tracking_number\": \"D200\"}, \"id\": \"call_4fK3RciWNrH4iOzWtsRnw2Mg\", \"type\": \"tool_call\"}]",
+      "Python 실행 결과: {\"name\": \"lookup_delivery\", \"args\": {\"tracking_number\": \"D200\"}, \"executed\": true, \"status\": \"success\", \"payload\": {\"found\": true, \"tracking_number\": \"D200\", \"status\": \"ready_for_pickup\", \"status_note\": \"수령소에 도착해 방문 수령할 수 있습니다.\", \"pickup_point_id\": \"S001\", \"updated_at\": \"2026-10-29T09:00:00+09:00\"}}",
+      "모델의 도구 요청: [{\"name\": \"lookup_pickup_point\", \"args\": {\"pickup_point_id\": \"S001\"}, \"id\": \"call_d98GAoLfzUcZIk81Hg3Uxk78\", \"type\": \"tool_call\"}]",
+      "Python 실행 결과: {\"name\": \"lookup_pickup_point\", \"args\": {\"pickup_point_id\": \"S001\"}, \"executed\": true, \"status\": \"success\", \"payload\": {\"found\": true, \"pickup_point_id\": \"S001\", \"name\": \"한빛 수령소\", \"address\": \"가상시 한빛구 예시로 10, 1층\", \"opening_hours\": \"평일 09:00~18:00\"}}",
+      "최종 안내: D200은 **보관소에 도착해 방문 수령할 수 있어요.** 기준 시각은 **2026-10-29 09:00 (+09:00)**입니다.\n\n- 수령 장소: 한빛 수령소\n- 주소: 가상시 한빛구 예시로 10, 1층\n- 운영 시간: 평일 09:00~18:00"
+    ],
+    "answer": "D200은 **보관소에 도착해 방문 수령할 수 있어요.** 기준 시각은 **2026-10-29 09:00 (+09:00)**입니다.\n\n- 수령 장소: 한빛 수령소\n- 주소: 가상시 한빛구 예시로 10, 1층\n- 운영 시간: 평일 09:00~18:00",
+    "trace": [
+      {
+        "name": "lookup_delivery",
+        "args": {
+          "tracking_number": "D200"
+        },
+        "executed": true,
+        "status": "success",
+        "payload": {
+          "found": true,
+          "tracking_number": "D200",
+          "status": "ready_for_pickup",
+          "status_note": "수령소에 도착해 방문 수령할 수 있습니다.",
+          "pickup_point_id": "S001",
+          "updated_at": "2026-10-29T09:00:00+09:00"
+        }
+      },
+      {
+        "name": "lookup_pickup_point",
+        "args": {
+          "pickup_point_id": "S001"
+        },
+        "executed": true,
+        "status": "success",
+        "payload": {
+          "found": true,
+          "pickup_point_id": "S001",
+          "name": "한빛 수령소",
+          "address": "가상시 한빛구 예시로 10, 1층",
+          "opening_hours": "평일 09:00~18:00"
+        }
+      }
+    ],
+    "state": {
+      "tracking_number": "D200",
+      "delivery": {
+        "found": true,
+        "tracking_number": "D200",
+        "status": "ready_for_pickup",
+        "status_note": "수령소에 도착해 방문 수령할 수 있습니다.",
+        "pickup_point_id": "S001",
+        "updated_at": "2026-10-29T09:00:00+09:00"
+      },
+      "pickup": {
+        "found": true,
+        "pickup_point_id": "S001",
+        "name": "한빛 수령소",
+        "address": "가상시 한빛구 예시로 10, 1층",
+        "opening_hours": "평일 09:00~18:00"
+      },
+      "calls": 2,
+      "attempts": 2,
+      "error": null,
+      "limit_reached": false
+    }
+  },
+  {
+    "request": "D300 배송 상태 알려 줘.",
+    "follow_up": [],
+    "expected": [
+      "lookup_delivery"
+    ],
+    "actual": [
+      "lookup_delivery"
+    ],
+    "path_passed": true,
+    "events": [
+      "예상 경로: lookup_delivery → 보관소 도착이면 lookup_pickup_point",
+      "모델의 도구 요청: [{\"name\": \"lookup_delivery\", \"args\": {\"tracking_number\": \"D300\"}, \"id\": \"call_CQpzV1iYbzPn1tBW2eBc01hY\", \"type\": \"tool_call\"}]",
+      "Python 실행 결과: {\"name\": \"lookup_delivery\", \"args\": {\"tracking_number\": \"D300\"}, \"executed\": true, \"status\": \"success\", \"payload\": {\"found\": true, \"tracking_number\": \"D300\", \"status\": \"delivered\", \"status_note\": \"수령인에게 전달을 완료했습니다.\", \"pickup_point_id\": null, \"updated_at\": \"2026-10-29T09:00:00+09:00\"}}",
+      "최종 안내: D300은 수령인에게 전달 완료되었습니다. 기준 시각: 2026-10-29T09:00:00+09:00."
+    ],
+    "answer": "D300은 수령인에게 전달 완료되었습니다. 기준 시각: 2026-10-29T09:00:00+09:00.",
+    "trace": [
+      {
+        "name": "lookup_delivery",
+        "args": {
+          "tracking_number": "D300"
+        },
+        "executed": true,
+        "status": "success",
+        "payload": {
+          "found": true,
+          "tracking_number": "D300",
+          "status": "delivered",
+          "status_note": "수령인에게 전달을 완료했습니다.",
+          "pickup_point_id": null,
+          "updated_at": "2026-10-29T09:00:00+09:00"
+        }
+      }
+    ],
+    "state": {
+      "tracking_number": "D300",
+      "delivery": {
+        "found": true,
+        "tracking_number": "D300",
+        "status": "delivered",
+        "status_note": "수령인에게 전달을 완료했습니다.",
+        "pickup_point_id": null,
+        "updated_at": "2026-10-29T09:00:00+09:00"
+      },
+      "pickup": null,
+      "calls": 1,
+      "attempts": 1,
+      "error": null,
+      "limit_reached": false
+    }
+  },
+  {
+    "request": "D999 조회해 줘.",
+    "follow_up": [],
+    "expected": [
+      "lookup_delivery"
+    ],
+    "actual": [
+      "lookup_delivery"
+    ],
+    "path_passed": true,
+    "events": [
+      "예상 경로: lookup_delivery → 보관소 도착이면 lookup_pickup_point",
+      "모델의 도구 요청: [{\"name\": \"lookup_delivery\", \"args\": {\"tracking_number\": \"D999\"}, \"id\": \"call_SHXazYtGt6sUJf51BmL36Zpy\", \"type\": \"tool_call\"}]",
+      "Python 실행 결과: {\"name\": \"lookup_delivery\", \"args\": {\"tracking_number\": \"D999\"}, \"executed\": true, \"status\": \"success\", \"payload\": {\"found\": false, \"tracking_number\": \"D999\", \"status\": null, \"status_note\": null, \"pickup_point_id\": null, \"updated_at\": null}}",
+      "최종 안내: D999 운송장 번호로는 조회 결과가 없습니다. 운송장 번호가 맞는지 확인해 주세요."
+    ],
+    "answer": "D999 운송장 번호로는 조회 결과가 없습니다. 운송장 번호가 맞는지 확인해 주세요.",
+    "trace": [
+      {
+        "name": "lookup_delivery",
+        "args": {
+          "tracking_number": "D999"
+        },
+        "executed": true,
+        "status": "success",
+        "payload": {
+          "found": false,
+          "tracking_number": "D999",
+          "status": null,
+          "status_note": null,
+          "pickup_point_id": null,
+          "updated_at": null
+        }
+      }
+    ],
+    "state": {
+      "tracking_number": "D999",
+      "delivery": {
+        "found": false,
+        "tracking_number": "D999",
+        "status": null,
+        "status_note": null,
+        "pickup_point_id": null,
+        "updated_at": null
+      },
+      "pickup": null,
+      "calls": 1,
+      "attempts": 1,
+      "error": null,
+      "limit_reached": false
+    }
+  },
+  {
+    "request": "배송 중이랑 배송 완료는 무슨 차이야?",
+    "follow_up": [],
+    "expected": [],
+    "actual": [],
+    "path_passed": true,
+    "events": [
+      "예상 경로: 일반 설명 → 배송 도구 0회",
+      "최종 안내: ‘배송 중’은 택배가 배송 과정에 있어 아직 전달되지 않은 상태이고, ‘배송 완료’는 수령인이나 지정된 장소에 전달이 끝난 상태예요."
+    ],
+    "answer": "‘배송 중’은 택배가 배송 과정에 있어 아직 전달되지 않은 상태이고, ‘배송 완료’는 수령인이나 지정된 장소에 전달이 끝난 상태예요.",
+    "trace": [],
+    "state": {
+      "tracking_number": null,
+      "delivery": null,
+      "pickup": null,
+      "calls": 0,
+      "attempts": 0,
+      "error": null,
+      "limit_reached": false
+    }
+  },
+  {
+    "request": "D200 배송지를 바꿔 줘.",
+    "follow_up": [],
+    "expected": [
+      "lookup_delivery",
+      "lookup_pickup_point"
+    ],
+    "actual": [
+      "lookup_delivery",
+      "lookup_pickup_point"
+    ],
+    "path_passed": true,
+    "events": [
+      "예상 경로: lookup_delivery → 보관소 도착이면 lookup_pickup_point → 배송지 변경 미지원 안내",
+      "모델의 도구 요청: [{\"name\": \"lookup_delivery\", \"args\": {\"tracking_number\": \"D200\"}, \"id\": \"call_AdAc9P2jwStvJcJhgPRQdZaH\", \"type\": \"tool_call\"}]",
+      "Python 실행 결과: {\"name\": \"lookup_delivery\", \"args\": {\"tracking_number\": \"D200\"}, \"executed\": true, \"status\": \"success\", \"payload\": {\"found\": true, \"tracking_number\": \"D200\", \"status\": \"ready_for_pickup\", \"status_note\": \"수령소에 도착해 방문 수령할 수 있습니다.\", \"pickup_point_id\": \"S001\", \"updated_at\": \"2026-10-29T09:00:00+09:00\"}}",
+      "모델의 도구 요청: [{\"name\": \"lookup_pickup_point\", \"args\": {\"pickup_point_id\": \"S001\"}, \"id\": \"call_nyHT7b8PfIEzOLCyhCBlxO9e\", \"type\": \"tool_call\"}]",
+      "Python 실행 결과: {\"name\": \"lookup_pickup_point\", \"args\": {\"pickup_point_id\": \"S001\"}, \"executed\": true, \"status\": \"success\", \"payload\": {\"found\": true, \"pickup_point_id\": \"S001\", \"name\": \"한빛 수령소\", \"address\": \"가상시 한빛구 예시로 10, 1층\", \"opening_hours\": \"평일 09:00~18:00\"}}",
+      "최종 안내: D200은 **보관소에 도착해 방문 수령할 수 있습니다.** 배송 상태 기준 시각은 **2026-10-29 09:00 (+09:00)**입니다.\n\n수령 장소는 **한빛 수령소**(가상시 한빛구 예시로 10, 1층)이며, 운영 시간은 **평일 09:00~18:00**입니다.\n\n배송지 변경은 지원하지 않습니다. 배송 조회와 수령 장소 안내만 도와드릴 수 있습니다."
+    ],
+    "answer": "D200은 **보관소에 도착해 방문 수령할 수 있습니다.** 배송 상태 기준 시각은 **2026-10-29 09:00 (+09:00)**입니다.\n\n수령 장소는 **한빛 수령소**(가상시 한빛구 예시로 10, 1층)이며, 운영 시간은 **평일 09:00~18:00**입니다.\n\n배송지 변경은 지원하지 않습니다. 배송 조회와 수령 장소 안내만 도와드릴 수 있습니다.",
+    "trace": [
+      {
+        "name": "lookup_delivery",
+        "args": {
+          "tracking_number": "D200"
+        },
+        "executed": true,
+        "status": "success",
+        "payload": {
+          "found": true,
+          "tracking_number": "D200",
+          "status": "ready_for_pickup",
+          "status_note": "수령소에 도착해 방문 수령할 수 있습니다.",
+          "pickup_point_id": "S001",
+          "updated_at": "2026-10-29T09:00:00+09:00"
+        }
+      },
+      {
+        "name": "lookup_pickup_point",
+        "args": {
+          "pickup_point_id": "S001"
+        },
+        "executed": true,
+        "status": "success",
+        "payload": {
+          "found": true,
+          "pickup_point_id": "S001",
+          "name": "한빛 수령소",
+          "address": "가상시 한빛구 예시로 10, 1층",
+          "opening_hours": "평일 09:00~18:00"
+        }
+      }
+    ],
+    "state": {
+      "tracking_number": "D200",
+      "delivery": {
+        "found": true,
+        "tracking_number": "D200",
+        "status": "ready_for_pickup",
+        "status_note": "수령소에 도착해 방문 수령할 수 있습니다.",
+        "pickup_point_id": "S001",
+        "updated_at": "2026-10-29T09:00:00+09:00"
+      },
+      "pickup": {
+        "found": true,
+        "pickup_point_id": "S001",
+        "name": "한빛 수령소",
+        "address": "가상시 한빛구 예시로 10, 1층",
+        "opening_hours": "평일 09:00~18:00"
+      },
+      "calls": 2,
+      "attempts": 2,
+      "error": null,
+      "limit_reached": false
+    }
+  },
+  {
+    "request": "D400 어디서 받아?",
+    "follow_up": [],
+    "expected": [
+      "lookup_delivery",
+      "lookup_pickup_point"
+    ],
+    "actual": [
+      "lookup_delivery",
+      "lookup_pickup_point"
+    ],
+    "path_passed": true,
+    "events": [
+      "예상 경로: lookup_delivery → 보관소 도착이면 lookup_pickup_point",
+      "모델의 도구 요청: [{\"name\": \"lookup_delivery\", \"args\": {\"tracking_number\": \"D400\"}, \"id\": \"call_e87oEgJuVYFElECiV7i9wVkT\", \"type\": \"tool_call\"}]",
+      "Python 실행 결과: {\"name\": \"lookup_delivery\", \"args\": {\"tracking_number\": \"D400\"}, \"executed\": true, \"status\": \"success\", \"payload\": {\"found\": true, \"tracking_number\": \"D400\", \"status\": \"ready_for_pickup\", \"status_note\": \"수령소에 도착해 방문 수령할 수 있습니다.\", \"pickup_point_id\": \"S002\", \"updated_at\": \"2026-10-29T09:00:00+09:00\"}}",
+      "모델의 도구 요청: [{\"name\": \"lookup_pickup_point\", \"args\": {\"pickup_point_id\": \"S002\"}, \"id\": \"call_gH5PZm1U59wd9xc615uDx8tP\", \"type\": \"tool_call\"}]",
+      "Python 실행 결과: {\"name\": \"lookup_pickup_point\", \"args\": {\"pickup_point_id\": \"S002\"}, \"executed\": true, \"status\": \"success\", \"payload\": {\"found\": true, \"pickup_point_id\": \"S002\", \"name\": \"새봄 수령소\", \"address\": \"가상시 새봄구 실습로 25, 2층\", \"opening_hours\": \"매일 10:00~20:00\"}}",
+      "최종 안내: D400은 수령소에 도착해 방문 수령하실 수 있습니다. 새봄 수령소(가상시 새봄구 실습로 25, 2층)에서 받으시면 됩니다. 운영시간은 매일 10:00~20:00이며, 배송 상태 기준 시각은 2026-10-29T09:00:00+09:00입니다."
+    ],
+    "answer": "D400은 수령소에 도착해 방문 수령하실 수 있습니다. 새봄 수령소(가상시 새봄구 실습로 25, 2층)에서 받으시면 됩니다. 운영시간은 매일 10:00~20:00이며, 배송 상태 기준 시각은 2026-10-29T09:00:00+09:00입니다.",
+    "trace": [
+      {
+        "name": "lookup_delivery",
+        "args": {
+          "tracking_number": "D400"
+        },
+        "executed": true,
+        "status": "success",
+        "payload": {
+          "found": true,
+          "tracking_number": "D400",
+          "status": "ready_for_pickup",
+          "status_note": "수령소에 도착해 방문 수령할 수 있습니다.",
+          "pickup_point_id": "S002",
+          "updated_at": "2026-10-29T09:00:00+09:00"
+        }
+      },
+      {
+        "name": "lookup_pickup_point",
+        "args": {
+          "pickup_point_id": "S002"
+        },
+        "executed": true,
+        "status": "success",
+        "payload": {
+          "found": true,
+          "pickup_point_id": "S002",
+          "name": "새봄 수령소",
+          "address": "가상시 새봄구 실습로 25, 2층",
+          "opening_hours": "매일 10:00~20:00"
+        }
+      }
+    ],
+    "state": {
+      "tracking_number": "D400",
+      "delivery": {
+        "found": true,
+        "tracking_number": "D400",
+        "status": "ready_for_pickup",
+        "status_note": "수령소에 도착해 방문 수령할 수 있습니다.",
+        "pickup_point_id": "S002",
+        "updated_at": "2026-10-29T09:00:00+09:00"
+      },
+      "pickup": {
+        "found": true,
+        "pickup_point_id": "S002",
+        "name": "새봄 수령소",
+        "address": "가상시 새봄구 실습로 25, 2층",
+        "opening_hours": "매일 10:00~20:00"
+      },
+      "calls": 2,
+      "attempts": 2,
+      "error": null,
+      "limit_reached": false
+    }
+  },
+  {
+    "request": "키보드의 기계식과 멤브레인 차이를 설명해 줘.",
+    "follow_up": [],
+    "expected": [],
+    "actual": [],
+    "path_passed": true,
+    "events": [
+      "예상 경로: 일반 설명 → 배송 도구 0회",
+      "최종 안내: 기계식 키보드는 각 키마다 독립된 스위치가 있어, 키감과 소리, 입력 특성이 스위치 종류에 따라 달라집니다. 키를 누르는 느낌이 뚜렷하고 스위치 교체나 수리가 쉬운 편이지만, 대체로 가격이 높고 소음이 클 수 있습니다.\n\n멤브레인 키보드는 키 아래의 고무막과 회로막이 눌리면서 입력을 인식합니다. 보통 조용하고 저렴하며 가볍지만, 기계식보다 키감이 덜 또렷하고 오래 사용하면 키감이 변할 수 있습니다.\n\n간단히 말하면, 다양한 키감과 내구성을 원하면 기계식, 조용하고 부담 없는 가격을 원하면 멤브레인이 잘 맞습니다."
+    ],
+    "answer": "기계식 키보드는 각 키마다 독립된 스위치가 있어, 키감과 소리, 입력 특성이 스위치 종류에 따라 달라집니다. 키를 누르는 느낌이 뚜렷하고 스위치 교체나 수리가 쉬운 편이지만, 대체로 가격이 높고 소음이 클 수 있습니다.\n\n멤브레인 키보드는 키 아래의 고무막과 회로막이 눌리면서 입력을 인식합니다. 보통 조용하고 저렴하며 가볍지만, 기계식보다 키감이 덜 또렷하고 오래 사용하면 키감이 변할 수 있습니다.\n\n간단히 말하면, 다양한 키감과 내구성을 원하면 기계식, 조용하고 부담 없는 가격을 원하면 멤브레인이 잘 맞습니다.",
+    "trace": [],
+    "state": {
+      "tracking_number": null,
+      "delivery": null,
+      "pickup": null,
+      "calls": 0,
+      "attempts": 0,
+      "error": null,
+      "limit_reached": false
+    }
+  },
+  {
+    "request": "D200 어디서 받아?",
+    "follow_up": [],
+    "expected": [
+      "lookup_delivery",
+      "lookup_pickup_point"
+    ],
+    "actual": [
+      "lookup_delivery",
+      "lookup_pickup_point"
+    ],
+    "path_passed": true,
+    "events": [
+      "예상 경로: lookup_delivery → 보관소 도착이면 lookup_pickup_point",
+      "모델의 도구 요청: [{\"name\": \"lookup_delivery\", \"args\": {\"tracking_number\": \"D200\"}, \"id\": \"call_UCoWdw2s3pD06BIbBNj87kbH\", \"type\": \"tool_call\"}]",
+      "Python 실행 결과: {\"name\": \"lookup_delivery\", \"args\": {\"tracking_number\": \"D200\"}, \"executed\": true, \"status\": \"success\", \"payload\": {\"found\": true, \"tracking_number\": \"D200\", \"status\": \"ready_for_pickup\", \"status_note\": \"수령소에 도착해 방문 수령할 수 있습니다.\", \"pickup_point_id\": \"S001\", \"updated_at\": \"2026-10-29T09:00:00+09:00\"}}",
+      "모델의 도구 요청: [{\"name\": \"lookup_pickup_point\", \"args\": {\"pickup_point_id\": \"S001\"}, \"id\": \"call_JIvQQPB7agbu5TT1jF2D3t3W\", \"type\": \"tool_call\"}]",
+      "Python 실행 결과: {\"name\": \"lookup_pickup_point\", \"args\": {\"pickup_point_id\": \"S001\"}, \"executed\": true, \"status\": \"success\", \"payload\": {\"found\": true, \"pickup_point_id\": \"S001\", \"name\": \"한빛 수령소\", \"address\": \"가상시 한빛구 예시로 10, 1층\", \"opening_hours\": \"평일 09:00~18:00\"}}",
+      "최종 안내: D200은 수령소에 도착해 방문 수령하실 수 있습니다. **한빛 수령소**(가상시 한빛구 예시로 10, 1층)에서 받으시면 됩니다. 운영시간은 평일 09:00~18:00이며, 배송 상태 기준 시각은 **2026-10-29 09:00 (+09:00)**입니다."
+    ],
+    "answer": "D200은 수령소에 도착해 방문 수령하실 수 있습니다. **한빛 수령소**(가상시 한빛구 예시로 10, 1층)에서 받으시면 됩니다. 운영시간은 평일 09:00~18:00이며, 배송 상태 기준 시각은 **2026-10-29 09:00 (+09:00)**입니다.",
+    "trace": [
+      {
+        "name": "lookup_delivery",
+        "args": {
+          "tracking_number": "D200"
+        },
+        "executed": true,
+        "status": "success",
+        "payload": {
+          "found": true,
+          "tracking_number": "D200",
+          "status": "ready_for_pickup",
+          "status_note": "수령소에 도착해 방문 수령할 수 있습니다.",
+          "pickup_point_id": "S001",
+          "updated_at": "2026-10-29T09:00:00+09:00"
+        }
+      },
+      {
+        "name": "lookup_pickup_point",
+        "args": {
+          "pickup_point_id": "S001"
+        },
+        "executed": true,
+        "status": "success",
+        "payload": {
+          "found": true,
+          "pickup_point_id": "S001",
+          "name": "한빛 수령소",
+          "address": "가상시 한빛구 예시로 10, 1층",
+          "opening_hours": "평일 09:00~18:00"
+        }
+      }
+    ],
+    "state": {
+      "tracking_number": "D200",
+      "delivery": {
+        "found": true,
+        "tracking_number": "D200",
+        "status": "ready_for_pickup",
+        "status_note": "수령소에 도착해 방문 수령할 수 있습니다.",
+        "pickup_point_id": "S001",
+        "updated_at": "2026-10-29T09:00:00+09:00"
+      },
+      "pickup": {
+        "found": true,
+        "pickup_point_id": "S001",
+        "name": "한빛 수령소",
+        "address": "가상시 한빛구 예시로 10, 1층",
+        "opening_hours": "평일 09:00~18:00"
+      },
+      "calls": 2,
+      "attempts": 2,
+      "error": null,
+      "limit_reached": false
+    }
+  },
+  {
+    "request": "그럼 D100은?",
+    "follow_up": [],
+    "expected": [
+      "lookup_delivery"
+    ],
+    "actual": [
+      "lookup_delivery"
+    ],
+    "path_passed": true,
+    "events": [
+      "예상 경로: lookup_delivery → 보관소 도착이면 lookup_pickup_point",
+      "모델의 도구 요청: [{\"name\": \"lookup_delivery\", \"args\": {\"tracking_number\": \"D100\"}, \"id\": \"call_1LW8y0KqUvrmLIHFVYzDsUXR\", \"type\": \"tool_call\"}]",
+      "Python 실행 결과: {\"name\": \"lookup_delivery\", \"args\": {\"tracking_number\": \"D100\"}, \"executed\": true, \"status\": \"success\", \"payload\": {\"found\": true, \"tracking_number\": \"D100\", \"status\": \"in_transit\", \"status_note\": \"지역 배송 거점에서 이동 중입니다.\", \"pickup_point_id\": null, \"updated_at\": \"2026-10-29T09:00:00+09:00\"}}",
+      "최종 안내: D100은 **지역 배송 거점에서 이동 중**입니다. 배송 상태 기준 시각은 **2026-10-29 09:00 (+09:00)**입니다."
+    ],
+    "answer": "D100은 **지역 배송 거점에서 이동 중**입니다. 배송 상태 기준 시각은 **2026-10-29 09:00 (+09:00)**입니다.",
+    "trace": [
+      {
+        "name": "lookup_delivery",
+        "args": {
+          "tracking_number": "D100"
+        },
+        "executed": true,
+        "status": "success",
+        "payload": {
+          "found": true,
+          "tracking_number": "D100",
+          "status": "in_transit",
+          "status_note": "지역 배송 거점에서 이동 중입니다.",
+          "pickup_point_id": null,
+          "updated_at": "2026-10-29T09:00:00+09:00"
+        }
+      }
+    ],
+    "state": {
+      "tracking_number": "D100",
+      "delivery": {
+        "found": true,
+        "tracking_number": "D100",
+        "status": "in_transit",
+        "status_note": "지역 배송 거점에서 이동 중입니다.",
+        "pickup_point_id": null,
+        "updated_at": "2026-10-29T09:00:00+09:00"
+      },
+      "pickup": null,
+      "calls": 1,
+      "attempts": 1,
+      "error": null,
+      "limit_reached": false
+    }
+  }
+]

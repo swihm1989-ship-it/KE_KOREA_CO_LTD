@@ -1,0 +1,49 @@
+[
+  {
+    "name": "seoul_bikes",
+    "ok": true,
+    "url": "https://archive.ics.uci.edu/static/public/560/seoul+bike+sharing+demand.zip",
+    "summary": {
+      "rows": 8760,
+      "columns": [
+        "Date",
+        "Rented Bike Count",
+        "Hour",
+        "Temperature(°C)",
+        "Humidity(%)",
+        "Wind speed (m/s)",
+        "Visibility (10m)",
+        "Dew point temperature(°C)",
+        "Solar Radiation (MJ/m2)",
+        "Rainfall(mm)",
+        "Snowfall (cm)",
+        "Seasons",
+        "Holiday",
+        "Functioning Day"
+      ],
+      "first_date": "01/12/2017",
+      "last_date": "30/11/2018"
+    }
+  },
+  {
+    "name": "artworks",
+    "ok": false,
+    "url": "https://api.artic.edu/api/v1/artworks/search?q=Monet&limit=5&fields=id%2Ctitle%2Cartist_title%2Cdate_display%2Cmedium_display%2Cis_on_view%2Cplace_of_origin",
+    "error": "HTTP Error 403: Forbidden"
+  },
+  {
+    "name": "exoplanets",
+    "ok": true,
+    "url": "https://exoplanetarchive.ipac.caltech.edu/TAP/sync?query=select+top+5+pl_name%2Chostname%2Cdiscoverymethod%2Cdisc_year%2Cpl_rade+from+pscomppars+order+by+pl_name&format=csv",
+    "summary": {
+      "rows": 5,
+      "first": {
+        "pl_name": "55 Cnc b",
+        "hostname": "55 Cnc",
+        "discoverymethod": "Radial Velocity",
+        "disc_year": "1996",
+        "pl_rade": "13.90000000"
+      }
+    }
+  }
+]

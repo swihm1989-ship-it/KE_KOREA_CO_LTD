@@ -1,0 +1,14 @@
+[
+  {
+    "pickup_point_id": "S001",
+    "name": "한빛 수령소",
+    "address": "가상시 한빛구 예시로 10, 1층",
+    "opening_hours": "평일 09:00~18:00"
+  },
+  {
+    "pickup_point_id": "S002",
+    "name": "새봄 수령소",
+    "address": "가상시 새봄구 실습로 25, 2층",
+    "opening_hours": "매일 10:00~20:00"
+  }
+]

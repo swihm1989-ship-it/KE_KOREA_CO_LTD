@@ -1,0 +1,7 @@
+/Quotation_KEKOREA/private/
+/Quotation_KEKOREA/outputs/
+/Quotation_KEKOREA/.env
+/Quotation_KEKOREA/.env.*
+!/Quotation_KEKOREA/.env.example
+/Quotation_KEKOREA/**/__pycache__/
+/tmp/

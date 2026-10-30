@@ -1,0 +1,10 @@
+{
+  "branch_id": "central",
+  "name": "중앙도서관",
+  "updated_at": "2026-10-29T09:00:00+09:00",
+  "books": [
+    {"title": "파이썬 첫걸음", "available_count": 2},
+    {"title": "데이터 분석 입문", "available_count": 0},
+    {"title": "비동기 프로그래밍", "available_count": 1}
+  ]
+}

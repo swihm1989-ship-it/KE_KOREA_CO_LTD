@@ -1,0 +1,189 @@
+"""Deterministic calculations and validation for English trade document drafts."""
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+import re
+
+
+DOC_TYPES = {"PO", "PI", "CI", "PL"}
+FAMILIES = {"cosmetics", "polysilicon", "wafer", "solar_cell", "solar_module", "other"}
+MONEY_QUANTUM = Decimal("0.01")
+PRICE_QUANTUM = Decimal("0.000001")
+
+
+def _decimal(value, field, issues, *, allow_zero=True):
+    try:
+        result = Decimal(str(value))
+        if not result.is_finite() or result < 0 or (not allow_zero and result == 0):
+            raise InvalidOperation
+        return result
+    except (InvalidOperation, TypeError, ValueError):
+        issues.append(f"Valid {'positive ' if not allow_zero else ''}number required for {field}")
+        return Decimal("0")
+
+
+def _has_korean(value):
+    return isinstance(value, str) and re.search(r"[\uac00-\ud7a3]", value) is not None
+
+
+def _plain_decimal(value):
+    rendered = format(value, "f")
+    return rendered.rstrip("0").rstrip(".") if "." in rendered else rendered
+
+
+def apply_promotion(paid_quantity, promotion):
+    """Return paid/free/shipped quantities for a simple buy-N-get-M promotion."""
+    paid = Decimal(str(paid_quantity))
+    if not paid.is_finite() or paid < 0:
+        raise ValueError("Paid quantity must be a non-negative number")
+    free = Decimal("0")
+    if promotion:
+        match = re.fullmatch(r"\s*(\d+)\s*\+\s*(\d+)\s*", promotion)
+        if not match or int(match.group(1)) < 1:
+            raise ValueError("Promotion must use the simple N+M form, such as 2+1")
+        buy, gift = map(int, match.groups())
+        if paid != paid.to_integral_value():
+            raise ValueError("Buy-N-get-M promotions require whole paid units")
+        free = (paid // buy) * gift
+    return {"paid_quantity": format(paid, "f"), "free_quantity": format(free, "f"),
+            "shipped_quantity": format(paid + free, "f")}
+
+
+def validate_and_calculate(data):
+    """Validate extracted user data, calculate sums, and identify issue blockers."""
+    issues, blocking = [], []
+
+    def block(message):
+        if message not in blocking:
+            blocking.append(message)
+
+    doc_type = data.get("document_type")
+    if doc_type not in DOC_TYPES:
+        block("Document type must be PO, PI, CI, or PL")
+    family = data.get("product_family")
+    if family not in FAMILIES:
+        block("Product family must be confirmed")
+    currency = data.get("currency")
+    if not isinstance(currency, str) or not re.fullmatch(r"[A-Z]{3}", currency):
+        block("Currency must be confirmed as a three-letter code")
+    elif currency not in {"USD", "KRW", "EUR", "CNY"}:
+        block(f"Currency rounding rule for {currency} must be configured")
+    money_quantum = Decimal("1") if currency == "KRW" else MONEY_QUANTUM
+
+    for role in ("buyer", "seller"):
+        party = data.get(role) or {}
+        display = "Buyer" if role == "buyer" else "Seller"
+        for field, label in (("legal_name", "legal name"), ("address", "address")):
+            value = party.get(field)
+            if not value:
+                block(f"{display} {label} is required")
+            elif _has_korean(value):
+                block(f"{display} {label} must be English")
+
+    if doc_type == "PO":
+        buyer = (data.get("buyer") or {}).get("legal_name", "").upper()
+        if "KE KOREA" not in buyer:
+            block("PO buyer must be KE KOREA")
+        if not (data.get("seller") or {}).get("legal_name") or "KE KOREA" in (data.get("seller") or {}).get("legal_name", "").upper():
+            block("PO seller must be the supplier and buyer must be KE KOREA")
+    elif doc_type in {"PI", "CI"}:
+        seller = (data.get("seller") or {}).get("legal_name", "").upper()
+        if "KE KOREA" not in seller:
+            block(f"{doc_type} seller must be KE KOREA")
+
+    if not data.get("document_number"):
+        block("Document number is required or must be marked DRAFT")
+    if not data.get("issue_date"):
+        block("Issue date is required")
+    if not data.get("incoterms"):
+        block("Incoterms and named place")
+    if doc_type in {"PO", "PI"} and not data.get("payment_terms"):
+        block("Payment terms")
+    if doc_type in {"CI", "PL"} and not data.get("shipment_reference"):
+        block("Shipment reference")
+
+    items = data.get("items") or []
+    if doc_type != "PL" and not items:
+        block("At least one line item is required")
+    calculated, total = [], Decimal("0")
+    for i, original in enumerate(items, 1):
+        item = dict(original)
+        name = item.get("product_name")
+        if not name:
+            block(f"Product name is required for item {i}")
+        elif _has_korean(name):
+            block(f"Product name for item {i} must be English")
+        if not item.get("unit"):
+            block(f"Quantity unit for item {i}")
+        if doc_type != "PL" and not item.get("price_basis"):
+            block(f"Price basis for {name or f'item {i}'}")
+        quantity = _decimal(item.get("paid_quantity", item.get("quantity")), f"paid quantity for item {i}", issues, allow_zero=False)
+        base = Decimal("0") if doc_type == "PL" else _decimal(item.get("unit_price"), f"unit price for item {i}", issues, allow_zero=False)
+        discount = _decimal(item.get("discount_percent", 0), f"discount percent for item {i}", issues)
+        if doc_type in {"PI", "CI"} and data.get("product_family") == "cosmetics" and item.get("discount_percent") is None:
+            block(f"Confirm discount percentage, including whether no discount applies, for {name or f'item {i}'}")
+        if discount > 100:
+            block(f"Discount for item {i} must be between 0 and 100 percent")
+            discount = Decimal("0")
+        if doc_type != "PL" and not item.get("price_source"):
+            block(f"Price source for {name or f'item {i}'} must be recorded")
+        if data.get("product_family") == "cosmetics" and item.get("master_price") is not True and not item.get("price_override_confirmed"):
+            block(f"Cosmetics price for {name or f'item {i}'} must match the verified price master")
+        basis = str(item.get("price_basis") or "").upper().replace("USD/", "").replace("KRW/", "").replace("PER ", "").strip()
+        unit = str(item.get("unit") or "").upper().strip()
+        if data.get("product_family") in {"polysilicon", "wafer", "solar_cell", "solar_module"} and basis and unit and basis not in {unit, "SET"}:
+            block(f"Price basis {basis} does not match quantity unit {unit} for {name or f'item {i}'}")
+        final = (base * (Decimal("1") - discount / Decimal("100"))).quantize(PRICE_QUANTUM, rounding=ROUND_HALF_UP)
+        line = (quantity * final).quantize(money_quantum, rounding=ROUND_HALF_UP)
+        free = _decimal(item.get("free_quantity", 0), f"free quantity for item {i}", issues)
+        shipped = _decimal(item.get("shipped_quantity", quantity + free), f"shipped quantity for item {i}", issues)
+        if shipped != quantity + free:
+            block(f"Shipped quantity must equal paid plus free quantity for {name or f'item {i}'}")
+        if item.get("promotion"):
+            try:
+                expected = apply_promotion(quantity, item["promotion"])
+                if Decimal(expected["free_quantity"]) != free:
+                    block(f"Promotion quantity mismatch for {name or f'item {i}'}")
+            except ValueError:
+                block(f"Promotion rule for {name or f'item {i}'} must be confirmed")
+        item.update({"base_unit_price": _plain_decimal(base), "final_unit_price": _plain_decimal(final),
+                     "line_total": format(line, "f"), "quantity": format(quantity, "f"),
+                     "paid_quantity": format(quantity, "f"), "free_quantity": format(free, "f"),
+                     "shipped_quantity": format(shipped, "f"), "discount_percent": format(discount, "f")})
+        item["display_quantity"] = format(shipped if doc_type == "PL" else quantity + free, "f")
+        calculated.append(item)
+        total += line
+    total = total.quantize(money_quantum, rounding=ROUND_HALF_UP)
+
+    if doc_type == "PL":
+        packages = data.get("packages") or []
+        if not packages or not data.get("actual_package_count"):
+            block("Actual package count and weights")
+        try:
+            actual_count = Decimal(str(data.get("actual_package_count")))
+            if not actual_count.is_finite() or actual_count <= 0 or actual_count != actual_count.to_integral_value():
+                raise InvalidOperation
+        except (InvalidOperation, TypeError, ValueError):
+            block("Actual package count must be a positive whole number")
+            actual_count = Decimal("0")
+        declared_count = Decimal("0")
+        for i, package in enumerate(packages, 1):
+            net = _decimal(package.get("net_weight_kg"), f"package {i} net weight", issues, allow_zero=False)
+            gross = _decimal(package.get("gross_weight_kg"), f"package {i} gross weight", issues, allow_zero=False)
+            count = _decimal(package.get("package_count"), f"package {i} count", issues, allow_zero=False)
+            if count != count.to_integral_value():
+                block(f"Package count for package {i} must be a whole number")
+            declared_count += count
+            if net > gross:
+                block(f"Net weight cannot exceed gross weight for package {i}")
+        if packages and declared_count != actual_count:
+            block("Sum of package counts must equal actual package count")
+
+    if doc_type == "CI" and not data.get("country_of_origin"):
+        block("Country of origin must be confirmed")
+    for issue in data.get("conflicts", []):
+        block(f"Resolve conflicting information: {issue}")
+    for field in data.get("missing_fields", []):
+        block(f"Confirm missing information: {field}")
+
+    return {**data, "items": calculated, "subtotal": format(total, "f"), "total": format(total, "f"),
+            "blocking_issues": blocking + issues, "ready_for_issue": not blocking and not issues,
+            "status": "READY_FOR_USER_CONFIRMATION" if not blocking and not issues else "DRAFT"}

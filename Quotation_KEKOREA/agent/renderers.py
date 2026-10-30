@@ -1,0 +1,206 @@
+"""Small dependency-free PDF, XLSX, and HTML renderers for review drafts."""
+from datetime import date, datetime
+from html import escape
+from pathlib import Path
+import re
+import zipfile
+from xml.sax.saxutils import escape as xml_escape
+from decimal import Decimal
+
+
+def _english(value):
+    if value is None:
+        return ""
+    value = str(value)
+    value = value.translate(str.maketrans({"\u2013": "-", "\u2014": "-", "\u2018": "'", "\u2019": "'", "\u201c": '"', "\u201d": '"'}))
+    if any(ord(ch) > 255 for ch in value):
+        raise ValueError("Document values must be English or Latin-1; provide an approved English transliteration before rendering")
+    return value
+
+
+def _rows(doc):
+    rows = [["Line", "Product", "Capacity / Specification", "Qty", "Unit", "Unit Price", "Discount", "Amount"]]
+    for i, item in enumerate(doc.get("items", []), 1):
+        if doc.get("document_type") == "PL":
+            price = "N/A"
+            amount = "N/A"
+        else:
+            price = item.get("final_unit_price", "")
+            amount = item.get("line_total", "")
+        if float(item.get("free_quantity") or 0):
+            rows.append([str(i), _english(item.get("product_name")) + " (PAID)", _english(item.get("capacity")),
+                         item.get("paid_quantity", ""), _english(item.get("unit")), price,
+                         item.get("discount_percent", "0") + "%", amount])
+            rows.append([str(i), _english(item.get("product_name")) + " (FREE OF CHARGE)", _english(item.get("capacity")),
+                         item.get("free_quantity", ""), _english(item.get("unit")), "0", "FOC", "0"])
+        else:
+            rows.append([str(i), _english(item.get("product_name")), _english(item.get("capacity")),
+                         item.get("display_quantity", item.get("shipped_quantity", item.get("quantity", ""))), _english(item.get("unit")), price,
+                         item.get("discount_percent", "0") + "%", amount])
+    return rows
+
+
+def _under_1000(n):
+    ones = ["ZERO", "ONE", "TWO", "THREE", "FOUR", "FIVE", "SIX", "SEVEN", "EIGHT", "NINE", "TEN", "ELEVEN", "TWELVE", "THIRTEEN", "FOURTEEN", "FIFTEEN", "SIXTEEN", "SEVENTEEN", "EIGHTEEN", "NINETEEN"]
+    tens = ["", "", "TWENTY", "THIRTY", "FORTY", "FIFTY", "SIXTY", "SEVENTY", "EIGHTY", "NINETY"]
+    words = []
+    if n >= 100:
+        words += [ones[n // 100], "HUNDRED"]
+        n %= 100
+    if n >= 20:
+        words.append(tens[n // 10])
+        if n % 10:
+            words.append(ones[n % 10])
+    elif n:
+        words.append(ones[n])
+    return " ".join(words)
+
+
+def amount_in_english(amount, currency):
+    value = Decimal(str(amount)).quantize(Decimal("1") if currency == "KRW" else Decimal("0.01"))
+    integer = int(value)
+    fraction = int((value - integer) * 100)
+    groups = (("TRILLION", 10**12), ("BILLION", 10**9), ("MILLION", 10**6), ("THOUSAND", 10**3))
+    words = []
+    remainder = integer
+    for label, base in groups:
+        count, remainder = divmod(remainder, base)
+        if count:
+            words.extend([_under_1000(count), label])
+    if remainder or not words:
+        words.append(_under_1000(remainder))
+    major, minor = {"USD": ("US DOLLARS", "CENTS"), "KRW": ("KOREAN WON", "JEON"),
+                    "EUR": ("EUROS", "CENTS"), "CNY": ("CHINESE YUAN", "FEN")}.get(currency, (currency, "HUNDREDTHS"))
+    result = " ".join(words) + " " + major
+    if fraction:
+        result += " AND " + _under_1000(fraction) + " " + minor
+    return result + " ONLY"
+
+
+def document_lines(doc):
+    status = doc.get("status", "DRAFT")
+    dtype = doc.get("document_type", "TRADE DOCUMENT")
+    lines = [status.replace("_", " "), "KE KOREA CO. LTD - REVIEW DRAFT", "", dtype, "".join(["Document No.: ", _english(doc.get("document_number") or "TBD")]),
+             "Issue Date: " + _english(doc.get("issue_date") or "TBD"),
+             "Product Family: " + _english(doc.get("product_family") or "TBD").upper(),
+             "Currency: " + _english(doc.get("currency") or "TBD"), "", "SELLER / SUPPLIER"]
+    lines.extend([_english((doc.get("seller") or {}).get(k)) for k in ("legal_name", "address", "contact", "phone", "email") if (doc.get("seller") or {}).get(k)])
+    lines += ["", "BUYER / CUSTOMER"]
+    lines.extend([_english((doc.get("buyer") or {}).get(k)) for k in ("legal_name", "address", "contact", "phone", "email") if (doc.get("buyer") or {}).get(k)])
+    for label, field in (("Bill To", "bill_to"), ("Ship To", "ship_to"), ("Incoterms", "incoterms"),
+                         ("Payment Terms", "payment_terms"), ("Shipment Reference", "shipment_reference"),
+                         ("Country of Origin", "country_of_origin")):
+        if doc.get(field):
+            lines.append(f"{label}: {_english(doc[field])}")
+    lines += ["", "LINE ITEMS: Line | Product | Capacity / Specification | Qty | Unit | Unit Price | Discount | Amount"]
+    for row in _rows(doc)[1:]:
+        lines.append(" | ".join(_english(cell) for cell in row))
+    if doc.get("document_type") != "PL":
+        lines += ["", "TOTAL: " + _english(doc.get("currency") or "") + " " + _english(doc.get("total", "0"))]
+        lines.append("AMOUNT IN WORDS: " + amount_in_english(doc.get("total", "0"), doc.get("currency") or ""))
+    if doc.get("actual_package_count"):
+        lines.append("Actual Package Count: " + _english(doc["actual_package_count"]))
+    for i, package in enumerate(doc.get("packages", []), 1):
+        lines.append(f"Package {i}: {_english(package.get('package_type'))}; Count {_english(package.get('package_count'))}; Net {_english(package.get('net_weight_kg'))} kg; Gross {_english(package.get('gross_weight_kg'))} kg")
+    if doc.get("document_type") == "PL" and doc.get("packages"):
+        try:
+            net_total = sum(Decimal(str(p.get("net_weight_kg"))) for p in doc["packages"])
+            gross_total = sum(Decimal(str(p.get("gross_weight_kg"))) for p in doc["packages"])
+            lines.append(f"TOTAL PACKAGES: {_english(doc.get('actual_package_count'))}; TOTAL NET WEIGHT: {net_total:f} kg; TOTAL GROSS WEIGHT: {gross_total:f} kg")
+        except Exception:
+            lines.append("TOTAL PACKAGE WEIGHTS: REVIEW REQUIRED")
+    if doc.get("remarks"):
+        lines += ["", "REMARKS", _english(doc["remarks"])]
+    if doc.get("blocking_issues"):
+        lines += ["", "OPEN ITEMS - DO NOT ISSUE"]
+        for issue in doc["blocking_issues"]:
+            if any(ord(ch) > 255 for ch in str(issue)):
+                lines.append("- Review a non-English source note in the app")
+            else:
+                lines.append("- " + _english(issue))
+    lines += ["", "Prepared in English. Review all transaction and shipping details before use."]
+    return lines
+
+
+def _pdf_bytes(lines):
+    pages = [lines[i:i + 48] for i in range(0, len(lines), 48)] or [[]]
+    objects = [b"<< /Type /Catalog /Pages 2 0 R >>"]
+    page_ids = [4 + 2 * i for i in range(len(pages))]
+    objects.append(("<< /Type /Pages /Kids [" + " ".join(f"{n} 0 R" for n in page_ids) + f"] /Count {len(pages)} >>").encode())
+    objects.append(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
+    for i, page_lines in enumerate(pages):
+        page_id, stream_id = 4 + 2 * i, 5 + 2 * i
+        commands = ["BT", "/F1 9 Tf", "50 790 Td", "14 TL"]
+        for line in page_lines:
+            safe = _english(line).replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")[:180]
+            commands.append(f"({safe}) Tj T*")
+        commands.append("ET")
+        stream = "\n".join(commands).encode("latin-1", errors="replace")
+        objects.append(f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R >> >> /Contents {stream_id} 0 R >>".encode())
+        objects.append(b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n" + stream + b"\nendstream")
+    output = bytearray(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n")
+    offsets = [0]
+    for i, obj in enumerate(objects, 1):
+        offsets.append(len(output))
+        output.extend(f"{i} 0 obj\n".encode() + obj + b"\nendobj\n")
+    xref = len(output)
+    output.extend(f"xref\n0 {len(objects)+1}\n0000000000 65535 f \n".encode())
+    for offset in offsets[1:]:
+        output.extend(f"{offset:010} 00000 n \n".encode())
+    output.extend(f"trailer\n<< /Size {len(objects)+1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode())
+    return bytes(output)
+
+
+def _xlsx_bytes(doc):
+    rows = [[doc.get("document_type", "DRAFT"), "STATUS", doc.get("status", "DRAFT")],
+            ["Currency", doc.get("currency") or "TBD", "Product Family", doc.get("product_family") or "TBD"],
+            ["Document Number", doc.get("document_number") or "TBD", "Issue Date", doc.get("issue_date") or "TBD"],
+            ["Seller", (doc.get("seller") or {}).get("legal_name") or "TBD"],
+            ["Seller Address", (doc.get("seller") or {}).get("address") or "TBD"],
+            ["Buyer", (doc.get("buyer") or {}).get("legal_name") or "TBD"],
+            ["Buyer Address", (doc.get("buyer") or {}).get("address") or "TBD"], [], *_rows(doc),
+            ["", "", "", "", "", "TOTAL", doc.get("currency") or "", doc.get("total", "0")],
+            ["Incoterms", doc.get("incoterms") or "TBD"], ["Payment Terms", doc.get("payment_terms") or "TBD"],
+            ["Remarks", doc.get("remarks") or ""]]
+    xml_rows = []
+    for ri, row in enumerate(rows, 1):
+        cells = []
+        for ci, value in enumerate(row, 1):
+            if value is None or value == "":
+                continue
+            col = ""
+            n = ci
+            while n:
+                n, rem = divmod(n - 1, 26)
+                col = chr(65 + rem) + col
+            cell = f"{col}{ri}"
+            cells.append(f'<c r="{cell}" t="inlineStr"><is><t xml:space="preserve">{xml_escape(_english(value))}</t></is></c>')
+        xml_rows.append(f'<row r="{ri}">{"".join(cells)}</row>')
+    sheet = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>' + "".join(xml_rows) + "</sheetData></worksheet>")
+    workbook = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Trade Document Draft" sheetId="1" r:id="rId1"/></sheets></workbook>'
+    with __import__("io").BytesIO() as buf:
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+            z.writestr("[Content_Types].xml", '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>')
+            z.writestr("_rels/.rels", '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>')
+            z.writestr("xl/workbook.xml", workbook)
+            z.writestr("xl/_rels/workbook.xml.rels", '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>')
+            z.writestr("xl/worksheets/sheet1.xml", sheet)
+        return buf.getvalue()
+
+
+def render_files(doc, output_dir):
+    """Write draft outputs (even incomplete ones carry a DRAFT status and open-items list)."""
+    dtype = re.sub(r"[^A-Za-z0-9_-]", "_", str(doc.get("document_type") or "DRAFT"))
+    stamp = re.sub(r"[^0-9-]", "", str(doc.get("issue_date") or "")) or date.today().isoformat()
+    directory = Path(output_dir)
+    directory.mkdir(parents=True, exist_ok=True)
+    run_id = datetime.now().strftime("%Y%m%d%H%M%S%f")
+    stem = f"{dtype}_{stamp}_DRAFT_{run_id}"
+    lines = document_lines(doc)
+    html_rows = "".join("<tr>" + "".join(f"<td>{escape(_english(v))}</td>" for v in row) + "</tr>" for row in _rows(doc))
+    html_doc = "<!doctype html><meta charset='utf-8'><title>Trade Document Draft</title><h1>" + escape(dtype) + "</h1><h2>" + escape(doc.get("status", "DRAFT")) + "</h2><table border='1'>" + html_rows + "</table><pre>" + escape("\n".join(lines)) + "</pre>"
+    paths = {"pdf": directory / f"{stem}.pdf", "xlsx": directory / f"{stem}.xlsx", "html": directory / f"{stem}.html"}
+    paths["pdf"].write_bytes(_pdf_bytes(lines))
+    paths["xlsx"].write_bytes(_xlsx_bytes(doc))
+    paths["html"].write_text(html_doc, encoding="utf-8")
+    return paths

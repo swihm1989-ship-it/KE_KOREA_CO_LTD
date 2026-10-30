@@ -1,0 +1,1658 @@
+[
+  {
+    "request": "『파이썬 첫걸음』을 빌릴 수 있는 지점을 알려 줘.",
+    "scenario": "normal",
+    "mode": "sequential",
+    "max_concurrency": 2,
+    "expected_collection_status": "complete",
+    "model_calls": 0,
+    "internal_jobs": 3,
+    "merged": {
+      "title": "파이썬 첫걸음",
+      "collection_status": "complete",
+      "available_branches": [
+        {
+          "branch_id": "central",
+          "name": "중앙도서관",
+          "title": "파이썬 첫걸음",
+          "found": true,
+          "available_count": 2,
+          "updated_at": "2026-10-29T09:00:00+09:00"
+        },
+        {
+          "branch_id": "west",
+          "name": "서부도서관",
+          "title": "파이썬 첫걸음",
+          "found": true,
+          "available_count": 1,
+          "updated_at": "2026-10-29T09:00:00+09:00"
+        }
+      ],
+      "unavailable_branches": [
+        {
+          "branch_id": "east",
+          "name": "동부도서관",
+          "title": "파이썬 첫걸음",
+          "found": true,
+          "available_count": 0,
+          "updated_at": "2026-10-29T09:00:00+09:00"
+        }
+      ],
+      "not_found_branches": [],
+      "errors": [],
+      "jobs": [
+        {
+          "branch_id": "central",
+          "name": "중앙도서관",
+          "status": "ok",
+          "result": {
+            "branch_id": "central",
+            "name": "중앙도서관",
+            "title": "파이썬 첫걸음",
+            "found": true,
+            "available_count": 2,
+            "updated_at": "2026-10-29T09:00:00+09:00"
+          },
+          "error": null,
+          "started_at": "2026-10-29T07:34:22.424203+00:00",
+          "finished_at": "2026-10-29T07:34:22.731587+00:00",
+          "elapsed_seconds": 0.308538
+        },
+        {
+          "branch_id": "east",
+          "name": "동부도서관",
+          "status": "ok",
+          "result": {
+            "branch_id": "east",
+            "name": "동부도서관",
+            "title": "파이썬 첫걸음",
+            "found": true,
+            "available_count": 0,
+            "updated_at": "2026-10-29T09:00:00+09:00"
+          },
+          "error": null,
+          "started_at": "2026-10-29T07:34:22.731587+00:00",
+          "finished_at": "2026-10-29T07:34:22.838590+00:00",
+          "elapsed_seconds": 0.105215
+        },
+        {
+          "branch_id": "west",
+          "name": "서부도서관",
+          "status": "ok",
+          "result": {
+            "branch_id": "west",
+            "name": "서부도서관",
+            "title": "파이썬 첫걸음",
+            "found": true,
+            "available_count": 1,
+            "updated_at": "2026-10-29T09:00:00+09:00"
+          },
+          "error": null,
+          "started_at": "2026-10-29T07:34:22.838590+00:00",
+          "finished_at": "2026-10-29T07:34:23.054801+00:00",
+          "elapsed_seconds": 0.216085
+        }
+      ],
+      "elapsed_seconds": 0.630353,
+      "peak_active": 1
+    },
+    "summary_without_model": "『파이썬 첫걸음』 조회 결과 (complete, 고정 가상 자료)\n- 중앙도서관: 대출 가능 2권 (자료 기준 시각: 2026-10-29T09:00:00+09:00)\n- 동부도서관: 대출 가능 0권 (자료 기준 시각: 2026-10-29T09:00:00+09:00)\n- 서부도서관: 대출 가능 1권 (자료 기준 시각: 2026-10-29T09:00:00+09:00)"
+  },
+  {
+    "request": "『파이썬 첫걸음』을 빌릴 수 있는 지점을 알려 줘.",
+    "scenario": "normal",
+    "mode": "parallel",
+    "max_concurrency": 1,
+    "expected_collection_status": "complete",
+    "model_calls": 0,
+    "internal_jobs": 3,
+    "merged": {
+      "title": "파이썬 첫걸음",
+      "collection_status": "complete",
+      "available_branches": [
+        {
+          "branch_id": "central",
+          "name": "중앙도서관",
+          "title": "파이썬 첫걸음",
+          "found": true,
+          "available_count": 2,
+          "updated_at": "2026-10-29T09:00:00+09:00"
+        },
+        {
+          "branch_id": "west",
+          "name": "서부도서관",
+          "title": "파이썬 첫걸음",
+          "found": true,
+          "available_count": 1,
+          "updated_at": "2026-10-29T09:00:00+09:00"
+        }
+      ],
+      "unavailable_branches": [
+        {
+          "branch_id": "east",
+          "name": "동부도서관",
+          "title": "파이썬 첫걸음",
+          "found": true,
+          "available_count": 0,
+          "updated_at": "2026-10-29T09:00:00+09:00"
+        }
+      ],
+      "not_found_branches": [],
+      "errors": [],
+      "jobs": [
+        {
+          "branch_id": "central",
+          "name": "중앙도서관",
+          "status": "ok",
+          "result": {
+            "branch_id": "central",
+            "name": "중앙도서관",
+            "title": "파이썬 첫걸음",
+            "found": true,
+            "available_count": 2,
+            "updated_at": "2026-10-29T09:00:00+09:00"
+          },
+          "error": null,
+          "started_at": "2026-10-29T07:34:23.056706+00:00",
+          "finished_at": "2026-10-29T07:34:23.361250+00:00",
+          "elapsed_seconds": 0.304237
+        },
+        {
+          "branch_id": "east",
+          "name": "동부도서관",
+          "status": "ok",
+          "result": {
+            "branch_id": "east",
+            "name": "동부도서관",
+            "title": "파이썬 첫걸음",
+            "found": true,
+            "available_count": 0,
+            "updated_at": "2026-10-29T09:00:00+09:00"
+          },
+          "error": null,
+          "started_at": "2026-10-29T07:34:23.361250+00:00",
+          "finished_at": "2026-10-29T07:34:23.470775+00:00",
+          "elapsed_seconds": 0.109286
+        },
+        {
+          "branch_id": "west",
+          "name": "서부도서관",
+          "status": "ok",
+          "result": {
+            "branch_id": "west",
+            "name": "서부도서관",
+            "title": "파이썬 첫걸음",
+            "found": true,
+            "available_count": 1,
+            "updated_at": "2026-10-29T09:00:00+09:00"
+          },
+          "error": null,
+          "started_at": "2026-10-29T07:34:23.470775+00:00",
+          "finished_at": "2026-10-29T07:34:23.685166+00:00",
+          "elapsed_seconds": 0.215011
+        }
+      ],
+      "elapsed_seconds": 0.629065,
+      "peak_active": 1
+    },
+    "summary_without_model": "『파이썬 첫걸음』 조회 결과 (complete, 고정 가상 자료)\n- 중앙도서관: 대출 가능 2권 (자료 기준 시각: 2026-10-29T09:00:00+09:00)\n- 동부도서관: 대출 가능 0권 (자료 기준 시각: 2026-10-29T09:00:00+09:00)\n- 서부도서관: 대출 가능 1권 (자료 기준 시각: 2026-10-29T09:00:00+09:00)"
+  },
+  {
+    "request": "『파이썬 첫걸음』을 빌릴 수 있는 지점을 알려 줘.",
+    "scenario": "normal",
+    "mode": "parallel",
+    "max_concurrency": 2,
+    "expected_collection_status": "complete",
+    "model_calls": 0,
+    "internal_jobs": 3,
+    "merged": {
+      "title": "파이썬 첫걸음",
+      "collection_status": "complete",
+      "available_branches": [
+        {
+          "branch_id": "central",
+          "name": "중앙도서관",
+          "title": "파이썬 첫걸음",
+          "found": true,
+          "available_count": 2,
+          "updated_at": "2026-10-29T09:00:00+09:00"
+        },
+        {
+          "branch_id": "west",
+          "name": "서부도서관",
+          "title": "파이썬 첫걸음",
+          "found": true,
+          "available_count": 1,
+          "updated_at": "2026-10-29T09:00:00+09:00"
+        }
+      ],
+      "unavailable_branches": [
+        {
+          "branch_id": "east",
+          "name": "동부도서관",
+          "title": "파이썬 첫걸음",
+          "found": true,
+          "available_count": 0,
+          "updated_at": "2026-10-29T09:00:00+09:00"
+        }
+      ],
+      "not_found_branches": [],
+      "errors": [],
+      "jobs": [
+        {
+          "branch_id": "central",
+          "name": "중앙도서관",
+          "status": "ok",
+          "result": {
+            "branch_id": "central",
+            "name": "중앙도서관",
+            "title": "파이썬 첫걸음",
+            "found": true,
+            "available_count": 2,
+            "updated_at": "2026-10-29T09:00:00+09:00"
+          },
+          "error": null,
+          "started_at": "2026-10-29T07:34:23.688264+00:00",
+          "finished_at": "2026-10-29T07:34:23.999846+00:00",
+          "elapsed_seconds": 0.311614
+        },
+        {
+          "branch_id": "east",
+          "name": "동부도서관",
+          "status": "ok",
+          "result": {
+            "branch_id": "east",
+            "name": "동부도서관",
+            "title": "파이썬 첫걸음",
+            "found": true,
+            "available_count": 0,
+            "updated_at": "2026-10-29T09:00:00+09:00"
+          },
+          "error": null,
+          "started_at": "2026-10-29T07:34:23.688264+00:00",
+          "finished_at": "2026-10-29T07:34:23.796571+00:00",
+          "elapsed_seconds": 0.108533
+        },
+        {
+          "branch_id": "west",
+          "name": "서부도서관",
+          "status": "ok",
+          "result": {
+            "branch_id": "west",
+            "name": "서부도서관",
+            "title": "파이썬 첫걸음",
+            "found": true,
+            "available_count": 1,
+            "updated_at": "2026-10-29T09:00:00+09:00"
+          },
+          "error": null,
+          "started_at": "2026-10-29T07:34:23.796571+00:00",
+          "finished_at": "2026-10-29T07:34:23.999846+00:00",
+          "elapsed_seconds": 0.203162
+        }
+      ],
+      "elapsed_seconds": 0.312132,
+      "peak_active": 2
+    },
+    "summary_without_model": "『파이썬 첫걸음』 조회 결과 (complete, 고정 가상 자료)\n- 중앙도서관: 대출 가능 2권 (자료 기준 시각: 2026-10-29T09:00:00+09:00)\n- 동부도서관: 대출 가능 0권 (자료 기준 시각: 2026-10-29T09:00:00+09:00)\n- 서부도서관: 대출 가능 1권 (자료 기준 시각: 2026-10-29T09:00:00+09:00)"
+  },
+  {
+    "request": "『데이터 분석 입문』을 빌릴 수 있는 지점을 알려 줘.",
+    "scenario": "normal",
+    "mode": "sequential",
+    "max_concurrency": 2,
+    "expected_collection_status": "complete",
+    "model_calls": 0,
+    "internal_jobs": 3,
+    "merged": {
+      "title": "데이터 분석 입문",
+      "collection_status": "complete",
+      "available_branches": [],
+      "unavailable_branches": [
+        {
+          "branch_id": "central",
+          "name": "중앙도서관",
+          "title": "데이터 분석 입문",
+          "found": true,
+          "available_count": 0,
+          "updated_at": "2026-10-29T09:00:00+09:00"
+        },
+        {
+          "branch_id": "east",
+          "name": "동부도서관",
+          "title": "데이터 분석 입문",
+          "found": true,
+          "available_count": 0,
+          "updated_at": "2026-10-29T09:00:00+09:00"
+        },
+        {
+          "branch_id": "west",
+          "name": "서부도서관",
+          "title": "데이터 분석 입문",
+          "found": true,
+          "available_count": 0,
+          "updated_at": "2026-10-29T09:00:00+09:00"
+        }
+      ],
+      "not_found_branches": [],
+      "errors": [],
+      "jobs": [
+        {
+          "branch_id": "central",
+          "name": "중앙도서관",
+          "status": "ok",
+          "result": {
+            "branch_id": "central",
+            "name": "중앙도서관",
+            "title": "데이터 분석 입문",
+            "found": true,
+            "available_count": 0,
+            "updated_at": "2026-10-29T09:00:00+09:00"
+          },
+          "error": null,
+          "started_at": "2026-10-29T07:34:24.002838+00:00",
+          "finished_at": "2026-10-29T07:34:24.310670+00:00",
+          "elapsed_seconds": 0.309924
+        },
+        {
+          "branch_id": "east",
+          "name": "동부도서관",
+          "status": "ok",
+          "result": {
+            "branch_id": "east",
+            "name": "동부도서관",
+            "title": "데이터 분석 입문",
+            "found": true,
+            "available_count": 0,
+            "updated_at": "2026-10-29T09:00:00+09:00"
+          },
+          "error": null,
+          "started_at": "2026-10-29T07:34:24.310670+00:00",
+          "finished_at": "2026-10-29T07:34:24.425022+00:00",
+          "elapsed_seconds": 0.113031
+        },
+        {
+          "branch_id": "west",
+          "name": "서부도서관",
+          "status": "ok",
+          "result": {
+            "branch_id": "west",
+            "name": "서부도서관",
+            "title": "데이터 분석 입문",
+            "found": true,
+            "available_count": 0,
+            "updated_at": "2026-10-29T09:00:00+09:00"
+          },
+          "error": null,
+          "started_at": "2026-10-29T07:34:24.425022+00:00",
+          "finished_at": "2026-10-29T07:34:24.630678+00:00",
+          "elapsed_seconds": 0.205307
+        }
+      ],
+      "elapsed_seconds": 0.628737,
+      "peak_active": 1
+    },
+    "summary_without_model": "『데이터 분석 입문』 조회 결과 (complete, 고정 가상 자료)\n- 중앙도서관: 대출 가능 0권 (자료 기준 시각: 2026-10-29T09:00:00+09:00)\n- 동부도서관: 대출 가능 0권 (자료 기준 시각: 2026-10-29T09:00:00+09:00)\n- 서부도서관: 대출 가능 0권 (자료 기준 시각: 2026-10-29T09:00:00+09:00)"
+  },
+  {
+    "request": "『데이터 분석 입문』을 빌릴 수 있는 지점을 알려 줘.",
+    "scenario": "normal",
+    "mode": "parallel",
+    "max_concurrency": 1,
+    "expected_collection_status": "complete",
+    "model_calls": 0,
+    "internal_jobs": 3,
+    "merged": {
+      "title": "데이터 분석 입문",
+      "collection_status": "complete",
+      "available_branches": [],
+      "unavailable_branches": [
+        {
+          "branch_id": "central",
+          "name": "중앙도서관",
+          "title": "데이터 분석 입문",
+          "found": true,
+          "available_count": 0,
+          "updated_at": "2026-10-29T09:00:00+09:00"
+        },
+        {
+          "branch_id": "east",
+          "name": "동부도서관",
+          "title": "데이터 분석 입문",
+          "found": true,
+          "available_count": 0,
+          "updated_at": "2026-10-29T09:00:00+09:00"
+        },
+        {
+          "branch_id": "west",
+          "name": "서부도서관",
+          "title": "데이터 분석 입문",
+          "found": true,
+          "available_count": 0,
+          "updated_at": "2026-10-29T09:00:00+09:00"
+        }
+      ],
+      "not_found_branches": [],
+      "errors": [],
+      "jobs": [
+        {
+          "branch_id": "central",
+          "name": "중앙도서관",
+          "status": "ok",
+          "result": {
+            "branch_id": "central",
+            "name": "중앙도서관",
+            "title": "데이터 분석 입문",
+            "found": true,
+            "available_count": 0,
+            "updated_at": "2026-10-29T09:00:00+09:00"
+          },
+          "error": null,
+          "started_at": "2026-10-29T07:34:24.631466+00:00",
+          "finished_at": "2026-10-29T07:34:24.947207+00:00",
+          "elapsed_seconds": 0.314414
+        },
+        {
+          "branch_id": "east",
+          "name": "동부도서관",
+          "status": "ok",
+          "result": {
+            "branch_id": "east",
+            "name": "동부도서관",
+            "title": "데이터 분석 입문",
+            "found": true,
+            "available_count": 0,
+            "updated_at": "2026-10-29T09:00:00+09:00"
+          },
+          "error": null,
+          "started_at": "2026-10-29T07:34:24.949135+00:00",
+          "finished_at": "2026-10-29T07:34:25.054757+00:00",
+          "elapsed_seconds": 0.10686
+        },
+        {
+          "branch_id": "west",
+          "name": "서부도서관",
+          "status": "ok",
+          "result": {
+            "branch_id": "west",
+            "name": "서부도서관",
+            "title": "데이터 분석 입문",
+            "found": true,
+            "available_count": 0,
+            "updated_at": "2026-10-29T09:00:00+09:00"
+          },
+          "error": null,
+          "started_at": "2026-10-29T07:34:25.054757+00:00",
+          "finished_at": "2026-10-29T07:34:25.265294+00:00",
+          "elapsed_seconds": 0.209874
+        }
+      ],
+      "elapsed_seconds": 0.631736,
+      "peak_active": 1
+    },
+    "summary_without_model": "『데이터 분석 입문』 조회 결과 (complete, 고정 가상 자료)\n- 중앙도서관: 대출 가능 0권 (자료 기준 시각: 2026-10-29T09:00:00+09:00)\n- 동부도서관: 대출 가능 0권 (자료 기준 시각: 2026-10-29T09:00:00+09:00)\n- 서부도서관: 대출 가능 0권 (자료 기준 시각: 2026-10-29T09:00:00+09:00)"
+  },
+  {
+    "request": "『데이터 분석 입문』을 빌릴 수 있는 지점을 알려 줘.",
+    "scenario": "normal",
+    "mode": "parallel",
+    "max_concurrency": 2,
+    "expected_collection_status": "complete",
+    "model_calls": 0,
+    "internal_jobs": 3,
+    "merged": {
+      "title": "데이터 분석 입문",
+      "collection_status": "complete",
+      "available_branches": [],
+      "unavailable_branches": [
+        {
+          "branch_id": "central",
+          "name": "중앙도서관",
+          "title": "데이터 분석 입문",
+          "found": true,
+          "available_count": 0,
+          "updated_at": "2026-10-29T09:00:00+09:00"
+        },
+        {
+          "branch_id": "east",
+          "name": "동부도서관",
+          "title": "데이터 분석 입문",
+          "found": true,
+          "available_count": 0,
+          "updated_at": "2026-10-29T09:00:00+09:00"
+        },
+        {
+          "branch_id": "west",
+          "name": "서부도서관",
+          "title": "데이터 분석 입문",
+          "found": true,
+          "available_count": 0,
+          "updated_at": "2026-10-29T09:00:00+09:00"
+        }
+      ],
+      "not_found_branches": [],
+      "errors": [],
+      "jobs": [
+        {
+          "branch_id": "central",
+          "name": "중앙도서관",
+          "status": "ok",
+          "result": {
+            "branch_id": "central",
+            "name": "중앙도서관",
+            "title": "데이터 분석 입문",
+            "found": true,
+            "available_count": 0,
+            "updated_at": "2026-10-29T09:00:00+09:00"
+          },
+          "error": null,
+          "started_at": "2026-10-29T07:34:25.267308+00:00",
+          "finished_at": "2026-10-29T07:34:25.574787+00:00",
+          "elapsed_seconds": 0.30904
+        },
+        {
+          "branch_id": "east",
+          "name": "동부도서관",
+          "status": "ok",
+          "result": {
+            "branch_id": "east",
+            "name": "동부도서관",
+            "title": "데이터 분석 입문",
+            "found": true,
+            "available_count": 0,
+            "updated_at": "2026-10-29T09:00:00+09:00"
+          },
+          "error": null,
+          "started_at": "2026-10-29T07:34:25.267308+00:00",
+          "finished_at": "2026-10-29T07:34:25.381172+00:00",
+          "elapsed_seconds": 0.112994
+        },
+        {
+          "branch_id": "west",
+          "name": "서부도서관",
+          "status": "ok",
+          "result": {
+            "branch_id": "west",
+            "name": "서부도서관",
+            "title": "데이터 분석 입문",
+            "found": true,
+            "available_count": 0,
+            "updated_at": "2026-10-29T09:00:00+09:00"
+          },
+          "error": null,
+          "started_at": "2026-10-29T07:34:25.381172+00:00",
+          "finished_at": "2026-10-29T07:34:25.574787+00:00",
+          "elapsed_seconds": 0.195727
+        }
+      ],
+      "elapsed_seconds": 0.309291,
+      "peak_active": 2
+    },
+    "summary_without_model": "『데이터 분석 입문』 조회 결과 (complete, 고정 가상 자료)\n- 중앙도서관: 대출 가능 0권 (자료 기준 시각: 2026-10-29T09:00:00+09:00)\n- 동부도서관: 대출 가능 0권 (자료 기준 시각: 2026-10-29T09:00:00+09:00)\n- 서부도서관: 대출 가능 0권 (자료 기준 시각: 2026-10-29T09:00:00+09:00)"
+  },
+  {
+    "request": "『비동기 프로그래밍』을 빌릴 수 있는 지점을 알려 줘.",
+    "scenario": "normal",
+    "mode": "sequential",
+    "max_concurrency": 2,
+    "expected_collection_status": "complete",
+    "model_calls": 0,
+    "internal_jobs": 3,
+    "merged": {
+      "title": "비동기 프로그래밍",
+      "collection_status": "complete",
+      "available_branches": [
+        {
+          "branch_id": "central",
+          "name": "중앙도서관",
+          "title": "비동기 프로그래밍",
+          "found": true,
+          "available_count": 1,
+          "updated_at": "2026-10-29T09:00:00+09:00"
+        }
+      ],
+      "unavailable_branches": [
+        {
+          "branch_id": "west",
+          "name": "서부도서관",
+          "title": "비동기 프로그래밍",
+          "found": true,
+          "available_count": 0,
+          "updated_at": "2026-10-29T09:00:00+09:00"
+        }
+      ],
+      "not_found_branches": [
+        {
+          "branch_id": "east",
+          "name": "동부도서관",
+          "title": "비동기 프로그래밍",
+          "found": false,
+          "available_count": null,
+          "updated_at": "2026-10-29T09:00:00+09:00"
+        }
+      ],
+      "errors": [],
+      "jobs": [
+        {
+          "branch_id": "central",
+          "name": "중앙도서관",
+          "status": "ok",
+          "result": {
+            "branch_id": "central",
+            "name": "중앙도서관",
+            "title": "비동기 프로그래밍",
+            "found": true,
+            "available_count": 1,
+            "updated_at": "2026-10-29T09:00:00+09:00"
+          },
+          "error": null,
+          "started_at": "2026-10-29T07:34:25.574787+00:00",
+          "finished_at": "2026-10-29T07:34:25.881067+00:00",
+          "elapsed_seconds": 0.30312
+        },
+        {
+          "branch_id": "east",
+          "name": "동부도서관",
+          "status": "ok",
+          "result": {
+            "branch_id": "east",
+            "name": "동부도서관",
+            "title": "비동기 프로그래밍",
+            "found": false,
+            "available_count": null,
+            "updated_at": "2026-10-29T09:00:00+09:00"
+          },
+          "error": null,
+          "started_at": "2026-10-29T07:34:25.881067+00:00",
+          "finished_at": "2026-10-29T07:34:25.989694+00:00",
+          "elapsed_seconds": 0.108354
+        },
+        {
+          "branch_id": "west",
+          "name": "서부도서관",
+          "status": "ok",
+          "result": {
+            "branch_id": "west",
+            "name": "서부도서관",
+            "title": "비동기 프로그래밍",
+            "found": true,
+            "available_count": 0,
+            "updated_at": "2026-10-29T09:00:00+09:00"
+          },
+          "error": null,
+          "started_at": "2026-10-29T07:34:25.989694+00:00",
+          "finished_at": "2026-10-29T07:34:26.214184+00:00",
+          "elapsed_seconds": 0.223518
+        }
+      ],
+      "elapsed_seconds": 0.635405,
+      "peak_active": 1
+    },
+    "summary_without_model": "『비동기 프로그래밍』 조회 결과 (complete, 고정 가상 자료)\n- 중앙도서관: 대출 가능 1권 (자료 기준 시각: 2026-10-29T09:00:00+09:00)\n- 동부도서관: 도서 미등록 (자료 기준 시각: 2026-10-29T09:00:00+09:00)\n- 서부도서관: 대출 가능 0권 (자료 기준 시각: 2026-10-29T09:00:00+09:00)"
+  },
+  {
+    "request": "『비동기 프로그래밍』을 빌릴 수 있는 지점을 알려 줘.",
+    "scenario": "normal",
+    "mode": "parallel",
+    "max_concurrency": 1,
+    "expected_collection_status": "complete",
+    "model_calls": 0,
+    "internal_jobs": 3,
+    "merged": {
+      "title": "비동기 프로그래밍",
+      "collection_status": "complete",
+      "available_branches": [
+        {
+          "branch_id": "central",
+          "name": "중앙도서관",
+          "title": "비동기 프로그래밍",
+          "found": true,
+          "available_count": 1,
+          "updated_at": "2026-10-29T09:00:00+09:00"
+        }
+      ],
+      "unavailable_branches": [
+        {
+          "branch_id": "west",
+          "name": "서부도서관",
+          "title": "비동기 프로그래밍",
+          "found": true,
+          "available_count": 0,
+          "updated_at": "2026-10-29T09:00:00+09:00"
+        }
+      ],
+      "not_found_branches": [
+        {
+          "branch_id": "east",
+          "name": "동부도서관",
+          "title": "비동기 프로그래밍",
+          "found": false,
+          "available_count": null,
+          "updated_at": "2026-10-29T09:00:00+09:00"
+        }
+      ],
+      "errors": [],
+      "jobs": [
+        {
+          "branch_id": "central",
+          "name": "중앙도서관",
+          "status": "ok",
+          "result": {
+            "branch_id": "central",
+            "name": "중앙도서관",
+            "title": "비동기 프로그래밍",
+            "found": true,
+            "available_count": 1,
+            "updated_at": "2026-10-29T09:00:00+09:00"
+          },
+          "error": null,
+          "started_at": "2026-10-29T07:34:26.214184+00:00",
+          "finished_at": "2026-10-29T07:34:26.522450+00:00",
+          "elapsed_seconds": 0.307108
+        },
+        {
+          "branch_id": "east",
+          "name": "동부도서관",
+          "status": "ok",
+          "result": {
+            "branch_id": "east",
+            "name": "동부도서관",
+            "title": "비동기 프로그래밍",
+            "found": false,
+            "available_count": null,
+            "updated_at": "2026-10-29T09:00:00+09:00"
+          },
+          "error": null,
+          "started_at": "2026-10-29T07:34:26.522450+00:00",
+          "finished_at": "2026-10-29T07:34:26.632663+00:00",
+          "elapsed_seconds": 0.108566
+        },
+        {
+          "branch_id": "west",
+          "name": "서부도서관",
+          "status": "ok",
+          "result": {
+            "branch_id": "west",
+            "name": "서부도서관",
+            "title": "비동기 프로그래밍",
+            "found": true,
+            "available_count": 0,
+            "updated_at": "2026-10-29T09:00:00+09:00"
+          },
+          "error": null,
+          "started_at": "2026-10-29T07:34:26.632663+00:00",
+          "finished_at": "2026-10-29T07:34:26.843437+00:00",
+          "elapsed_seconds": 0.211933
+        }
+      ],
+      "elapsed_seconds": 0.628121,
+      "peak_active": 1
+    },
+    "summary_without_model": "『비동기 프로그래밍』 조회 결과 (complete, 고정 가상 자료)\n- 중앙도서관: 대출 가능 1권 (자료 기준 시각: 2026-10-29T09:00:00+09:00)\n- 동부도서관: 도서 미등록 (자료 기준 시각: 2026-10-29T09:00:00+09:00)\n- 서부도서관: 대출 가능 0권 (자료 기준 시각: 2026-10-29T09:00:00+09:00)"
+  },
+  {
+    "request": "『비동기 프로그래밍』을 빌릴 수 있는 지점을 알려 줘.",
+    "scenario": "normal",
+    "mode": "parallel",
+    "max_concurrency": 2,
+    "expected_collection_status": "complete",
+    "model_calls": 0,
+    "internal_jobs": 3,
+    "merged": {
+      "title": "비동기 프로그래밍",
+      "collection_status": "complete",
+      "available_branches": [
+        {
+          "branch_id": "central",
+          "name": "중앙도서관",
+          "title": "비동기 프로그래밍",
+          "found": true,
+          "available_count": 1,
+          "updated_at": "2026-10-29T09:00:00+09:00"
+        }
+      ],
+      "unavailable_branches": [
+        {
+          "branch_id": "west",
+          "name": "서부도서관",
+          "title": "비동기 프로그래밍",
+          "found": true,
+          "available_count": 0,
+          "updated_at": "2026-10-29T09:00:00+09:00"
+        }
+      ],
+      "not_found_branches": [
+        {
+          "branch_id": "east",
+          "name": "동부도서관",
+          "title": "비동기 프로그래밍",
+          "found": false,
+          "available_count": null,
+          "updated_at": "2026-10-29T09:00:00+09:00"
+        }
+      ],
+      "errors": [],
+      "jobs": [
+        {
+          "branch_id": "central",
+          "name": "중앙도서관",
+          "status": "ok",
+          "result": {
+            "branch_id": "central",
+            "name": "중앙도서관",
+            "title": "비동기 프로그래밍",
+            "found": true,
+            "available_count": 1,
+            "updated_at": "2026-10-29T09:00:00+09:00"
+          },
+          "error": null,
+          "started_at": "2026-10-29T07:34:26.847318+00:00",
+          "finished_at": "2026-10-29T07:34:27.147546+00:00",
+          "elapsed_seconds": 0.301179
+        },
+        {
+          "branch_id": "east",
+          "name": "동부도서관",
+          "status": "ok",
+          "result": {
+            "branch_id": "east",
+            "name": "동부도서관",
+            "title": "비동기 프로그래밍",
+            "found": false,
+            "available_count": null,
+            "updated_at": "2026-10-29T09:00:00+09:00"
+          },
+          "error": null,
+          "started_at": "2026-10-29T07:34:26.847318+00:00",
+          "finished_at": "2026-10-29T07:34:26.961353+00:00",
+          "elapsed_seconds": 0.113875
+        },
+        {
+          "branch_id": "west",
+          "name": "서부도서관",
+          "status": "ok",
+          "result": {
+            "branch_id": "west",
+            "name": "서부도서관",
+            "title": "비동기 프로그래밍",
+            "found": true,
+            "available_count": 0,
+            "updated_at": "2026-10-29T09:00:00+09:00"
+          },
+          "error": null,
+          "started_at": "2026-10-29T07:34:26.961353+00:00",
+          "finished_at": "2026-10-29T07:34:27.147546+00:00",
+          "elapsed_seconds": 0.188546
+        }
+      ],
+      "elapsed_seconds": 0.302869,
+      "peak_active": 2
+    },
+    "summary_without_model": "『비동기 프로그래밍』 조회 결과 (complete, 고정 가상 자료)\n- 중앙도서관: 대출 가능 1권 (자료 기준 시각: 2026-10-29T09:00:00+09:00)\n- 동부도서관: 도서 미등록 (자료 기준 시각: 2026-10-29T09:00:00+09:00)\n- 서부도서관: 대출 가능 0권 (자료 기준 시각: 2026-10-29T09:00:00+09:00)"
+  },
+  {
+    "request": "『우주 항해 입문』을 빌릴 수 있는 지점을 알려 줘.",
+    "scenario": "normal",
+    "mode": "sequential",
+    "max_concurrency": 2,
+    "expected_collection_status": "complete",
+    "model_calls": 0,
+    "internal_jobs": 3,
+    "merged": {
+      "title": "우주 항해 입문",
+      "collection_status": "complete",
+      "available_branches": [],
+      "unavailable_branches": [],
+      "not_found_branches": [
+        {
+          "branch_id": "central",
+          "name": "중앙도서관",
+          "title": "우주 항해 입문",
+          "found": false,
+          "available_count": null,
+          "updated_at": "2026-10-29T09:00:00+09:00"
+        },
+        {
+          "branch_id": "east",
+          "name": "동부도서관",
+          "title": "우주 항해 입문",
+          "found": false,
+          "available_count": null,
+          "updated_at": "2026-10-29T09:00:00+09:00"
+        },
+        {
+          "branch_id": "west",
+          "name": "서부도서관",
+          "title": "우주 항해 입문",
+          "found": false,
+          "available_count": null,
+          "updated_at": "2026-10-29T09:00:00+09:00"
+        }
+      ],
+      "errors": [],
+      "jobs": [
+        {
+          "branch_id": "central",
+          "name": "중앙도서관",
+          "status": "ok",
+          "result": {
+            "branch_id": "central",
+            "name": "중앙도서관",
+            "title": "우주 항해 입문",
+            "found": false,
+            "available_count": null,
+            "updated_at": "2026-10-29T09:00:00+09:00"
+          },
+          "error": null,
+          "started_at": "2026-10-29T07:34:27.147546+00:00",
+          "finished_at": "2026-10-29T07:34:27.464531+00:00",
+          "elapsed_seconds": 0.311753
+        },
+        {
+          "branch_id": "east",
+          "name": "동부도서관",
+          "status": "ok",
+          "result": {
+            "branch_id": "east",
+            "name": "동부도서관",
+            "title": "우주 항해 입문",
+            "found": false,
+            "available_count": null,
+            "updated_at": "2026-10-29T09:00:00+09:00"
+          },
+          "error": null,
+          "started_at": "2026-10-29T07:34:27.464531+00:00",
+          "finished_at": "2026-10-29T07:34:27.575018+00:00",
+          "elapsed_seconds": 0.111633
+        },
+        {
+          "branch_id": "west",
+          "name": "서부도서관",
+          "status": "ok",
+          "result": {
+            "branch_id": "west",
+            "name": "서부도서관",
+            "title": "우주 항해 입문",
+            "found": false,
+            "available_count": null,
+            "updated_at": "2026-10-29T09:00:00+09:00"
+          },
+          "error": null,
+          "started_at": "2026-10-29T07:34:27.575018+00:00",
+          "finished_at": "2026-10-29T07:34:27.786166+00:00",
+          "elapsed_seconds": 0.210196
+        }
+      ],
+      "elapsed_seconds": 0.633841,
+      "peak_active": 1
+    },
+    "summary_without_model": "『우주 항해 입문』 조회 결과 (complete, 고정 가상 자료)\n- 중앙도서관: 도서 미등록 (자료 기준 시각: 2026-10-29T09:00:00+09:00)\n- 동부도서관: 도서 미등록 (자료 기준 시각: 2026-10-29T09:00:00+09:00)\n- 서부도서관: 도서 미등록 (자료 기준 시각: 2026-10-29T09:00:00+09:00)"
+  },
+  {
+    "request": "『우주 항해 입문』을 빌릴 수 있는 지점을 알려 줘.",
+    "scenario": "normal",
+    "mode": "parallel",
+    "max_concurrency": 1,
+    "expected_collection_status": "complete",
+    "model_calls": 0,
+    "internal_jobs": 3,
+    "merged": {
+      "title": "우주 항해 입문",
+      "collection_status": "complete",
+      "available_branches": [],
+      "unavailable_branches": [],
+      "not_found_branches": [
+        {
+          "branch_id": "central",
+          "name": "중앙도서관",
+          "title": "우주 항해 입문",
+          "found": false,
+          "available_count": null,
+          "updated_at": "2026-10-29T09:00:00+09:00"
+        },
+        {
+          "branch_id": "east",
+          "name": "동부도서관",
+          "title": "우주 항해 입문",
+          "found": false,
+          "available_count": null,
+          "updated_at": "2026-10-29T09:00:00+09:00"
+        },
+        {
+          "branch_id": "west",
+          "name": "서부도서관",
+          "title": "우주 항해 입문",
+          "found": false,
+          "available_count": null,
+          "updated_at": "2026-10-29T09:00:00+09:00"
+        }
+      ],
+      "errors": [],
+      "jobs": [
+        {
+          "branch_id": "central",
+          "name": "중앙도서관",
+          "status": "ok",
+          "result": {
+            "branch_id": "central",
+            "name": "중앙도서관",
+            "title": "우주 항해 입문",
+            "found": false,
+            "available_count": null,
+            "updated_at": "2026-10-29T09:00:00+09:00"
+          },
+          "error": null,
+          "started_at": "2026-10-29T07:34:27.788149+00:00",
+          "finished_at": "2026-10-29T07:34:28.097384+00:00",
+          "elapsed_seconds": 0.309377
+        },
+        {
+          "branch_id": "east",
+          "name": "동부도서관",
+          "status": "ok",
+          "result": {
+            "branch_id": "east",
+            "name": "동부도서관",
+            "title": "우주 항해 입문",
+            "found": false,
+            "available_count": null,
+            "updated_at": "2026-10-29T09:00:00+09:00"
+          },
+          "error": null,
+          "started_at": "2026-10-29T07:34:28.097384+00:00",
+          "finished_at": "2026-10-29T07:34:28.207732+00:00",
+          "elapsed_seconds": 0.111819
+        },
+        {
+          "branch_id": "west",
+          "name": "서부도서관",
+          "status": "ok",
+          "result": {
+            "branch_id": "west",
+            "name": "서부도서관",
+            "title": "우주 항해 입문",
+            "found": false,
+            "available_count": null,
+            "updated_at": "2026-10-29T09:00:00+09:00"
+          },
+          "error": null,
+          "started_at": "2026-10-29T07:34:28.207732+00:00",
+          "finished_at": "2026-10-29T07:34:28.420933+00:00",
+          "elapsed_seconds": 0.211619
+        }
+      ],
+      "elapsed_seconds": 0.633293,
+      "peak_active": 1
+    },
+    "summary_without_model": "『우주 항해 입문』 조회 결과 (complete, 고정 가상 자료)\n- 중앙도서관: 도서 미등록 (자료 기준 시각: 2026-10-29T09:00:00+09:00)\n- 동부도서관: 도서 미등록 (자료 기준 시각: 2026-10-29T09:00:00+09:00)\n- 서부도서관: 도서 미등록 (자료 기준 시각: 2026-10-29T09:00:00+09:00)"
+  },
+  {
+    "request": "『우주 항해 입문』을 빌릴 수 있는 지점을 알려 줘.",
+    "scenario": "normal",
+    "mode": "parallel",
+    "max_concurrency": 2,
+    "expected_collection_status": "complete",
+    "model_calls": 0,
+    "internal_jobs": 3,
+    "merged": {
+      "title": "우주 항해 입문",
+      "collection_status": "complete",
+      "available_branches": [],
+      "unavailable_branches": [],
+      "not_found_branches": [
+        {
+          "branch_id": "central",
+          "name": "중앙도서관",
+          "title": "우주 항해 입문",
+          "found": false,
+          "available_count": null,
+          "updated_at": "2026-10-29T09:00:00+09:00"
+        },
+        {
+          "branch_id": "east",
+          "name": "동부도서관",
+          "title": "우주 항해 입문",
+          "found": false,
+          "available_count": null,
+          "updated_at": "2026-10-29T09:00:00+09:00"
+        },
+        {
+          "branch_id": "west",
+          "name": "서부도서관",
+          "title": "우주 항해 입문",
+          "found": false,
+          "available_count": null,
+          "updated_at": "2026-10-29T09:00:00+09:00"
+        }
+      ],
+      "errors": [],
+      "jobs": [
+        {
+          "branch_id": "central",
+          "name": "중앙도서관",
+          "status": "ok",
+          "result": {
+            "branch_id": "central",
+            "name": "중앙도서관",
+            "title": "우주 항해 입문",
+            "found": false,
+            "available_count": null,
+            "updated_at": "2026-10-29T09:00:00+09:00"
+          },
+          "error": null,
+          "started_at": "2026-10-29T07:34:28.423012+00:00",
+          "finished_at": "2026-10-29T07:34:28.728743+00:00",
+          "elapsed_seconds": 0.305677
+        },
+        {
+          "branch_id": "east",
+          "name": "동부도서관",
+          "status": "ok",
+          "result": {
+            "branch_id": "east",
+            "name": "동부도서관",
+            "title": "우주 항해 입문",
+            "found": false,
+            "available_count": null,
+            "updated_at": "2026-10-29T09:00:00+09:00"
+          },
+          "error": null,
+          "started_at": "2026-10-29T07:34:28.423012+00:00",
+          "finished_at": "2026-10-29T07:34:28.540120+00:00",
+          "elapsed_seconds": 0.118342
+        },
+        {
+          "branch_id": "west",
+          "name": "서부도서관",
+          "status": "ok",
+          "result": {
+            "branch_id": "west",
+            "name": "서부도서관",
+            "title": "우주 항해 입문",
+            "found": false,
+            "available_count": null,
+            "updated_at": "2026-10-29T09:00:00+09:00"
+          },
+          "error": null,
+          "started_at": "2026-10-29T07:34:28.540120+00:00",
+          "finished_at": "2026-10-29T07:34:28.728743+00:00",
+          "elapsed_seconds": 0.187301
+        }
+      ],
+      "elapsed_seconds": 0.306024,
+      "peak_active": 2
+    },
+    "summary_without_model": "『우주 항해 입문』 조회 결과 (complete, 고정 가상 자료)\n- 중앙도서관: 도서 미등록 (자료 기준 시각: 2026-10-29T09:00:00+09:00)\n- 동부도서관: 도서 미등록 (자료 기준 시각: 2026-10-29T09:00:00+09:00)\n- 서부도서관: 도서 미등록 (자료 기준 시각: 2026-10-29T09:00:00+09:00)"
+  },
+  {
+    "request": "『파이썬 첫걸음』을 빌릴 수 있는 지점을 알려 줘.",
+    "scenario": "east_error",
+    "mode": "sequential",
+    "max_concurrency": 2,
+    "expected_collection_status": "partial",
+    "model_calls": 0,
+    "internal_jobs": 3,
+    "merged": {
+      "title": "파이썬 첫걸음",
+      "collection_status": "partial",
+      "available_branches": [
+        {
+          "branch_id": "central",
+          "name": "중앙도서관",
+          "title": "파이썬 첫걸음",
+          "found": true,
+          "available_count": 2,
+          "updated_at": "2026-10-29T09:00:00+09:00"
+        },
+        {
+          "branch_id": "west",
+          "name": "서부도서관",
+          "title": "파이썬 첫걸음",
+          "found": true,
+          "available_count": 1,
+          "updated_at": "2026-10-29T09:00:00+09:00"
+        }
+      ],
+      "unavailable_branches": [],
+      "not_found_branches": [],
+      "errors": [
+        {
+          "branch_id": "east",
+          "name": "동부도서관",
+          "error": "RuntimeError: 시나리오에 지정된 가상 조회 오류"
+        }
+      ],
+      "jobs": [
+        {
+          "branch_id": "central",
+          "name": "중앙도서관",
+          "status": "ok",
+          "result": {
+            "branch_id": "central",
+            "name": "중앙도서관",
+            "title": "파이썬 첫걸음",
+            "found": true,
+            "available_count": 2,
+            "updated_at": "2026-10-29T09:00:00+09:00"
+          },
+          "error": null,
+          "started_at": "2026-10-29T07:34:28.731747+00:00",
+          "finished_at": "2026-10-29T07:34:29.047583+00:00",
+          "elapsed_seconds": 0.316372
+        },
+        {
+          "branch_id": "east",
+          "name": "동부도서관",
+          "status": "error",
+          "result": null,
+          "error": "RuntimeError: 시나리오에 지정된 가상 조회 오류",
+          "started_at": "2026-10-29T07:34:29.047583+00:00",
+          "finished_at": "2026-10-29T07:34:29.155623+00:00",
+          "elapsed_seconds": 0.107506
+        },
+        {
+          "branch_id": "west",
+          "name": "서부도서관",
+          "status": "ok",
+          "result": {
+            "branch_id": "west",
+            "name": "서부도서관",
+            "title": "파이썬 첫걸음",
+            "found": true,
+            "available_count": 1,
+            "updated_at": "2026-10-29T09:00:00+09:00"
+          },
+          "error": null,
+          "started_at": "2026-10-29T07:34:29.155623+00:00",
+          "finished_at": "2026-10-29T07:34:29.380897+00:00",
+          "elapsed_seconds": 0.226119
+        }
+      ],
+      "elapsed_seconds": 0.650443,
+      "peak_active": 1
+    },
+    "summary_without_model": "『파이썬 첫걸음』 조회 결과 (partial, 고정 가상 자료)\n- 중앙도서관: 대출 가능 2권 (자료 기준 시각: 2026-10-29T09:00:00+09:00)\n- 동부도서관: 미확인 — RuntimeError: 시나리오에 지정된 가상 조회 오류\n- 서부도서관: 대출 가능 1권 (자료 기준 시각: 2026-10-29T09:00:00+09:00)\n조회 실패한 지점의 권수는 확인하지 못했습니다."
+  },
+  {
+    "request": "『파이썬 첫걸음』을 빌릴 수 있는 지점을 알려 줘.",
+    "scenario": "east_error",
+    "mode": "parallel",
+    "max_concurrency": 1,
+    "expected_collection_status": "partial",
+    "model_calls": 0,
+    "internal_jobs": 3,
+    "merged": {
+      "title": "파이썬 첫걸음",
+      "collection_status": "partial",
+      "available_branches": [
+        {
+          "branch_id": "central",
+          "name": "중앙도서관",
+          "title": "파이썬 첫걸음",
+          "found": true,
+          "available_count": 2,
+          "updated_at": "2026-10-29T09:00:00+09:00"
+        },
+        {
+          "branch_id": "west",
+          "name": "서부도서관",
+          "title": "파이썬 첫걸음",
+          "found": true,
+          "available_count": 1,
+          "updated_at": "2026-10-29T09:00:00+09:00"
+        }
+      ],
+      "unavailable_branches": [],
+      "not_found_branches": [],
+      "errors": [
+        {
+          "branch_id": "east",
+          "name": "동부도서관",
+          "error": "RuntimeError: 시나리오에 지정된 가상 조회 오류"
+        }
+      ],
+      "jobs": [
+        {
+          "branch_id": "central",
+          "name": "중앙도서관",
+          "status": "ok",
+          "result": {
+            "branch_id": "central",
+            "name": "중앙도서관",
+            "title": "파이썬 첫걸음",
+            "found": true,
+            "available_count": 2,
+            "updated_at": "2026-10-29T09:00:00+09:00"
+          },
+          "error": null,
+          "started_at": "2026-10-29T07:34:29.380897+00:00",
+          "finished_at": "2026-10-29T07:34:29.688975+00:00",
+          "elapsed_seconds": 0.305188
+        },
+        {
+          "branch_id": "east",
+          "name": "동부도서관",
+          "status": "error",
+          "result": null,
+          "error": "RuntimeError: 시나리오에 지정된 가상 조회 오류",
+          "started_at": "2026-10-29T07:34:29.688975+00:00",
+          "finished_at": "2026-10-29T07:34:29.812835+00:00",
+          "elapsed_seconds": 0.12355
+        },
+        {
+          "branch_id": "west",
+          "name": "서부도서관",
+          "status": "ok",
+          "result": {
+            "branch_id": "west",
+            "name": "서부도서관",
+            "title": "파이썬 첫걸음",
+            "found": true,
+            "available_count": 1,
+            "updated_at": "2026-10-29T09:00:00+09:00"
+          },
+          "error": null,
+          "started_at": "2026-10-29T07:34:29.812835+00:00",
+          "finished_at": "2026-10-29T07:34:30.024186+00:00",
+          "elapsed_seconds": 0.210726
+        }
+      ],
+      "elapsed_seconds": 0.640083,
+      "peak_active": 1
+    },
+    "summary_without_model": "『파이썬 첫걸음』 조회 결과 (partial, 고정 가상 자료)\n- 중앙도서관: 대출 가능 2권 (자료 기준 시각: 2026-10-29T09:00:00+09:00)\n- 동부도서관: 미확인 — RuntimeError: 시나리오에 지정된 가상 조회 오류\n- 서부도서관: 대출 가능 1권 (자료 기준 시각: 2026-10-29T09:00:00+09:00)\n조회 실패한 지점의 권수는 확인하지 못했습니다."
+  },
+  {
+    "request": "『파이썬 첫걸음』을 빌릴 수 있는 지점을 알려 줘.",
+    "scenario": "east_error",
+    "mode": "parallel",
+    "max_concurrency": 2,
+    "expected_collection_status": "partial",
+    "model_calls": 0,
+    "internal_jobs": 3,
+    "merged": {
+      "title": "파이썬 첫걸음",
+      "collection_status": "partial",
+      "available_branches": [
+        {
+          "branch_id": "central",
+          "name": "중앙도서관",
+          "title": "파이썬 첫걸음",
+          "found": true,
+          "available_count": 2,
+          "updated_at": "2026-10-29T09:00:00+09:00"
+        },
+        {
+          "branch_id": "west",
+          "name": "서부도서관",
+          "title": "파이썬 첫걸음",
+          "found": true,
+          "available_count": 1,
+          "updated_at": "2026-10-29T09:00:00+09:00"
+        }
+      ],
+      "unavailable_branches": [],
+      "not_found_branches": [],
+      "errors": [
+        {
+          "branch_id": "east",
+          "name": "동부도서관",
+          "error": "RuntimeError: 시나리오에 지정된 가상 조회 오류"
+        }
+      ],
+      "jobs": [
+        {
+          "branch_id": "central",
+          "name": "중앙도서관",
+          "status": "ok",
+          "result": {
+            "branch_id": "central",
+            "name": "중앙도서관",
+            "title": "파이썬 첫걸음",
+            "found": true,
+            "available_count": 2,
+            "updated_at": "2026-10-29T09:00:00+09:00"
+          },
+          "error": null,
+          "started_at": "2026-10-29T07:34:30.026180+00:00",
+          "finished_at": "2026-10-29T07:34:30.324845+00:00",
+          "elapsed_seconds": 0.301586
+        },
+        {
+          "branch_id": "east",
+          "name": "동부도서관",
+          "status": "error",
+          "result": null,
+          "error": "RuntimeError: 시나리오에 지정된 가상 조회 오류",
+          "started_at": "2026-10-29T07:34:30.026180+00:00",
+          "finished_at": "2026-10-29T07:34:30.133207+00:00",
+          "elapsed_seconds": 0.107035
+        },
+        {
+          "branch_id": "west",
+          "name": "서부도서관",
+          "status": "ok",
+          "result": {
+            "branch_id": "west",
+            "name": "서부도서관",
+            "title": "파이썬 첫걸음",
+            "found": true,
+            "available_count": 1,
+            "updated_at": "2026-10-29T09:00:00+09:00"
+          },
+          "error": null,
+          "started_at": "2026-10-29T07:34:30.133207+00:00",
+          "finished_at": "2026-10-29T07:34:30.328056+00:00",
+          "elapsed_seconds": 0.195328
+        }
+      ],
+      "elapsed_seconds": 0.303,
+      "peak_active": 2
+    },
+    "summary_without_model": "『파이썬 첫걸음』 조회 결과 (partial, 고정 가상 자료)\n- 중앙도서관: 대출 가능 2권 (자료 기준 시각: 2026-10-29T09:00:00+09:00)\n- 동부도서관: 미확인 — RuntimeError: 시나리오에 지정된 가상 조회 오류\n- 서부도서관: 대출 가능 1권 (자료 기준 시각: 2026-10-29T09:00:00+09:00)\n조회 실패한 지점의 권수는 확인하지 못했습니다."
+  },
+  {
+    "request": "『파이썬 첫걸음』을 빌릴 수 있는 지점을 알려 줘.",
+    "scenario": "all_error",
+    "mode": "sequential",
+    "max_concurrency": 2,
+    "expected_collection_status": "failed",
+    "model_calls": 0,
+    "internal_jobs": 3,
+    "merged": {
+      "title": "파이썬 첫걸음",
+      "collection_status": "failed",
+      "available_branches": [],
+      "unavailable_branches": [],
+      "not_found_branches": [],
+      "errors": [
+        {
+          "branch_id": "central",
+          "name": "중앙도서관",
+          "error": "RuntimeError: 시나리오에 지정된 가상 조회 오류"
+        },
+        {
+          "branch_id": "east",
+          "name": "동부도서관",
+          "error": "RuntimeError: 시나리오에 지정된 가상 조회 오류"
+        },
+        {
+          "branch_id": "west",
+          "name": "서부도서관",
+          "error": "RuntimeError: 시나리오에 지정된 가상 조회 오류"
+        }
+      ],
+      "jobs": [
+        {
+          "branch_id": "central",
+          "name": "중앙도서관",
+          "status": "error",
+          "result": null,
+          "error": "RuntimeError: 시나리오에 지정된 가상 조회 오류",
+          "started_at": "2026-10-29T07:34:30.328056+00:00",
+          "finished_at": "2026-10-29T07:34:30.630876+00:00",
+          "elapsed_seconds": 0.29927
+        },
+        {
+          "branch_id": "east",
+          "name": "동부도서관",
+          "status": "error",
+          "result": null,
+          "error": "RuntimeError: 시나리오에 지정된 가상 조회 오류",
+          "started_at": "2026-10-29T07:34:30.630876+00:00",
+          "finished_at": "2026-10-29T07:34:30.742824+00:00",
+          "elapsed_seconds": 0.111901
+        },
+        {
+          "branch_id": "west",
+          "name": "서부도서관",
+          "status": "error",
+          "result": null,
+          "error": "RuntimeError: 시나리오에 지정된 가상 조회 오류",
+          "started_at": "2026-10-29T07:34:30.742824+00:00",
+          "finished_at": "2026-10-29T07:34:30.958872+00:00",
+          "elapsed_seconds": 0.216032
+        }
+      ],
+      "elapsed_seconds": 0.627678,
+      "peak_active": 1
+    },
+    "summary_without_model": "『파이썬 첫걸음』 조회 결과 (failed, 고정 가상 자료)\n- 중앙도서관: 미확인 — RuntimeError: 시나리오에 지정된 가상 조회 오류\n- 동부도서관: 미확인 — RuntimeError: 시나리오에 지정된 가상 조회 오류\n- 서부도서관: 미확인 — RuntimeError: 시나리오에 지정된 가상 조회 오류\n조회 실패한 지점의 권수는 확인하지 못했습니다."
+  },
+  {
+    "request": "『파이썬 첫걸음』을 빌릴 수 있는 지점을 알려 줘.",
+    "scenario": "all_error",
+    "mode": "parallel",
+    "max_concurrency": 1,
+    "expected_collection_status": "failed",
+    "model_calls": 0,
+    "internal_jobs": 3,
+    "merged": {
+      "title": "파이썬 첫걸음",
+      "collection_status": "failed",
+      "available_branches": [],
+      "unavailable_branches": [],
+      "not_found_branches": [],
+      "errors": [
+        {
+          "branch_id": "central",
+          "name": "중앙도서관",
+          "error": "RuntimeError: 시나리오에 지정된 가상 조회 오류"
+        },
+        {
+          "branch_id": "east",
+          "name": "동부도서관",
+          "error": "RuntimeError: 시나리오에 지정된 가상 조회 오류"
+        },
+        {
+          "branch_id": "west",
+          "name": "서부도서관",
+          "error": "RuntimeError: 시나리오에 지정된 가상 조회 오류"
+        }
+      ],
+      "jobs": [
+        {
+          "branch_id": "central",
+          "name": "중앙도서관",
+          "status": "error",
+          "result": null,
+          "error": "RuntimeError: 시나리오에 지정된 가상 조회 오류",
+          "started_at": "2026-10-29T07:34:30.958872+00:00",
+          "finished_at": "2026-10-29T07:34:31.269779+00:00",
+          "elapsed_seconds": 0.307781
+        },
+        {
+          "branch_id": "east",
+          "name": "동부도서관",
+          "status": "error",
+          "result": null,
+          "error": "RuntimeError: 시나리오에 지정된 가상 조회 오류",
+          "started_at": "2026-10-29T07:34:31.269779+00:00",
+          "finished_at": "2026-10-29T07:34:31.379510+00:00",
+          "elapsed_seconds": 0.109766
+        },
+        {
+          "branch_id": "west",
+          "name": "서부도서관",
+          "status": "error",
+          "result": null,
+          "error": "RuntimeError: 시나리오에 지정된 가상 조회 오류",
+          "started_at": "2026-10-29T07:34:31.379510+00:00",
+          "finished_at": "2026-10-29T07:34:31.587639+00:00",
+          "elapsed_seconds": 0.20783
+        }
+      ],
+      "elapsed_seconds": 0.626226,
+      "peak_active": 1
+    },
+    "summary_without_model": "『파이썬 첫걸음』 조회 결과 (failed, 고정 가상 자료)\n- 중앙도서관: 미확인 — RuntimeError: 시나리오에 지정된 가상 조회 오류\n- 동부도서관: 미확인 — RuntimeError: 시나리오에 지정된 가상 조회 오류\n- 서부도서관: 미확인 — RuntimeError: 시나리오에 지정된 가상 조회 오류\n조회 실패한 지점의 권수는 확인하지 못했습니다."
+  },
+  {
+    "request": "『파이썬 첫걸음』을 빌릴 수 있는 지점을 알려 줘.",
+    "scenario": "all_error",
+    "mode": "parallel",
+    "max_concurrency": 2,
+    "expected_collection_status": "failed",
+    "model_calls": 0,
+    "internal_jobs": 3,
+    "merged": {
+      "title": "파이썬 첫걸음",
+      "collection_status": "failed",
+      "available_branches": [],
+      "unavailable_branches": [],
+      "not_found_branches": [],
+      "errors": [
+        {
+          "branch_id": "central",
+          "name": "중앙도서관",
+          "error": "RuntimeError: 시나리오에 지정된 가상 조회 오류"
+        },
+        {
+          "branch_id": "east",
+          "name": "동부도서관",
+          "error": "RuntimeError: 시나리오에 지정된 가상 조회 오류"
+        },
+        {
+          "branch_id": "west",
+          "name": "서부도서관",
+          "error": "RuntimeError: 시나리오에 지정된 가상 조회 오류"
+        }
+      ],
+      "jobs": [
+        {
+          "branch_id": "central",
+          "name": "중앙도서관",
+          "status": "error",
+          "result": null,
+          "error": "RuntimeError: 시나리오에 지정된 가상 조회 오류",
+          "started_at": "2026-10-29T07:34:31.587639+00:00",
+          "finished_at": "2026-10-29T07:34:31.897644+00:00",
+          "elapsed_seconds": 0.307201
+        },
+        {
+          "branch_id": "east",
+          "name": "동부도서관",
+          "status": "error",
+          "result": null,
+          "error": "RuntimeError: 시나리오에 지정된 가상 조회 오류",
+          "started_at": "2026-10-29T07:34:31.587639+00:00",
+          "finished_at": "2026-10-29T07:34:31.691446+00:00",
+          "elapsed_seconds": 0.100879
+        },
+        {
+          "branch_id": "west",
+          "name": "서부도서관",
+          "status": "error",
+          "result": null,
+          "error": "RuntimeError: 시나리오에 지정된 가상 조회 오류",
+          "started_at": "2026-10-29T07:34:31.691446+00:00",
+          "finished_at": "2026-10-29T07:34:31.897644+00:00",
+          "elapsed_seconds": 0.205745
+        }
+      ],
+      "elapsed_seconds": 0.307464,
+      "peak_active": 2
+    },
+    "summary_without_model": "『파이썬 첫걸음』 조회 결과 (failed, 고정 가상 자료)\n- 중앙도서관: 미확인 — RuntimeError: 시나리오에 지정된 가상 조회 오류\n- 동부도서관: 미확인 — RuntimeError: 시나리오에 지정된 가상 조회 오류\n- 서부도서관: 미확인 — RuntimeError: 시나리오에 지정된 가상 조회 오류\n조회 실패한 지점의 권수는 확인하지 못했습니다."
+  }
+]
