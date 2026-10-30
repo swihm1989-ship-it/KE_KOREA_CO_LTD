@@ -94,11 +94,11 @@ def match_eclado_product(name, capacity=None, products=None):
     """Match exact English item and, when supplied, exact capacity. Never fuzzy-match."""
     products = products if products is not None else load_local_catalog()
     key = " ".join(str(name or "").split()).casefold()
-    capacity_key = " ".join(str(capacity or "").split()).casefold() or None
+    capacity_key = re.sub(r"\s+", "", str(capacity or "")).casefold() or None
     exact = [p for p in products if p.get("brand") == "ECLADO" and
              " ".join(str(p.get("item_name") or "").split()).casefold() == key]
     if capacity_key is not None:
-        exact = [p for p in exact if " ".join(str(p.get("capacity") or "").split()).casefold() == capacity_key]
+        exact = [p for p in exact if re.sub(r"\s+", "", str(p.get("capacity") or "")).casefold() == capacity_key]
     if len(exact) != 1:
         return {"status": "not_found" if not exact else "ambiguous", "matches": exact}
     return {"status": "matched", "product": exact[0]}
@@ -161,10 +161,16 @@ def apply_verified_eclado_prices(draft, seed=None):
             # model to infer it from the order screenshot.
             draft["currency"] = price.get("currency")
         provided = item.get("unit_price")
+        provided_amount = None
         try:
-            price_differs = provided not in (None, "") and Decimal(str(provided)) != Decimal(str(price["unit_price"]))
+            if provided not in (None, ""):
+                candidate_amount = Decimal(str(provided))
+                if candidate_amount.is_finite() and candidate_amount > 0:
+                    provided_amount = candidate_amount
         except (InvalidOperation, TypeError, ValueError):
-            price_differs = True
+            pass
+        price_differs = (provided_amount is not None and
+                         provided_amount != Decimal(str(price["unit_price"])))
         if item.get("price_override_confirmed"):
             draft["conflicts"] = [c for c in draft.get("conflicts", [])
                                   if not (product.get("item_name", "") in c and "stated price differs from the verified catalog" in c)]
