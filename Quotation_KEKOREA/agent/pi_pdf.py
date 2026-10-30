@@ -300,7 +300,7 @@ def render_charcoal_gold_pi(data, bank_details, *, logo_path=None, seal_path=Non
     canvas.rect(392, 613, 182, 103, (1,1,1), PALE, 0.8)
     canvas.text(404, 630, "AUTHORIZED REPRESENTATIVE", 6.0, True, MUTED)
     canvas.text(404, 648, "DAVID, SEOKWON IHM", 7.5, True, INK)
-    if not canvas.image(seal_path, 504, 657, 56, 54, watermark=False, crop_box=(748, 148, 120, 120)):
+    if not canvas.image(seal_path, 440, 657, 120, 54, watermark=False):
         canvas.rect(398, 654, 170, 58, None, BRAND_BLUE, 0.7)
         canvas.text(441, 686, "COMPANY SEAL", 6.2, True, BRAND_BLUE)
 
@@ -498,7 +498,7 @@ def _document_row(item, is_packing_list, currency):
 def _paginate_rows(rows, first_table_top, review_height, is_packing_list, packing_quantity_lines=1):
     """Fit measured row heights around reserved totals, review, signature, and footer areas."""
     content_bottom = 752
-    last_page_reserve = (163 + max(0, packing_quantity_lines - 1) * 8 if is_packing_list else 132) + review_height
+    last_page_reserve = (185 + max(0, packing_quantity_lines - 1) * 8 if is_packing_list else 154) + review_height
     first_final_capacity = content_bottom - first_table_top - 17 - last_page_reserve
     if sum(row["height"] for row in rows) <= first_final_capacity:
         return [rows]
@@ -702,14 +702,13 @@ def render_trade_document(data, bank_details=None, *, logo_path=None, seal_path=
                 sign_x, sign_width = 398, 179
             else:
                 sign_x, sign_width = 398, 179
-            canvas.rect(sign_x, bottom, sign_width, 86, (1, 1, 1), PALE, 0.7)
+            canvas.rect(sign_x, bottom, sign_width, 108, (1, 1, 1), PALE, 0.7)
             canvas.text(sign_x + 10, bottom + 17, "AUTHORIZED REPRESENTATIVE", 5.3, True, MUTED)
             canvas.text(sign_x + 10, bottom + 32, "DAVID, SEOKWON IHM", 6.3, True, INK)
             canvas.text(sign_x + 10, bottom + 42, "KE KOREA CO. LTD", 5.8, False, INK)
-            if not canvas.image(seal_path, sign_x + 10, bottom + 47, 38, 34,
-                                crop_box=(748, 148, 120, 120)):
+            if not canvas.image(seal_path, sign_x + 10, bottom + 47, sign_width - 20, 53):
                 raise ValueError("KE KOREA company seal could not be embedded in the PDF")
-            if bottom + 86 > 752:
+            if bottom + 108 > 752:
                 raise ValueError("Document content exceeds the reserved footer area; add a page break or shorten the source information")
 
         canvas.line(35, 778, 577, 778, (0.86, 0.85, 0.82), 0.5)

@@ -261,7 +261,7 @@ API 기반 판독을 선택하면 어떤 자료가 외부로 전송되는지 표
 - `app.py`: Streamlit screen for typed transaction details and buyer order-image uploads. Users review extracted JSON, resolve blocking issues, and download PDF/XLSX/HTML drafts.
 - `agent/extractor.py`: OpenAI Responses API structured extraction from transaction text and attached order screenshots. Prompt and images are sent only after the user clicks Extract.
 - 입력 언어: 중국어·인도네시아어·한국어를 GPT가 해석해 영문 필드로 정리한다. 중국어 회사명·주소는 중국어 원문 뒤에 영문 번역을 괄호로 병기하고, 나머지 중국어는 영문만 남긴다. PDF는 중국어 글리프용 CID 폰트 인코딩으로 병기 이름·주소를 보존한다.
-- KE Korea default profile for all PI, PO, CI, PL, and CIPL documents: `KE Korea Co. LTD`, `#1510, 157 Yangpyung Ro, Yungdeungpo Gu, Seoul, South Korea`, `Representative: DAVID, SEOKWON IHM`, phone `+82 10 9823 0029`, and email `david.ihm@ke-korea.com`. The profile is seller by default and buyer on PO; transaction-specific company details take priority. Solar PI uses `assets/company_logo.png` in the header and the private seal from `private/company_seal.png`; never commit the private seal.
+- KE Korea default profile for all PI, PO, CI, PL, and CIPL documents: `KE Korea Co. LTD`, `#1510, 157 Yangpyung Ro, Yungdeungpo Gu, Seoul, South Korea`, `Representative: DAVID, SEOKWON IHM`, phone `+82 10 9823 0029`, and email `david.ihm@ke-korea.com`. The profile is seller by default and buyer on PO; transaction-specific company details take priority. Documents use `assets/company_logo.png` in the header and the complete private seal image from `assets/image.png` in the signature area.
 - `agent/pricing.py`: Supabase REST API에서 최신 `kekorea_catalog_imports` ID, ECLADO 제품, 해당 import의 매입가·판매가를 서버에서 조회한다. ECLADO 공급 PO에는 매입가만, Dear Glow 판매 PI/CI에는 해당 구매처 판매가만 exact match로 적용한다. 구매처·공급처/통화가 다르면 해당 가격을 쓰지 않는다.
 - Supabase 신형 `SUPABASE_SECRET_KEY`는 HTTPS REST 요청의 `apikey` 헤더로만 전달한다. 브라우저 코드, URL, 로그에 키를 노출하지 않는다. Secret key는 전체 DB 접근 권한이 있으므로 Streamlit 앱 공개 범위를 반드시 비공개로 설정한다.
 - Supabase 연결 설정이 없으면 개발용 로컬 seed를 사용할 수 있으나, Cloud에서는 seed를 Git에서 제외하므로 Supabase 비밀 키가 필요하다. Supabase 조회 실패 시 오래된 로컬 가격으로 조용히 대체하지 않는다.
@@ -321,11 +321,11 @@ The solar PI header displays the supplied company logo in a white brand panel. T
 ## Brand assets and Cloud secrets
 
 - The solar PI displays the supplied logo in a white header area. Navy and blue replace the previous charcoal and gold theme. No body watermark is used.
-- `assets/company_logo.png` is tracked. The source seal `assets/명판직인.png` is used automatically in local runs; `private/company_seal.png`, the seal asset, `.env`, generated outputs, and catalog seed data are excluded from Git.
-- The GitHub repository is public, so keep the company seal out of Git. Streamlit Cloud uses `KEKOREA_COMPANY_SEAL_BASE64` for the seal and the six `KEKOREA_USD_*` variables for PI bank details. Generate the seal value in PowerShell from the repository root with:
+- `assets/company_logo.png` is tracked. The complete seal image `assets/image.png` is used automatically in local runs; the seal images, `.env`, generated outputs, and catalog seed data are excluded from Git.
+- The GitHub repository is public, so keep the company seal out of Git. Streamlit Cloud uses `KEKOREA_COMPANY_SEAL_BASE64` for the seal and the six `KEKOREA_USD_*` variables for PI bank details. Replace the previous secret with the Base64 of `assets/image.png`; the app verifies the secret matches that image before use. Generate the seal value in PowerShell from the repository root with:
 
 ```powershell
-[Convert]::ToBase64String([IO.File]::ReadAllBytes('.\Quotation_KEKOREA\assets\명판직인.png')) | Set-Clipboard
+[Convert]::ToBase64String([IO.File]::ReadAllBytes('.\Quotation_KEKOREA\assets\image.png')) | Set-Clipboard
 ```
 
 Copy the resulting value into Streamlit Cloud Secrets. Bank details appear on PI only.
@@ -339,7 +339,7 @@ The Streamlit sidebar offers separate PI, PO, CI, PL, and CIPL workflows. CI cre
 
 Field extraction accepts common equivalent labels instead of requiring exact schema wording: Qty/Q'ty/ordered units/Volume for quantities; Item/Product/Goods/Description for product names; Unit Price/Rate/Price per unit for prices; Shipping Terms/Terms of Shipping/Ship Conditions/Delivery Terms for Incoterms; and Payment Conditions/Terms of Payment/Settlement Terms for payment. SET, BOX, CARTON, CTN, PALLET, and similar terms are retained as units or package descriptors based on context, never converted to another unit. If a quantity uses ambiguous `Volume` or a bare package-count label such as `Box: 10`, the review screen asks the user to confirm the interpretation before enabling PDF/XLSX downloads. Cubic/package volume and delivery dates are kept distinct from ordered quantity and Incoterms.
 
-The shared PDF renderer preserves the source quantity unit on PI, PO, and CI lines (including PC/PCS/KG) and shows the unit separately in PL. It formats total quantities with thousands separators and groups different units instead of adding incompatible units together. CI/PI/PO amount boxes center both label and amount. Every PDF type requires and embeds the company seal below `KE KOREA CO. LTD` in its signature panel; if the seal asset is unavailable, downloads are blocked. Local generation uses `private/company_seal.png`; Streamlit Cloud must provide the top-level `KEKOREA_COMPANY_SEAL_BASE64` secret.
+The shared PDF renderer preserves the source quantity unit on PI, PO, and CI lines (including PC/PCS/KG) and shows the unit separately in PL. It formats total quantities with thousands separators and groups different units instead of adding incompatible units together. CI/PI/PO amount boxes center both label and amount. Every PDF type embeds the full `assets/image.png` company seal below `KE KOREA CO. LTD` in its signature panel; if that image is unavailable, downloads are blocked. Streamlit Cloud must provide the matching top-level `KEKOREA_COMPANY_SEAL_BASE64` secret.
 
 ### Automatic document fields
 

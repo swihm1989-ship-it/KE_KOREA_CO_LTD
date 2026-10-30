@@ -1,5 +1,4 @@
 """Streamlit interface for KE KOREA trade-document drafts."""
-import base64
 import json
 import tempfile
 from pathlib import Path
@@ -13,6 +12,7 @@ ROOT = Path(__file__).resolve().parent
 REPOSITORY_ROOT = ROOT.parent
 sys.path.insert(0, str(REPOSITORY_ROOT))
 from Quotation_KEKOREA.agent.extractor import extract_trade_data, load_env, verify_item_quotes
+from Quotation_KEKOREA.agent.branding import resolve_company_seal
 from Quotation_KEKOREA.agent.pricing import apply_verified_eclado_prices, load_local_seed, load_supabase_catalog
 from Quotation_KEKOREA.agent.packing import reconcile_packing
 from Quotation_KEKOREA.agent.renderers import format_currency_amount, render_files
@@ -512,25 +512,7 @@ if raw:
         bank_keys = ("BENEFICIARY", "BANK_NAME", "BRANCH", "SWIFT", "ACCOUNT_NUMBER", "BANK_ADDRESS")
         bank_details = {key: str(runtime_env.get(f"KEKOREA_USD_{key}", "")).strip() for key in bank_keys}
         missing_bank_keys = [f"KEKOREA_USD_{key}" for key, value in bank_details.items() if not value]
-        encoded_seal = str(runtime_env.get("KEKOREA_COMPANY_SEAL_BASE64", "")).strip()
-        seal_bytes = None
-        seal_secret_error = None
-        if encoded_seal:
-            encoded_seal = re.sub(r"\s+", "", encoded_seal)
-            encoded_seal = re.sub(r"^data:image/png;base64,", "", encoded_seal, flags=re.IGNORECASE)
-            try:
-                seal_bytes = base64.b64decode(encoded_seal, validate=True)
-                if not seal_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
-                    seal_bytes = None
-                    seal_secret_error = "KEKOREA_COMPANY_SEAL_BASE64 is set, but it does not decode to a PNG image"
-            except (ValueError, TypeError):
-                seal_bytes = None
-                seal_secret_error = "KEKOREA_COMPANY_SEAL_BASE64 is present but is not valid Base64"
-        # Prefer the company-provided seal asset in every local document flow;
-        # keep the private copy as a backward-compatible fallback.
-        seal_asset_path = ROOT / "assets" / "\uBA85\uD310\uC9C1\uC778.png"
-        private_seal_path = ROOT / "private" / "company_seal.png"
-        local_seal_path = next((path for path in (seal_asset_path, private_seal_path) if path.is_file()), seal_asset_path)
+        local_seal_path, seal_bytes, seal_secret_error = resolve_company_seal(ROOT, runtime_env)
         missing_seal = seal_bytes is None and not local_seal_path.is_file()
         if expected_type == "PI" and missing_bank_keys:
             issue = "KE Korea USD bank profile is incomplete; missing runtime keys: " + ", ".join(missing_bank_keys)

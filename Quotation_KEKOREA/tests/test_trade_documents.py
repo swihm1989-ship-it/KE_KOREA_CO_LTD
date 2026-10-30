@@ -165,6 +165,7 @@ class TradeDocumentTests(unittest.TestCase):
                 self.assertIn("xl/worksheets/sheet1.xml", workbook.namelist())
                 sheet = workbook.read("xl/worksheets/sheet1.xml").decode()
                 self.assertIn("112.50", sheet)
+                self.assertEqual(workbook.read("xl/media/seal.png"), seal.read_bytes())
             self.assertIn("AMOUNT IN WORDS", paths["html"].read_text(encoding="utf-8"))
         finally:
             for path in paths.values():

@@ -212,7 +212,7 @@ def _pdf_bytes(lines):
     return bytes(output)
 
 
-def _xlsx_bytes(doc, bank_details=None):
+def _xlsx_bytes(doc, bank_details=None, *, seal_path=None):
     rows = [[doc.get("document_type", "DRAFT"), "STATUS", doc.get("status", "DRAFT")],
             ["Currency", doc.get("currency") or "TBD", "Product Family", doc.get("product_family") or "TBD"],
             ["Document Number", doc.get("document_number") or "TBD", "Issue Date", doc.get("issue_date") or "TBD"],
@@ -249,6 +249,9 @@ def _xlsx_bytes(doc, bank_details=None):
                  ["", "SWIFT Code", bank_details.get("SWIFT") or "[BANK DETAIL REQUIRED]"],
                  ["", "Account Number (USD)", bank_details.get("ACCOUNT_NUMBER") or "[BANK DETAIL REQUIRED]"],
                  ["", "Bank Address", bank_details.get("BANK_ADDRESS") or "[BANK DETAIL REQUIRED]"]]
+    seal_bytes = Path(seal_path).read_bytes() if seal_path and Path(seal_path).is_file() else None
+    if seal_bytes:
+        rows += [[], ["Authorized Representative", "DAVID, SEOKWON IHM"], ["KE KOREA CO. LTD"]]
     xml_rows = []
     for ri, row in enumerate(rows, 1):
         cells = []
@@ -263,15 +266,22 @@ def _xlsx_bytes(doc, bank_details=None):
             cell = f"{col}{ri}"
             cells.append(f'<c r="{cell}" t="inlineStr"><is><t xml:space="preserve">{xml_escape(_english(value))}</t></is></c>')
         xml_rows.append(f'<row r="{ri}">{"".join(cells)}</row>')
-    sheet = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>' + "".join(xml_rows) + "</sheetData></worksheet>")
+    drawing = '<drawing r:id="rId1"/>' if seal_bytes else ""
+    sheet = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheetData>' + "".join(xml_rows) + "</sheetData>" + drawing + "</worksheet>")
     workbook = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Trade Document Draft" sheetId="1" r:id="rId1"/></sheets></workbook>'
     with __import__("io").BytesIO() as buf:
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
-            z.writestr("[Content_Types].xml", '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>')
+            drawing_types = '<Default Extension="png" ContentType="image/png"/><Override PartName="/xl/drawings/drawing1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>' if seal_bytes else ""
+            z.writestr("[Content_Types].xml", '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>' + drawing_types + '</Types>')
             z.writestr("_rels/.rels", '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>')
             z.writestr("xl/workbook.xml", workbook)
             z.writestr("xl/_rels/workbook.xml.rels", '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>')
             z.writestr("xl/worksheets/sheet1.xml", sheet)
+            if seal_bytes:
+                z.writestr("xl/worksheets/_rels/sheet1.xml.rels", '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing1.xml"/></Relationships>')
+                z.writestr("xl/drawings/drawing1.xml", '<?xml version="1.0" encoding="UTF-8"?><xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><xdr:oneCellAnchor><xdr:from><xdr:col>0</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>' + str(len(rows)) + '</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from><xdr:ext cx="4572000" cy="1542000"/><xdr:pic><xdr:nvPicPr><xdr:cNvPr id="1" name="KE KOREA Company Seal"/><xdr:cNvPicPr/></xdr:nvPicPr><xdr:blipFill><a:blip r:embed="rId1"/><a:stretch><a:fillRect/></a:stretch></xdr:blipFill><xdr:spPr><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></xdr:spPr></xdr:pic><xdr:clientData/></xdr:oneCellAnchor></xdr:wsDr>')
+                z.writestr("xl/drawings/_rels/drawing1.xml.rels", '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/seal.png"/></Relationships>')
+                z.writestr("xl/media/seal.png", seal_bytes)
         return buf.getvalue()
 
 
@@ -295,6 +305,6 @@ def render_files(doc, output_dir, *, bank_details=None, logo_path=None, seal_pat
         from Quotation_KEKOREA.agent.pi_pdf import render_trade_document
     paths["pdf"].write_bytes(render_trade_document(
         doc, bank_details or {}, logo_path=logo_path, seal_path=seal_path))
-    paths["xlsx"].write_bytes(_xlsx_bytes(doc, bank_details))
+    paths["xlsx"].write_bytes(_xlsx_bytes(doc, bank_details, seal_path=seal_path))
     paths["html"].write_text(html_doc, encoding="utf-8")
     return paths
