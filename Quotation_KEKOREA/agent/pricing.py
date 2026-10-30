@@ -120,6 +120,16 @@ def apply_verified_eclado_prices(draft, seed=None):
     """Replace ECLADO candidate price with exact catalog price or mark the uncertainty."""
     seed = seed if seed is not None else load_local_seed()
     products = seed.get("products", [])
+    items = draft.get("items", [])
+    # Vision extraction can label a cosmetics order as "other" when the image
+    # shows products and sizes but no explicit category. An exact match of every
+    # line against the ECLADO product master is stronger evidence and lets the
+    # existing role/currency-specific price lookup proceed for both PI and PO.
+    if items and draft.get("product_family") != "cosmetics":
+        exact_matches = [match_eclado_product(item.get("product_name"), item.get("capacity"), products)
+                         for item in items]
+        if all(match["status"] == "matched" for match in exact_matches):
+            draft["product_family"] = "cosmetics"
     price_table = "purchase_prices" if draft.get("document_type") == "PO" else "buyer_prices"
     default_currency = "KRW" if draft.get("document_type") == "PO" else None
     counterparty_role = "seller" if draft.get("document_type") == "PO" else "buyer"
@@ -129,7 +139,7 @@ def apply_verified_eclado_prices(draft, seed=None):
     expected_party = "ECLADO" if draft.get("document_type") == "PO" else "DEAR GLOW"
     party_matches = ("ECLADO" in counterparty if draft.get("document_type") == "PO"
                      else "DEARGLOW" in counterparty)
-    for item in draft.get("items", []):
+    for item in items:
         if draft.get("product_family") != "cosmetics":
             item["master_price"] = False
             continue
