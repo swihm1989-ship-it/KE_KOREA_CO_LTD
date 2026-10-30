@@ -22,6 +22,17 @@ class FakeResponse:
 
 
 class ExtractorTests(unittest.TestCase):
+    def test_cloud_secrets_override_file_values_without_printing_them(self):
+        with __import__("tempfile").NamedTemporaryFile(mode="w", encoding="utf-8", suffix=".env", delete=False) as file:
+            file.write("OPENAI_MODEL=gpt-6-luna\n")
+            env_path = Path(file.name)
+        try:
+            values = extractor.load_env(env_path, secrets={"OPENAI_API_KEY": "cloud-test-secret", "OPENAI_MODEL": "gpt-6-luna"})
+            self.assertEqual(values["OPENAI_API_KEY"], "cloud-test-secret")
+            self.assertEqual(values["OPENAI_MODEL"], "gpt-6-luna")
+        finally:
+            env_path.unlink(missing_ok=True)
+
     def test_requests_structured_output_with_configured_model(self):
         captured = {}
         def opener(request, timeout):

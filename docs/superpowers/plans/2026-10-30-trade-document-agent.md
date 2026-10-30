@@ -29,7 +29,7 @@ Real Supabase migration/seed application; image, PDF and spreadsheet extraction;
 - [x] Exact local ECLADO matching and price direction separation
 - [x] Deterministic validation and simple PDF/XLSX/HTML draft output
 - [x] Streamlit screen and `.env.example`
-- [x] Synthetic suite; 31 passing on 2026-10-30
+- [x] Synthetic suite; 32 passing on 2026-10-30
 - [ ] Install/launch Streamlit and verify UI interactively
 - [ ] Render/visually inspect PDF and open XLSX in Office
 - [ ] Replace generic layouts with approved company templates

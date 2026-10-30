@@ -326,16 +326,25 @@ Next verification should use anonymized/synthetic transaction text first, then a
 
 ### Run locally
 
-From `Quotation_KEKOREA/`, install the project and start the UI:
+From `Quotation_KEKOREA/`, install the app dependency and start the UI:
 
 ```powershell
 python -m venv .venv
 .venv\Scripts\Activate.ps1
-python -m pip install -e .
+python -m pip install -r requirements.txt
 streamlit run app.py
 ```
 
-Keep API keys in the ignored `.env`; `OPENAI_MODEL=gpt-6-luna` is unquoted. The prompt screen states that text is sent to OpenAI. Generated files go under ignored `outputs/`.
+Keep local API keys in the ignored `.env`; `OPENAI_MODEL=gpt-6-luna` is unquoted. Streamlit Community Cloud reads API keys from **App settings > Secrets** (TOML), not from the developer's local `.env`. The prompt screen states that text is sent to OpenAI. Generated files go under ignored `outputs/`.
+
+For Streamlit Community Cloud, set the main file to `Quotation_KEKOREA/app.py`. This app's `requirements.txt` sits beside that entrypoint. After pushing code updates to the selected GitHub branch, Cloud redeploys from that branch. Add the OpenAI credentials in **Manage app > Settings > Secrets**, for example:
+
+```toml
+OPENAI_API_KEY = "your-rotated-key"
+OPENAI_MODEL = "gpt-6-luna"
+```
+
+Do not upload `.env` or the private ECLADO price seed to GitHub. The price seed is excluded by `.gitignore`; it will therefore be missing on Community Cloud and the app will show a warning. The current version has no secure cloud price-catalog connection, so ECLADO pricing will stay blocked there until that integration is implemented.
 
 Run the local synthetic checks from the repository root:
 
@@ -345,7 +354,7 @@ python -m unittest discover -s Quotation_KEKOREA/tests -v
 
 ### Verification run
 
-- Existing price-import tests and new draft-generation tests: **31 passed** using Python `unittest` on 2026-10-30.
+- Existing price-import tests and new draft-generation tests: **32 passed** using Python `unittest` on 2026-10-30.
 - Local private ECLADO seed: **157 products** found by the code; no price values are printed in test output.
 - The model request shape was checked with a mocked HTTP response. The workspace could not reach OpenAI or Supabase endpoints, so live API-key/model access and Supabase status remain unverified.
 - Streamlit, ReportLab, pypdf and Poppler are not installed in the current Python environment. Automated checks confirm file signatures/ZIP contents only. The Streamlit screen was not launched; the PDF was not visually rendered and the XLSX was not opened in Excel.

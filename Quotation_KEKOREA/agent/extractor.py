@@ -6,7 +6,7 @@ import urllib.error
 import urllib.request
 
 
-def load_env(path=None):
+def load_env(path=None, secrets=None):
     env_path = Path(path) if path else Path(__file__).resolve().parents[1] / ".env"
     values = {}
     if env_path.exists():
@@ -17,6 +17,9 @@ def load_env(path=None):
             key, value = line.split("=", 1)
             values[key.strip()] = value.strip().strip('"').strip("'")
     values.update({k: v for k, v in os.environ.items() if k.startswith(("OPENAI_", "SUPABASE_"))})
+    for key, value in (secrets or {}).items():
+        if key.startswith(("OPENAI_", "SUPABASE_")) and value is not None:
+            values[key] = str(value)
     return values
 
 

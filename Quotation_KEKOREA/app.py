@@ -17,7 +17,20 @@ st.set_page_config(page_title="KE KOREA Trade Documents", layout="wide")
 st.title("KE KOREA Trade Document Drafts")
 st.caption("English document drafts: PO · PI · Commercial Invoice · Packing List")
 st.warning("Drafts require your review. This app does not send orders, issue documents, email customers, or file customs declarations.")
-st.info("When you click Extract, the text in the prompt box is sent to OpenAI using the API key and model in Quotation_KEKOREA/.env. Do not include information you do not want sent to the configured API.")
+st.info("When you click Extract, the prompt text is sent to OpenAI using the configured API key and model. Use local .env on your computer or App settings > Secrets on Streamlit Cloud. Do not include information you do not want sent to the configured API.")
+
+cloud_secrets = {}
+try:
+    for key in ("OPENAI_API_KEY", "OPENAI_MODEL", "SUPABASE_URL", "SUPABASE_PUBLISHABLE_KEY", "SUPABASE_SECRET_KEY"):
+        if key in st.secrets:
+            cloud_secrets[key] = st.secrets[key]
+except Exception:
+    pass
+runtime_env = load_env(secrets=cloud_secrets)
+if not runtime_env.get("OPENAI_API_KEY"):
+    st.error("OPENAI_API_KEY is missing. Set it in local .env or Streamlit Cloud Settings > Secrets.")
+if not load_local_seed().get("products"):
+    st.warning("The private ECLADO catalog seed is unavailable in this deployment. ECLADO catalog prices cannot be verified until a secure catalog source is connected.")
 
 with st.expander("Supported in this first verification build"):
     st.write("Paste a transaction request as text. PDF, screenshot, email, Supabase live lookup, company/bank profiles, official company templates, and automatic final numbering are not connected yet.")
@@ -28,7 +41,7 @@ prompt = st.text_area("Transaction details", height=220,
 if st.button("Extract draft from prompt", type="primary", disabled=not prompt.strip()):
     try:
         with st.spinner("Extracting candidate fields. No document is issued."):
-            st.session_state["trade_draft"] = verify_item_quotes(extract_trade_data(prompt), prompt)
+            st.session_state["trade_draft"] = verify_item_quotes(extract_trade_data(prompt, env=runtime_env), prompt)
             draft = st.session_state["trade_draft"]
             company_role = "buyer" if draft.get("document_type") == "PO" else "seller"
             company = draft.get(company_role) or {}
