@@ -41,6 +41,14 @@ def format_currency_amount(value, currency):
 
 
 def _rows(doc):
+    if doc.get("document_type") == "PL":
+        rows = [["Line", "Product", "Capacity / Specification", "Qty", "Unit", "Package Type", "Packages", "NW (KG)", "GW (KG)", "CBM", "HS Code"]]
+        for i, item in enumerate(doc.get("items", []), 1):
+            rows.append([str(i), _english(item.get("product_name")), _english(item.get("capacity")),
+                         _format_quantity(item.get("display_quantity", item.get("quantity", ""))), _english(item.get("unit")),
+                         _english(item.get("package_type")), _english(item.get("package_count")),
+                         _english(item.get("net_weight_kg")), _english(item.get("gross_weight_kg")), _english(item.get("volume_cbm")), _english(item.get("hs_code"))])
+        return rows
     rows = [["Line", "Product", "Capacity / Specification", "Qty", "Unit", "Unit Price", "Discount", "Amount"]]
     for i, item in enumerate(doc.get("items", []), 1):
         if doc.get("document_type") == "PL":
@@ -119,7 +127,7 @@ def document_lines(doc, bank_details=None):
                          ("Country of Origin", "country_of_origin")):
         if doc.get(field):
             lines.append(f"{label}: {_english(doc[field])}")
-    lines += ["", "LINE ITEMS: Line | Product | Capacity / Specification | Qty | Unit | Unit Price | Discount | Amount"]
+    lines += ["", "LINE ITEMS: " + " | ".join(_rows(doc)[0])]
     for row in _rows(doc)[1:]:
         lines.append(" | ".join(_english(cell) for cell in row))
     if doc.get("document_type") != "PL":
@@ -139,6 +147,16 @@ def document_lines(doc, bank_details=None):
             lines.append(f"TOTAL PACKAGES: {_english(doc.get('actual_package_count'))}; TOTAL NET WEIGHT: {net_total:f} kg; TOTAL GROSS WEIGHT: {gross_total:f} kg")
         except Exception:
             lines.append("TOTAL PACKAGE WEIGHTS: REVIEW REQUIRED")
+    if doc.get("document_type") == "PL":
+        from .packing import reconcile_packing
+        calculated = reconcile_packing(doc)["calculated"]
+        for label, value in (("Containers", doc.get("container_count")),
+                             ("HS Code", doc.get("hs_code")),
+                             ("Total packages", doc.get("actual_package_count") or calculated.get("package_count")),
+                             ("Total net weight (kg)", calculated.get("net_weight_kg") or doc.get("declared_net_weight_kg")),
+                             ("Total gross weight (kg)", calculated.get("gross_weight_kg") or doc.get("declared_gross_weight_kg")),
+                             ("Total volume (CBM)", calculated.get("volume_cbm") or doc.get("declared_volume_cbm"))):
+            lines.append(f"{label}: {_english(value or 'TO BE CONFIRMED')}")
     if doc.get("remarks"):
         lines += ["", "REMARKS", _english(doc["remarks"])]
     if doc.get("document_type") == "PI":
@@ -213,6 +231,16 @@ def _xlsx_bytes(doc, bank_details=None):
              format_currency_amount(doc.get("total", "0"), doc.get("currency")) if doc.get("product_family") == "cosmetics" else doc.get("total", "0")],
             ["Incoterms", doc.get("incoterms") or "TBD"], ["Payment Terms", doc.get("payment_terms") or "TBD"],
             ["Remarks", doc.get("remarks") or ""]]
+    if doc.get("document_type") == "PL":
+        from .packing import reconcile_packing
+        calculated = reconcile_packing(doc)["calculated"]
+        rows = [row for row in rows if not (len(row) > 5 and row[:5] == ["", "", "", "", ""] and row[5] == "TOTAL")]
+        rows += [["Containers", doc.get("container_count") or "TO BE CONFIRMED"],
+                 ["HS Code", doc.get("hs_code") or "TO BE CONFIRMED"],
+                 ["Total packages", doc.get("actual_package_count") or calculated.get("package_count") or "TO BE CONFIRMED"],
+                 ["Total net weight (kg)", calculated.get("net_weight_kg") or doc.get("declared_net_weight_kg") or "TO BE CONFIRMED"],
+                 ["Total gross weight (kg)", calculated.get("gross_weight_kg") or doc.get("declared_gross_weight_kg") or "TO BE CONFIRMED"],
+                 ["Total volume (CBM)", calculated.get("volume_cbm") or doc.get("declared_volume_cbm") or "TO BE CONFIRMED"]]
     if doc.get("document_type") == "PI":
         bank_details = bank_details or {}
         rows += [["Bank Information", "Beneficiary", bank_details.get("BENEFICIARY") or "[BANK DETAIL REQUIRED]"],

@@ -133,8 +133,8 @@ class TradeDocumentTests(unittest.TestCase):
               "seller": {"legal_name": "Eclado Co., Ltd."}, "items": [dict(item)]}
         apply_verified_eclado_prices(pi, seed)
         apply_verified_eclado_prices(po, seed)
-        self.assertEqual(pi["items"][0]["price_source"].split(";")[0], "Verified local ECLADO catalog")
-        self.assertEqual(po["items"][0]["price_source"].split(";")[0], "Verified local ECLADO catalog")
+        self.assertEqual(pi["items"][0]["price_source"].split(";")[0], "Verified ECLADO catalog")
+        self.assertEqual(po["items"][0]["price_source"].split(";")[0], "Verified ECLADO catalog")
         self.assertEqual(pi["currency"], "USD")
         self.assertEqual(po["currency"], "KRW")
 
@@ -142,11 +142,24 @@ class TradeDocumentTests(unittest.TestCase):
         self.assertEqual(amount_in_english("112.50", "USD"), "ONE HUNDRED TWELVE US DOLLARS AND FIFTY CENTS ONLY")
 
     def test_generated_review_files_are_readable_containers(self):
+        import struct
+        import zlib
+        from uuid import uuid4
         data = trade.validate_and_calculate(sample_trade())
-        temp = ROOT / "private" / "eclado" / "test-output"
+        temp = ROOT / "outputs"
         temp.mkdir(parents=True, exist_ok=True)
-        paths = render_files(data, temp)
+        def chunk(kind, payload):
+            return struct.pack(">I", len(payload)) + kind + payload + struct.pack(">I", zlib.crc32(kind + payload) & 0xffffffff)
+        # A disposable RGB image of sufficient size exercises the required seal
+        # without depending on a private company asset in the test environment.
+        width, height = 900, 300
+        pixels = (b"\0" + b"\xff" * (width * 3)) * height
+        seal = temp / f"test-seal-{uuid4().hex}.png"
+        seal.write_bytes(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)) +
+                         chunk(b"IDAT", zlib.compress(pixels)) + chunk(b"IEND", b""))
+        paths = {}
         try:
+            paths = render_files(data, temp, seal_path=seal)
             self.assertTrue(paths["pdf"].read_bytes().startswith(b"%PDF-1.4"))
             with zipfile.ZipFile(paths["xlsx"]) as workbook:
                 self.assertIn("xl/worksheets/sheet1.xml", workbook.namelist())
@@ -156,7 +169,7 @@ class TradeDocumentTests(unittest.TestCase):
         finally:
             for path in paths.values():
                 path.unlink(missing_ok=True)
-            temp.rmdir()
+            seal.unlink(missing_ok=True)
 
     def test_renderer_rejects_non_english_document_text_instead_of_corrupting_it(self):
         data = trade.validate_and_calculate(sample_trade())

@@ -36,7 +36,10 @@ def normalize_quantity_unit(value):
 
 def _decimal(value, field, issues, *, allow_zero=True):
     try:
-        result = Decimal(str(value))
+        text = str(value).strip()
+        if "," in text and not re.fullmatch(r"\d{1,3}(?:,\d{3})+(?:\.\d+)?", text):
+            raise InvalidOperation
+        result = Decimal(text.replace(",", ""))
         if not result.is_finite() or result < 0 or (not allow_zero and result == 0):
             raise InvalidOperation
         return result
@@ -97,9 +100,9 @@ def validate_and_calculate(data):
     if family not in FAMILIES:
         block("Product family must be confirmed")
     currency = data.get("currency")
-    if not isinstance(currency, str) or not re.fullmatch(r"[A-Z]{3}", currency):
+    if doc_type != "PL" and (not isinstance(currency, str) or not re.fullmatch(r"[A-Z]{3}", currency)):
         block("Currency must be confirmed as a three-letter code")
-    elif currency not in {"USD", "KRW", "EUR", "CNY"}:
+    elif doc_type != "PL" and currency not in {"USD", "KRW", "EUR", "CNY"}:
         block(f"Currency rounding rule for {currency} must be configured")
     money_quantum = Decimal("1") if currency == "KRW" else MONEY_QUANTUM
 
@@ -139,7 +142,7 @@ def validate_and_calculate(data):
         block("Shipment reference")
 
     items = data.get("items") or []
-    if doc_type != "PL" and not items:
+    if not items:
         block("At least one line item is required")
     calculated, total = [], Decimal("0")
     for i, original in enumerate(items, 1):
@@ -158,9 +161,10 @@ def validate_and_calculate(data):
             block(f"Quantity unit for item {i}")
         if doc_type != "PL" and not item.get("price_basis"):
             block(f"Price basis for {name or f'item {i}'}")
-        quantity = _decimal(item.get("paid_quantity", item.get("quantity")), f"paid quantity for item {i}", issues, allow_zero=False)
+        quantity_value = (item.get("shipped_quantity") or item.get("quantity") or item.get("paid_quantity")) if doc_type == "PL" else item.get("paid_quantity", item.get("quantity"))
+        quantity = _decimal(quantity_value, f"paid quantity for item {i}", issues, allow_zero=False)
         base = Decimal("0") if doc_type == "PL" else _decimal(item.get("unit_price"), f"unit price for item {i}", issues, allow_zero=False)
-        discount = _decimal(item.get("discount_percent", 0), f"discount percent for item {i}", issues)
+        discount = Decimal("0") if doc_type == "PL" else _decimal(item.get("discount_percent", 0), f"discount percent for item {i}", issues)
         if doc_type in {"PI", "CI"} and data.get("product_family") == "cosmetics" and item.get("discount_percent") is None:
             block(f"Confirm discount percentage, including whether no discount applies, for {name or f'item {i}'}")
         if discount > 100:
@@ -168,21 +172,21 @@ def validate_and_calculate(data):
             discount = Decimal("0")
         if doc_type != "PL" and not item.get("price_source"):
             block(f"Price source for {name or f'item {i}'} must be recorded")
-        if data.get("product_family") == "cosmetics" and item.get("master_price") is not True and not item.get("price_override_confirmed"):
+        if doc_type != "PL" and data.get("product_family") == "cosmetics" and item.get("master_price") is not True and not item.get("price_override_confirmed"):
             block(f"Cosmetics price for {name or f'item {i}'} must match the verified price master")
         basis = str(item.get("price_basis") or "").upper().replace("USD/", "").replace("KRW/", "").replace("PER ", "").strip()
         basis = normalize_quantity_unit(basis)
         unit = normalize_quantity_unit(item.get("unit"))
-        if data.get("product_family") in {"polysilicon", "wafer", "solar_cell", "solar_module"} and basis and unit and basis not in {unit, "SET"}:
+        if doc_type != "PL" and data.get("product_family") in {"polysilicon", "wafer", "solar_cell", "solar_module"} and basis and unit and basis not in {unit, "SET"}:
             block(f"Price basis {basis} does not match quantity unit {unit} for {name or f'item {i}'}")
         unit_quantum = money_quantum if data.get("product_family") == "cosmetics" else PRICE_QUANTUM
         final = (base * (Decimal("1") - discount / Decimal("100"))).quantize(unit_quantum, rounding=ROUND_HALF_UP)
         line = (quantity * final).quantize(money_quantum, rounding=ROUND_HALF_UP)
-        free = _decimal(item.get("free_quantity", 0), f"free quantity for item {i}", issues)
-        shipped = _decimal(item.get("shipped_quantity", quantity + free), f"shipped quantity for item {i}", issues)
+        free = Decimal("0") if doc_type == "PL" else _decimal(item.get("free_quantity", 0), f"free quantity for item {i}", issues)
+        shipped = quantity if doc_type == "PL" else _decimal(item.get("shipped_quantity", quantity + free), f"shipped quantity for item {i}", issues)
         if shipped != quantity + free:
             block(f"Shipped quantity must equal paid plus free quantity for {name or f'item {i}'}")
-        if item.get("promotion"):
+        if doc_type != "PL" and item.get("promotion"):
             try:
                 expected = apply_promotion(quantity, item["promotion"])
                 if Decimal(expected["free_quantity"]) != free:
@@ -199,18 +203,24 @@ def validate_and_calculate(data):
     total = total.quantize(money_quantum, rounding=ROUND_HALF_UP)
 
     if doc_type == "PL":
+        from Quotation_KEKOREA.agent.packing import reconcile_packing
+        packing = reconcile_packing({**data, "items": calculated})
+        for issue in packing["issues"]:
+            block("Packing: " + issue)
         packages = data.get("packages") or []
-        if not packages or not data.get("actual_package_count"):
+        has_item_packing = any(item.get("net_weight_kg") or item.get("gross_weight_kg") or item.get("package_count") or item.get("volume_cbm") for item in calculated)
+        if not has_item_packing and (not packages or not data.get("actual_package_count")):
             block("Actual package count and weights")
-        try:
-            actual_count = Decimal(str(data.get("actual_package_count")))
-            if not actual_count.is_finite() or actual_count <= 0 or actual_count != actual_count.to_integral_value():
-                raise InvalidOperation
-        except (InvalidOperation, TypeError, ValueError):
-            block("Actual package count must be a positive whole number")
-            actual_count = Decimal("0")
+        actual_count = Decimal("0")
+        if not has_item_packing:
+            try:
+                actual_count = Decimal(str(data.get("actual_package_count")))
+                if not actual_count.is_finite() or actual_count <= 0 or actual_count != actual_count.to_integral_value():
+                    raise InvalidOperation
+            except (InvalidOperation, TypeError, ValueError):
+                block("Actual package count must be a positive whole number")
         declared_count = Decimal("0")
-        for i, package in enumerate(packages, 1):
+        for i, package in enumerate(packages if not has_item_packing else [], 1):
             net = _decimal(package.get("net_weight_kg"), f"package {i} net weight", issues, allow_zero=False)
             gross = _decimal(package.get("gross_weight_kg"), f"package {i} gross weight", issues, allow_zero=False)
             count = _decimal(package.get("package_count"), f"package {i} count", issues, allow_zero=False)
@@ -219,7 +229,7 @@ def validate_and_calculate(data):
             declared_count += count
             if net > gross:
                 block(f"Net weight cannot exceed gross weight for package {i}")
-        if packages and declared_count != actual_count:
+        if packages and not has_item_packing and declared_count != actual_count:
             block("Sum of package counts must equal actual package count")
 
     if doc_type == "CI" and not data.get("country_of_origin"):

@@ -22,6 +22,22 @@ class FakeResponse:
 
 
 class ExtractorTests(unittest.TestCase):
+    def test_packing_image_request_includes_packing_fields_and_source_context(self):
+        captured = {}
+        def opener(request, timeout):
+            captured["body"] = json.loads(request.data)
+            return FakeResponse({"output": [{"content": [{"type": "output_text", "text": '{"items":[]}'}]}]})
+        extractor.extract_trade_data("Packing list", images=[{"name": "source.png", "mime_type": "image/png", "data": b"image"}],
+                                     env={"OPENAI_API_KEY": "test"}, opener=opener,
+                                     requested_document_type="PL", packing_source=True)
+        body = captured["body"]
+        item = body["text"]["format"]["schema"]["properties"]["items"]["items"]
+        self.assertIn("volume_cbm", item["properties"])
+        self.assertIn("gross_weight_kg", item["properties"])
+        self.assertIn("container_count", body["text"]["format"]["schema"]["properties"])
+        self.assertIn("supplier document is packing evidence", body["instructions"])
+        self.assertEqual(body["input"][0]["content"][1]["type"], "input_image")
+
     def test_translation_rules_are_in_openai_instructions(self):
         self.assertIn("Chinese", extractor.SYSTEM_PROMPT)
         self.assertIn("(English translation)", extractor.SYSTEM_PROMPT)

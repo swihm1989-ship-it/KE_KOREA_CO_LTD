@@ -268,6 +268,12 @@ API 기반 판독을 선택하면 어떤 자료가 외부로 전송되는지 표
 - `agent/trade_documents.py`: Decimal 계산, 할인·FOC 분리, 거래 역할·통화·가격 기준·포장 검증. 필수값 누락/충돌이면 DRAFT 상태로 막는다.
 - `agent/renderers.py`: English PDF/XLSX/HTML review drafts. Solar PI uses the corporate-blue header with the company logo and PI-only bank details.
 
+### Supplier packing-list images
+
+The PL and CIPL workflows accept up to five supplier document images and extract each product's quantity and unit, package type and count, net and gross weight, and CBM. Printed totals and the explicit container count are stored separately from calculated row sums; containers are never inferred from pallet counts or volume. The review table and printed-total fields are editable. Quantities and package types are not added across incompatible units, and fractional pallet allocations are allowed. A difference between a printed total and the complete row sum must be resolved before download, and the user confirms the image transcription. Missing values remain unconfirmed. PL output does not require a price or currency. PDF, Excel, and HTML include the packing fields; CIPL includes both CI and PL outputs.
+
+For an ECLADO PO with no seller name, exact catalog matches can supply a KRW purchase-price candidate only when every line has an ECLADO supplier price. The user must confirm that price source; the supplier's legal name and address remain separate fields. A different specified supplier does not receive ECLADO catalog prices.
+
 ### 로컬 실행
 
 저장소 최상위 폴더에서:

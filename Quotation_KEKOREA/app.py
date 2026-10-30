@@ -14,6 +14,7 @@ REPOSITORY_ROOT = ROOT.parent
 sys.path.insert(0, str(REPOSITORY_ROOT))
 from Quotation_KEKOREA.agent.extractor import extract_trade_data, load_env, verify_item_quotes
 from Quotation_KEKOREA.agent.pricing import apply_verified_eclado_prices, load_local_seed, load_supabase_catalog
+from Quotation_KEKOREA.agent.packing import reconcile_packing
 from Quotation_KEKOREA.agent.renderers import format_currency_amount, render_files
 from Quotation_KEKOREA.agent.trade_documents import apply_promotion, current_issue_date, normalize_quantity_unit, validate_and_calculate
 
@@ -84,7 +85,7 @@ def _explicit_remark(prompt):
 def _has_explicit_ship_to(prompt):
     """Require an explicitly labeled destination before treating text as ship-to."""
     labels = (
-        r"ship\s*to(?:\s+address)?", r"deliver(?:ed)?\s+to(?:\s+address)?",
+        r"ship[\s-]*to(?:\s*[- ]\s*party|\s+address)?", r"deliver(?:ed)?\s+to(?:\s+address)?",
         r"delivery\s+to(?:\s+address)?", r"delivery\s+address", r"destination(?:\s+address)?",
         r"consignee\s+address", r"shipping\s+address", r"delivery\s+location",
         r"ship\s+destination", r"납품처", r"배송지", r"도착지", r"인도\s*장소",
@@ -351,7 +352,7 @@ with st.expander("What this menu creates"):
 st.markdown('<div class="ke-section">1 · 주문 정보</div>', unsafe_allow_html=True)
 prompt = st.text_area("거래 조건을 입력하세요", height=180,
     placeholder=f"Example: Create a {title} for [company name, address, contact, phone, email]. List products, exact quantities, currency and prices, Incoterms and named place, payment or shipment terms. Optional: REMARK: [text]. If omitted, the document shows N/A.")
-uploaded_images = st.file_uploader("바이어 주문 이미지 첨부", type=["png", "jpg", "jpeg", "webp"], accept_multiple_files=True,
+uploaded_images = st.file_uploader("공급처 패킹리스트 이미지 첨부" if expected_type == "PL" or create_cipl_bundle else "바이어 주문 이미지 첨부", type=["png", "jpg", "jpeg", "webp"], accept_multiple_files=True,
     help="이미지 최대 5개, 파일당 10 MB, 총 20 MB까지 첨부할 수 있습니다.")
 st.caption("For ECLADO, the entered discount is applied to the Supabase list price. If no discount is stated, the full list price (0% discount) is used. Enter one discount rate per invoice.")
 st.caption("Common labels such as Qty/Q'ty/Volume, Unit Price/Rate, Shipping Terms/Delivery Terms, and Payment Conditions are interpreted by meaning. Volume and package-count labels may require your confirmation.")
@@ -370,7 +371,7 @@ if extract_clicked:
                 "Choose the matching document menu, then extract again."
             )
         for state_key in list(st.session_state):
-            if str(state_key).startswith(f"confirm_source_alias_{page}_"):
+            if str(state_key).startswith((f"confirm_source_alias_{page}_", f"packing_{page}_", f"po_seller_name_{page}", f"po_seller_address_{page}")):
                 del st.session_state[state_key]
         image_inputs = []
         if len(uploaded_images or []) > 5:
@@ -385,12 +386,14 @@ if extract_clicked:
         if total_image_bytes > 20 * 1024 * 1024:
             raise ValueError("Order images exceed the 20 MB combined limit")
         with st.spinner("Extracting candidate fields. No document is issued."):
-            draft = extract_trade_data(prompt or f"Use the attached order image as source for a {title}.", images=image_inputs, env=runtime_env)
+            draft = extract_trade_data(prompt or f"Use the attached order image as source for a {title}.", images=image_inputs, env=runtime_env,
+                                       requested_document_type=expected_type, packing_source=expected_type == "PL" or create_cipl_bundle)
             draft = _normalize_quantity_aliases(draft, prompt)
             draft = _normalize_currency_alias(draft, prompt)
             # The selected sidebar workflow is authoritative, even if the order image mentions another form.
             draft["document_type"] = expected_type
             draft = verify_item_quotes(draft, prompt, image_context=bool(image_inputs))
+            draft["source_image_attached"] = bool(image_inputs)
             draft["issue_date"] = current_issue_date()
             ship_to_source = draft.pop("ship_to_source", None)
             if not _has_explicit_ship_to(prompt) and not (image_inputs and _has_explicit_ship_to(ship_to_source)):
@@ -406,7 +409,8 @@ if extract_clicked:
                                   if not issue.lower().startswith("remarks was not found verbatim")]
             _synchronize_extracted_quantities(draft)
             _apply_ke_korea_company_defaults(draft, expected_type)
-            apply_verified_eclado_prices(draft, active_catalog)
+            if expected_type != "PL":
+                apply_verified_eclado_prices(draft, active_catalog)
             discount_rate, discount_issue = _discount_instruction(prompt)
             if discount_rate is not None:
                 for item in draft.get("items", []):
@@ -431,8 +435,80 @@ if raw:
         data = json.loads(json.dumps(raw, ensure_ascii=False))
         data["document_type"] = expected_type
         _apply_ke_korea_company_defaults(data, expected_type)
-        apply_verified_eclado_prices(data, active_catalog)
+        if expected_type == "PO":
+            seller = data.get("seller") or {}
+            data["seller"] = seller
+            st.caption("PO supplier details (fill in the supplier's legal name and address when known).")
+            seller["legal_name"] = st.text_input("Supplier legal name", value=seller.get("legal_name") or "", key=f"po_seller_name_{page}") or None
+            seller["address"] = st.text_input("Supplier address", value=seller.get("address") or "", key=f"po_seller_address_{page}") or None
+        if expected_type == "PL" or create_cipl_bundle:
+            buyer = data.get("buyer") or {}
+            data["buyer"] = buyer
+            party_columns = st.columns(2)
+            buyer["legal_name"] = party_columns[0].text_input("Buyer legal name", value=buyer.get("legal_name") or "", key=f"packing_{page}_buyer") or None
+            buyer["address"] = party_columns[1].text_input("Buyer address", value=buyer.get("address") or "", key=f"packing_{page}_buyer_address") or None
+            shipment_columns = st.columns(2)
+            data["ship_to"] = shipment_columns[0].text_input("Ship-to address", value=data.get("ship_to") or "", key=f"packing_{page}_ship_to") or None
+            data["shipment_reference"] = shipment_columns[1].text_input("Shipment reference", value=data.get("shipment_reference") or "", key=f"packing_{page}_shipment_reference") or None
+            origin_columns = st.columns(2)
+            data["country_of_origin"] = origin_columns[0].text_input("Country of origin", value=data.get("country_of_origin") or "", key=f"packing_{page}_origin") or None
+            data["hs_code"] = origin_columns[1].text_input("Shipment HS code", value=data.get("hs_code") or "", key=f"packing_{page}_hs_code") or None
+            st.markdown("**Packing details — compare the extracted values with the supplier document**")
+            packing_fields = (("product_name", "Product"), ("capacity", "Specification"),
+                              ("quantity", "Quantity"), ("unit", "Unit"),
+                              ("package_type", "Package type"), ("package_count", "Packages"),
+                              ("net_weight_kg", "NW (kg)"), ("gross_weight_kg", "GW (kg)"), ("volume_cbm", "CBM"), ("hs_code", "HS code"))
+            original_items = data.get("items", [])
+            packing_rows = [{"Row": str(index), **{label: str((item.get("shipped_quantity") or item.get(field) or "") if field == "quantity" and create_cipl_bundle else (item.get(field) or ""))
+                             for field, label in packing_fields}} for index, item in enumerate(original_items, 1)]
+            if not packing_rows and expected_type == "PL":
+                packing_rows = [{"Row": "", **{label: "" for _, label in packing_fields}}]
+            edited_rows = st.data_editor(packing_rows, hide_index=True, num_rows="fixed" if create_cipl_bundle else "dynamic",
+                                         disabled=["Row"], use_container_width=True, key=f"packing_{page}_rows")
+            updated_items = []
+            for row in edited_rows:
+                row_id = str(row.get("Row") or "")
+                item = dict(original_items[int(row_id) - 1]) if row_id.isdigit() and 1 <= int(row_id) <= len(original_items) else {}
+                for field, label in packing_fields:
+                    if field == "quantity" and create_cipl_bundle:
+                        item["shipped_quantity"] = str(row.get(label) or "").strip() or None
+                        continue
+                    item[field] = str(row.get(label) or "").strip() or None
+                if expected_type == "PL":
+                    item["paid_quantity"] = item.get("quantity")
+                    item["shipped_quantity"] = item.get("quantity")
+                    item["free_quantity"] = "0"
+                updated_items.append(item)
+            data["items"] = updated_items
+            st.caption("Printed totals from the supplier document — edit only after checking the original image.")
+            total_fields = (("actual_package_count", "Total packages"), ("container_count", "Containers"),
+                            ("declared_net_weight_kg", "Source NW (kg)"), ("declared_gross_weight_kg", "Source GW (kg)"),
+                            ("declared_volume_cbm", "Source CBM"), ("declared_total_quantity", "Source total quantity"),
+                            ("declared_total_quantity_unit", "Source quantity unit"))
+            columns = st.columns(2)
+            for index, (field, label) in enumerate(total_fields):
+                column = columns[index % len(columns)]
+                data[field] = column.text_input(label, value=str(data.get(field) or ""), key=f"packing_{page}_{field}") or None
+        if expected_type != "PL":
+            apply_verified_eclado_prices(data, active_catalog)
         result = validate_and_calculate(data)
+        packing_check = reconcile_packing(data) if expected_type == "PL" or create_cipl_bundle else None
+        if create_cipl_bundle:
+            packing_check["issues"].extend(issue for issue in result["blocking_issues"]
+                                           if issue.startswith("Shipped quantity must equal paid plus free quantity"))
+        if packing_check and packing_check["issues"]:
+            st.error("Packing totals need correction before download:")
+            for issue in packing_check["issues"]:
+                st.write(f"- {issue}")
+        if packing_check:
+            calculated = packing_check["calculated"]
+            st.caption("Calculated row totals: " + " | ".join(
+                f"{label}: {_format_quantity_display(calculated[field]) if calculated[field] is not None else 'Incomplete'}"
+                for field, label in (("package_count", "Packages"), ("net_weight_kg", "NW kg"),
+                                     ("gross_weight_kg", "GW kg"), ("volume_cbm", "CBM"))))
+        packing_image_confirmed = True
+        if packing_check is not None and data.get("source_image_attached"):
+            packing_image_confirmed = st.checkbox("I compared the extracted packing details and totals with the supplier image.", key=f"packing_{page}_confirmed")
         bank_keys = ("BENEFICIARY", "BANK_NAME", "BRANCH", "SWIFT", "ACCOUNT_NUMBER", "BANK_ADDRESS")
         bank_details = {key: str(runtime_env.get(f"KEKOREA_USD_{key}", "")).strip() for key in bank_keys}
         missing_bank_keys = [f"KEKOREA_USD_{key}" for key, value in bank_details.items() if not value]
@@ -490,9 +566,9 @@ if raw:
                                 if issue.startswith("Valid positive number required for paid quantity")
                                 or issue.startswith("Valid positive number required for unit price")]
         calculation_blockers.extend(currency_conflicts)
-        if currency not in supported_currencies:
+        if expected_type != "PL" and currency not in supported_currencies:
             calculation_blockers.append("Currency must be confirmed as a supported three-letter code")
-        discount_blockers = [issue for issue in result["blocking_issues"] if "discount" in issue.lower()]
+        discount_blockers = [] if expected_type == "PL" else [issue for issue in result["blocking_issues"] if "discount" in issue.lower()]
         total_display = ("Cannot calculate" if calculation_blockers or discount_blockers else
                          format_currency_amount(result.get("total", "0"), result.get("currency")))
         unit_totals = {}
@@ -511,8 +587,11 @@ if raw:
         top_metrics = st.columns(3)
         top_metrics[0].metric("Product lines", len(result.get("items", [])))
         top_metrics[1].metric("Total quantity", quantity_summary)
-        top_metrics[2].metric("Total amount", total_display)
-        st.caption(f"Currency: {result.get('currency') or 'To confirm'}")
+        if expected_type == "PL":
+            top_metrics[2].metric("Total CBM", packing_check["calculated"].get("volume_cbm") or "To confirm")
+        else:
+            top_metrics[2].metric("Total amount", total_display)
+            st.caption(f"Currency: {result.get('currency') or 'To confirm'}")
 
         seller_col, buyer_col = st.columns(2)
         for column, label, party in ((seller_col, "SELLER", result.get("seller") or {}),
@@ -555,7 +634,8 @@ if raw:
                 "Discount": "Not confirmed" if discount_missing else f"{item.get('discount_percent', '0')}%",
                 "Line Total": line_total,
             })
-        st.dataframe(display_rows, hide_index=True, use_container_width=True)
+        if expected_type != "PL":
+            st.dataframe(display_rows, hide_index=True, use_container_width=True)
 
         unconfirmed_aliases = []
         for index, confirmation in enumerate(data.get("pending_confirmations", []), 1):
@@ -607,11 +687,14 @@ if raw:
                          if "company seal is unavailable" in issue.lower()
                          or "KEKOREA_COMPANY_SEAL_BASE64" in issue]
         financial_blockers = calculation_blockers + discount_blockers
-        export_blocked = bool(financial_blockers or bank_blockers or seal_blockers or unconfirmed_aliases)
+        export_blocked = bool(financial_blockers or bank_blockers or seal_blockers or unconfirmed_aliases or
+                              (packing_check and packing_check["issues"]) or not packing_image_confirmed)
         if financial_blockers:
             st.error("Confirm valid quantities, unit prices, and discounts before creating a PDF or Excel file.")
         if unconfirmed_aliases:
             st.warning("Confirm the interpreted order field above before creating the documents.")
+        if not packing_image_confirmed:
+            st.warning("Compare the packing details with the supplier image and confirm the checkbox before download.")
         if bank_blockers:
             st.error("PI download is disabled until all six KEKOREA_USD_* bank details are configured in this runtime.")
         if seal_blockers:

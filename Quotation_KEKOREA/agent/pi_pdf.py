@@ -457,6 +457,8 @@ def _party_panel(canvas, x, title, party):
 
 def _document_row(item, is_packing_list, currency):
     name = str(item.get("product_name") or "TO BE CONFIRMED")
+    if is_packing_list and item.get("hs_code"):
+        name += " | HS: " + str(item["hs_code"])
     capacity = str(item.get("capacity") or item.get("specification") or "-")
     quantity = _format_quantity(item.get("display_quantity") or item.get("paid_quantity") or item.get("quantity") or "-")
     unit = str(item.get("unit") or "PCS")
@@ -469,9 +471,16 @@ def _document_row(item, is_packing_list, currency):
     if not is_packing_list:
         quantity = f"{quantity} {unit}".strip()
     row = {"name": name, "capacity": capacity, "quantity": quantity, "unit": unit}
-    row["name_lines"] = _wrap(name, 52)
-    row["capacity_lines"] = _wrap(capacity, 23)
-    row["quantity_lines"] = _wrap(quantity, 16)
+    row["name_lines"] = _wrap(name, 30 if is_packing_list else 52)
+    row["capacity_lines"] = _wrap(capacity, 13 if is_packing_list else 23)
+    row["quantity_lines"] = _wrap(quantity, 11 if is_packing_list else 16)
+    if is_packing_list:
+        package = " ".join(str(item.get(key) or "").strip() for key in ("package_count", "package_type")).strip()
+        for key, value, width in (("package_lines", package, 11),
+                                  ("net_lines", item.get("net_weight_kg"), 13),
+                                  ("gross_lines", item.get("gross_weight_kg"), 13),
+                                  ("volume_lines", item.get("volume_cbm"), 13)):
+            row[key] = _wrap(str(value) if value not in (None, "") else "-", width)
     if not is_packing_list:
         row["price"] = _formatted_money(item.get("final_unit_price", item.get("unit_price", "")), currency)
         row["amount"] = _formatted_money(item.get("line_total", ""), currency)
@@ -486,10 +495,10 @@ def _document_row(item, is_packing_list, currency):
     return row
 
 
-def _paginate_rows(rows, first_table_top, review_height, is_packing_list):
+def _paginate_rows(rows, first_table_top, review_height, is_packing_list, packing_quantity_lines=1):
     """Fit measured row heights around reserved totals, review, signature, and footer areas."""
     content_bottom = 752
-    last_page_reserve = (130 if is_packing_list else 132) + review_height
+    last_page_reserve = (163 + max(0, packing_quantity_lines - 1) * 8 if is_packing_list else 132) + review_height
     first_final_capacity = content_bottom - first_table_top - 17 - last_page_reserve
     if sum(row["height"] for row in rows) <= first_final_capacity:
         return [rows]
@@ -555,12 +564,13 @@ def render_trade_document(data, bank_details=None, *, logo_path=None, seal_path=
     terms_lines = [_wrap(str(value), 26) for value in terms_values]
     terms_height = max(38, 18 + max(map(len, terms_lines)) * 7.0)
     first_table_top = terms_top + terms_height + 12
-    chunks = _paginate_rows(rows, first_table_top, review_height, is_packing_list)
+    total_quantity = _total_quantity_summary(items)
+    packing_quantity_lines = _wrap("TOTAL QUANTITY: " + total_quantity, 130)
+    chunks = _paginate_rows(rows, first_table_top, review_height, is_packing_list, len(packing_quantity_lines))
     canvases = []
     number = str(data.get("document_number") or "TBD")
     issue_date = current_issue_date()
     number_label = {"PI": "INVOICE #", "CI": "INVOICE #", "PO": "PO #", "PL": "PACKING LIST #"}.get(doc_type, "DOCUMENT #")
-    total_quantity = _total_quantity_summary(items)
 
     for page_index, page_rows in enumerate(chunks):
         canvas = _Canvas()
@@ -576,8 +586,8 @@ def render_trade_document(data, bank_details=None, *, logo_path=None, seal_path=
         canvas.text(35, 123, number[:25], 7.2, True, INK)
         canvas.text(220, 109, "ISSUE DATE", 5.8, True, MUTED)
         canvas.text(220, 123, issue_date, 7.2, True, INK)
-        canvas.text(430, 109, "CURRENCY", 5.8, True, MUTED)
-        canvas.text(430, 123, currency, 7.2, True, INK)
+        canvas.text(430, 109, "SHIPMENT REFERENCE" if is_packing_list else "CURRENCY", 5.8, True, MUTED)
+        canvas.text(430, 123, str(data.get("shipment_reference") or "N/A")[:30] if is_packing_list else currency, 7.2, True, INK)
 
         if page_index == 0:
             _party_panel(canvas, 35, "SELLER / SUPPLIER", data.get("seller") or {})
@@ -595,13 +605,13 @@ def render_trade_document(data, bank_details=None, *, logo_path=None, seal_path=
             table_top = 166
 
         left = 35
-        widths = [225, 90, 62, 78, 87]
+        widths = [143, 62, 53, 30, 50, 66, 66, 72] if is_packing_list else [225, 90, 62, 78, 87]
         xs = [left]
         for width in widths:
             xs.append(xs[-1] + width)
         canvas.text(left, table_top - 7, "PACKING DETAILS" if is_packing_list else "PRODUCT & PRICING", 6.5, True, BRAND_BLUE)
         canvas.rect(left, table_top, 542, 17, NAVY)
-        labels = (["PRODUCT DESCRIPTION", "CAPACITY / SPEC.", "QUANTITY", "UNIT", "PACKAGES"] if is_packing_list else
+        labels = (["PRODUCT", "SPEC.", "QTY", "UNIT", "PACKAGES", "NW (KG)", "GW (KG)", "CBM"] if is_packing_list else
                   ["PRODUCT DESCRIPTION", "CAPACITY / SPEC.", "QUANTITY / UNIT", f"UNIT PRICE ({currency})", f"AMOUNT ({currency})"])
         for column_index, label in enumerate(labels):
             canvas.text(xs[column_index] + 3, table_top + 11, label, 5.2, True, (1, 1, 1))
@@ -617,7 +627,9 @@ def render_trade_document(data, bank_details=None, *, logo_path=None, seal_path=
                     canvas.text(xs[column] + 3, y + 8 + line_index * 7, line, 5.4, False, INK)
             if is_packing_list:
                 canvas.text(xs[3] + 3, y + 8, row["unit"][:12], 5.4, False, INK)
-                canvas.text(xs[4] + 3, y + 8, "SEE SUMMARY", 5.1, False, MUTED)
+                for column, key in ((4, "package_lines"), (5, "net_lines"), (6, "gross_lines"), (7, "volume_lines")):
+                    for line_index, line in enumerate(row[key]):
+                        canvas.text(xs[column] + 3, y + 8 + line_index * 7, line, 5.0, False, INK)
             else:
                 for column, key in ((3, "price_lines"), (4, "amount_lines")):
                     for line_index, line in enumerate(row[key]):
@@ -629,26 +641,32 @@ def render_trade_document(data, bank_details=None, *, logo_path=None, seal_path=
         if last_page:
             bottom = y + 8
             if is_packing_list:
+                from .packing import reconcile_packing
+                packing = reconcile_packing(data)
+                calculated = packing["calculated"]
                 packages = data.get("packages") or []
                 package_lines = []
-                if data.get("actual_package_count"):
-                    package_lines.append("TOTAL PACKAGES: " + str(data["actual_package_count"]))
-                else:
-                    package_lines.append("TOTAL PACKAGES: TO BE CONFIRMED")
+                package_lines.append("TOTAL PACKAGES: " + str(data.get("actual_package_count") or calculated.get("package_count") or "TO BE CONFIRMED") +
+                                     "  |  CONTAINERS: " + str(data.get("container_count") or "TO BE CONFIRMED"))
                 try:
-                    net = sum(Decimal(str(p.get("net_weight_kg") or 0)) for p in packages)
-                    gross = sum(Decimal(str(p.get("gross_weight_kg") or 0)) for p in packages)
-                    if packages and net > 0 and gross > 0:
-                        package_lines.append(f"NET WEIGHT: {net:,.2f} KG  |  GROSS WEIGHT: {gross:,.2f} KG")
-                    else:
-                        package_lines.append("NET WEIGHT / GROSS WEIGHT: TO BE CONFIRMED")
+                    net = calculated.get("net_weight_kg") or data.get("declared_net_weight_kg")
+                    gross = calculated.get("gross_weight_kg") or data.get("declared_gross_weight_kg")
+                    if packages and not net and not gross:
+                        net = str(sum(Decimal(str(p.get("net_weight_kg") or 0)) for p in packages))
+                        gross = str(sum(Decimal(str(p.get("gross_weight_kg") or 0)) for p in packages))
+                    package_lines.append(f"NET WEIGHT: {_format_quantity(net) if net else 'TO BE CONFIRMED'} KG  |  GROSS WEIGHT: {_format_quantity(gross) if gross else 'TO BE CONFIRMED'} KG")
+                    volume = calculated.get("volume_cbm") or data.get("declared_volume_cbm")
+                    package_lines.append("TOTAL VOLUME: " + (_format_quantity(volume) if volume else "TO BE CONFIRMED") + " CBM")
+                    if data.get("hs_code"):
+                        package_lines.append("HS CODE: " + str(data["hs_code"]))
                 except (InvalidOperation, TypeError, ValueError):
                     package_lines.append("NET WEIGHT / GROSS WEIGHT: TO BE CONFIRMED")
                 for line_index, line in enumerate(package_lines):
                     canvas.text(left, bottom + 8 + line_index * 8, line, 5.8, True, MUTED)
-                bottom += 20
-                canvas.text(left, bottom + 8, "TOTAL QUANTITY: " + total_quantity, 5.8, True, MUTED)
-                bottom += 8
+                bottom += len(package_lines) * 8 + 4
+                for line_index, line in enumerate(packing_quantity_lines):
+                    canvas.text(left, bottom + 8 + line_index * 8, line, 5.8, True, MUTED)
+                bottom += 17 + (len(packing_quantity_lines) - 1) * 8
             else:
                 total_text = _formatted_money(data.get("total") or "0", currency)
                 canvas.rect(374, bottom - 4, 203, 27, NAVY)

@@ -104,13 +104,15 @@ def match_eclado_product(name, capacity=None, products=None):
     return {"status": "matched", "product": exact[0]}
 
 
-def resolve_price(product_id, prices=None, role="sale", currency=None):
+def resolve_price(product_id, prices=None, role="sale", currency=None, party_key=None):
     """Resolve a locally seeded price only on exact product, role and currency."""
     if prices is None:
         prices = load_local_seed()
     table = "buyer_prices" if role == "sale" else "purchase_prices"
+    party_field = "buyer_key" if role == "sale" else "supplier_key"
     rows = [p for p in prices.get(table, []) if p.get("product_id") == product_id and
-            (currency is None or p.get("currency") == currency)]
+            (currency is None or p.get("currency") == currency) and
+            (party_key is None or str(p.get(party_field) or "").upper() == party_key.upper())]
     if len(rows) != 1:
         return None
     return rows[0] if len(rows) == 1 else None
@@ -125,9 +127,9 @@ def apply_verified_eclado_prices(draft, seed=None):
     # shows products and sizes but no explicit category. An exact match of every
     # line against the ECLADO product master is stronger evidence and lets the
     # existing role/currency-specific price lookup proceed for both PI and PO.
+    exact_matches = [match_eclado_product(item.get("product_name"), item.get("capacity"), products)
+                     for item in items]
     if items and draft.get("product_family") != "cosmetics":
-        exact_matches = [match_eclado_product(item.get("product_name"), item.get("capacity"), products)
-                         for item in items]
         if all(match["status"] == "matched" for match in exact_matches):
             draft["product_family"] = "cosmetics"
     price_table = "purchase_prices" if draft.get("document_type") == "PO" else "buyer_prices"
@@ -139,6 +141,18 @@ def apply_verified_eclado_prices(draft, seed=None):
     expected_party = "ECLADO" if draft.get("document_type") == "PO" else "DEAR GLOW"
     party_matches = ("ECLADO" in counterparty if draft.get("document_type") == "PO"
                      else "DEARGLOW" in counterparty)
+    supplier_confirmation = "The seller was not supplied. Use the ECLADO purchase price catalog for this PO? Confirm the supplier and legal details."
+    pending = draft.setdefault("pending_confirmations", [])
+    if draft.get("document_type") == "PO" and not counterparty and items and all(m["status"] == "matched" for m in exact_matches):
+        party_matches = all(resolve_price(m["product"]["id"], seed, "purchase", "KRW", "ECLADO")
+                            for m in exact_matches)
+        if party_matches and supplier_confirmation not in pending:
+            pending.append(supplier_confirmation)
+    elif supplier_confirmation in pending:
+        pending.remove(supplier_confirmation)
+    if not party_matches and draft.get("_catalog_currency_inferred"):
+        draft["currency"] = None
+        draft.pop("_catalog_currency_inferred", None)
     for item in items:
         if draft.get("product_family") != "cosmetics":
             item["master_price"] = False
@@ -151,6 +165,10 @@ def apply_verified_eclado_prices(draft, seed=None):
             continue
         product = match["product"]
         if not party_matches:
+            if item.get("master_price") is True:
+                item["unit_price"] = None
+                item["price_source"] = None
+                item.pop("price_override_confirmed", None)
             item["master_price"] = False
             if item.get("source") and item.get("unit_price") not in (None, ""):
                 item["price_override_confirmed"] = True
@@ -160,7 +178,8 @@ def apply_verified_eclado_prices(draft, seed=None):
                     f"Confirm a transaction-specific price for {product.get('item_name')}; local catalog price is only for {expected_party}")
             continue
         currency = draft.get("currency") or default_currency
-        price = resolve_price(product["id"], seed, "purchase" if draft.get("document_type") == "PO" else "sale", currency)
+        price = resolve_price(product["id"], seed, "purchase" if draft.get("document_type") == "PO" else "sale", currency,
+                              "ECLADO" if draft.get("document_type") == "PO" else "DEAR_GLOW")
         if not price:
             item["master_price"] = False
             draft.setdefault("missing_fields", []).append(
@@ -171,6 +190,7 @@ def apply_verified_eclado_prices(draft, seed=None):
             # currency only, use that catalog currency instead of asking the
             # model to infer it from the order screenshot.
             draft["currency"] = price.get("currency")
+            draft["_catalog_currency_inferred"] = True
         provided = item.get("unit_price")
         provided_amount = None
         try:
@@ -191,7 +211,7 @@ def apply_verified_eclado_prices(draft, seed=None):
         if not price_differs:
             item["product_id"] = product["id"]
             item["unit_price"] = str(price["unit_price"])
-            item["price_source"] = "Verified local ECLADO catalog; source workbook row " + str(price.get("source_row"))
+            item["price_source"] = "Verified ECLADO catalog; source workbook row " + str(price.get("source_row"))
             item["master_price"] = True
         elif item.get("price_override_confirmed"):
             item["price_source"] = "User-confirmed transaction-specific override"
