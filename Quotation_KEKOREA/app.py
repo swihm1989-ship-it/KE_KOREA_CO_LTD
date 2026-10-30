@@ -350,7 +350,8 @@ if extract_clicked:
             draft["document_type"] = expected_type
             draft = verify_item_quotes(draft, prompt, image_context=bool(image_inputs))
             draft["issue_date"] = current_issue_date()
-            if not image_inputs and not _has_explicit_ship_to(prompt):
+            ship_to_source = draft.pop("ship_to_source", None)
+            if not _has_explicit_ship_to(prompt) and not (image_inputs and _has_explicit_ship_to(ship_to_source)):
                 draft["ship_to"] = None
             elif re.fullmatch(r"\s*(?:N/?A|NONE|NOT\s+PROVIDED|TO\s+CONFIRM|TBC|TBD|UNKNOWN)\s*[.!]?\s*", str(draft.get("ship_to") or ""), re.IGNORECASE):
                 draft["ship_to"] = None

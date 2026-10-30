@@ -1,8 +1,7 @@
 """Deterministic calculations and validation for English trade document drafts."""
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import re
-from zoneinfo import ZoneInfo
 
 
 DOC_TYPES = {"PO", "PI", "CI", "PL"}
@@ -13,7 +12,9 @@ PRICE_QUANTUM = Decimal("0.000001")
 
 def current_issue_date():
     """Current English issue date in the company's Asia/Seoul time zone."""
-    today = datetime.now(ZoneInfo("Asia/Seoul")).date()
+    # South Korea uses UTC+09:00 year-round; fixed offset also works on runtimes
+    # (notably some Windows and slim Linux builds) without an IANA tz database.
+    today = datetime.now(timezone(timedelta(hours=9))).date()
     month = ("January", "February", "March", "April", "May", "June",
              "July", "August", "September", "October", "November", "December")[today.month - 1]
     return f"{today.day} {month} {today.year}"

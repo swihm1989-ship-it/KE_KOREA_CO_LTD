@@ -550,8 +550,9 @@ def render_trade_document(data, bank_details=None, *, logo_path=None, seal_path=
     terms_top = max(seller_bottom, buyer_bottom) + 8
     terms_values = [data.get("incoterms") or "TO BE CONFIRMED",
                     data.get("payment_terms") or "TO BE CONFIRMED",
-                    data.get("ship_to") or "N/A"]
-    terms_lines = [_wrap(str(value), 25) for value in terms_values]
+                    data.get("ship_to") or "N/A",
+                    data.get("country_of_origin") or "N/A"]
+    terms_lines = [_wrap(str(value), 26) for value in terms_values]
     terms_height = max(38, 18 + max(map(len, terms_lines)) * 7.0)
     first_table_top = terms_top + terms_height + 12
     chunks = _paginate_rows(rows, first_table_top, review_height, is_packing_list)
@@ -582,7 +583,8 @@ def render_trade_document(data, bank_details=None, *, logo_path=None, seal_path=
             _party_panel(canvas, 35, "SELLER / SUPPLIER", data.get("seller") or {})
             _party_panel(canvas, 315, "BUYER / CUSTOMER", data.get("buyer") or {})
             canvas.rect(35, terms_top, 542, terms_height, PALE)
-            columns = [(47, "DELIVERY TERMS"), (225, "PAYMENT TERMS"), (410, "SHIP TO")]
+            columns = [(47, "DELIVERY TERMS"), (185, "PAYMENT TERMS"),
+                       (330, "SHIP TO"), (455, "COUNTRY OF ORIGIN")]
             for column_index, (x, label) in enumerate(columns):
                 canvas.text(x, terms_top + 12, label, 5.6, True, MUTED)
                 for line_index, line in enumerate(terms_lines[column_index]):
