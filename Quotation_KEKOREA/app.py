@@ -18,6 +18,24 @@ from Quotation_KEKOREA.agent.renderers import format_currency_amount, render_fil
 from Quotation_KEKOREA.agent.trade_documents import apply_promotion, current_issue_date, normalize_quantity_unit, validate_and_calculate
 
 
+def _apply_ke_korea_company_defaults(draft, document_type):
+    """Fill the KE Korea party profile on every shared document workflow."""
+    role = "buyer" if document_type == "PO" else "seller"
+    party = dict(draft.get(role) or {})
+    defaults = {
+        "legal_name": "KE Korea Co. LTD",
+        "address": "#1510, 157 Yangpyung Ro, Yungdeungpo Gu, Seoul, South Korea",
+        "contact": "Representative: DAVID, SEOKWON IHM",
+        "phone": "+82 10 9823 0029",
+        "email": "david.ihm@ke-korea.com",
+    }
+    for field, value in defaults.items():
+        if not str(party.get(field) or "").strip():
+            party[field] = value
+    draft[role] = party
+    return draft
+
+
 def _synchronize_extracted_quantities(draft):
     """Use one paid quantity consistently and calculate shipped quantities."""
     for item in draft.get("items", []):
@@ -363,15 +381,7 @@ if extract_clicked:
             draft["conflicts"] = [issue for issue in draft.get("conflicts", [])
                                   if not issue.lower().startswith("remarks was not found verbatim")]
             _synchronize_extracted_quantities(draft)
-            company_role = "buyer" if expected_type == "PO" else "seller"
-            company = draft.get(company_role) or {}
-            if not company.get("legal_name"):
-                company["legal_name"] = "KE Korea Co. LTD"
-            if not company.get("address"):
-                company["address"] = "#1510, 157 Yangpyung Ro, Yungdeungpo Gu, Seoul, South Korea"
-            if not company.get("contact"):
-                company["contact"] = "Representative: DAVID, SEOKWON IHM"
-            draft[company_role] = company
+            _apply_ke_korea_company_defaults(draft, expected_type)
             apply_verified_eclado_prices(draft, active_catalog)
             discount_rate, discount_issue = _discount_instruction(prompt)
             if discount_rate is not None:
@@ -396,6 +406,7 @@ if raw:
     try:
         data = json.loads(json.dumps(raw, ensure_ascii=False))
         data["document_type"] = expected_type
+        _apply_ke_korea_company_defaults(data, expected_type)
         apply_verified_eclado_prices(data, active_catalog)
         result = validate_and_calculate(data)
         bank_keys = ("BENEFICIARY", "BANK_NAME", "BRANCH", "SWIFT", "ACCOUNT_NUMBER", "BANK_ADDRESS")
@@ -439,10 +450,24 @@ if raw:
         if expected_type != "PO" and result.get("product_family") == "cosmetics" and "dearglow" not in buyer_key:
             st.warning("The current ECLADO sale-price catalog is for Dear Glow only. This buyer has no stored catalog price yet, so enter an approved price before creating a document.")
 
+        supported_currencies = {"USD", "KRW", "EUR", "CNY"}
+        currency = str(result.get("currency") or "").strip().upper()
+        # Keep the calculation display separate from overall document readiness.
+        # A catalog lookup can supply the authoritative currency after extraction,
+        # while a stale "currency" entry remains in missing_fields. Only an
+        # invalid/missing currency or an explicit currency conflict makes a
+        # numeric total unsafe to display.
+        currency_conflicts = [
+            issue for issue in result["blocking_issues"]
+            if issue.lower().startswith("resolve conflicting information:")
+            and "currency" in issue.lower()
+        ]
         calculation_blockers = [issue for issue in result["blocking_issues"]
                                 if issue.startswith("Valid positive number required for paid quantity")
-                                or issue.startswith("Valid positive number required for unit price")
-                                or "currency" in issue.lower()]
+                                or issue.startswith("Valid positive number required for unit price")]
+        calculation_blockers.extend(currency_conflicts)
+        if currency not in supported_currencies:
+            calculation_blockers.append("Currency must be confirmed as a supported three-letter code")
         discount_blockers = [issue for issue in result["blocking_issues"] if "discount" in issue.lower()]
         total_display = ("Cannot calculate" if calculation_blockers or discount_blockers else
                          format_currency_amount(result.get("total", "0"), result.get("currency")))
