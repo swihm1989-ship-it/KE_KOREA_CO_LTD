@@ -55,6 +55,24 @@ def _explicit_remark(prompt):
     return (match.group(1).strip(" \t\r\n;,") or "N/A") if match else "N/A"
 
 
+def _discount_instruction(prompt):
+    """Return one discount rate; if omitted, use the undiscounted catalog price."""
+    text = prompt or ""
+    if not re.search(r"discount|할인", text, re.IGNORECASE):
+        return "0", None
+    rates = re.findall(r"(?<![\w.])(\d+(?:\.\d+)?)\s*%", text)
+    if not rates:
+        if re.search(r"no\s+discount|without\s+discount|할인\s*없|할인율\s*미적용", text, re.IGNORECASE):
+            return "0", None
+        return None, "Discount was mentioned without a percentage; specify a single discount rate."
+    correction = re.search(r"not|instead|rather than|아니라|아닌|대신|수정|변경", text, re.IGNORECASE)
+    if len(set(rates)) == 1:
+        return rates[-1], None
+    if correction:
+        return rates[-1], None
+    return None, "Multiple discount rates were requested; specify one rate for this invoice."
+
+
 def _keep_delivery_note_in_terms(draft, auto_remark):
     """Keep a model-classified delivery deadline under delivery terms, not remarks."""
     if not auto_remark or not re.search(r"\b(delivery|deliver|shipment deadline|ship before)\b", str(auto_remark), re.I):
@@ -161,6 +179,7 @@ prompt = st.text_area("거래 조건을 입력하세요", height=180,
     placeholder=f"Example: Create a {title} for [company name, address, contact, phone, email]. List products, exact quantities, currency and prices, Incoterms and named place, payment or shipment terms. Optional: REMARK: [text]. If omitted, the document shows N/A.")
 uploaded_images = st.file_uploader("바이어 주문 이미지 첨부", type=["png", "jpg", "jpeg", "webp"], accept_multiple_files=True,
     help="이미지 최대 5개, 파일당 10 MB, 총 20 MB까지 첨부할 수 있습니다.")
+st.caption("For ECLADO, the entered discount is applied to the Supabase list price. If no discount is stated, the full list price (0% discount) is used. Enter one discount rate per invoice.")
 if uploaded_images:
     st.caption(f"첨부 이미지 {len(uploaded_images)}개 · Extract를 누를 때 OpenAI로 전송됩니다.")
     st.image([upload.getvalue() for upload in uploaded_images], caption=[upload.name for upload in uploaded_images], use_container_width=True)
@@ -201,6 +220,16 @@ if extract_clicked:
                 company["contact"] = "Representative: DAVID, SEOKWON IHM"
             draft[company_role] = company
             apply_verified_eclado_prices(draft, active_catalog)
+            discount_rate, discount_issue = _discount_instruction(prompt)
+            if discount_rate is not None:
+                for item in draft.get("items", []):
+                    item["discount_percent"] = discount_rate
+                draft["conflicts"] = [issue for issue in draft.get("conflicts", [])
+                                      if "discount percent was not found in its source quote" not in issue.lower()]
+            else:
+                for item in draft.get("items", []):
+                    item["discount_percent"] = None
+                draft.setdefault("conflicts", []).append(discount_issue)
             st.session_state["trade_draft"] = draft
             st.session_state["trade_draft_page"] = page
             st.session_state["rendered_paths"] = {}
@@ -224,6 +253,11 @@ if raw:
                 result["blocking_issues"].append(issue)
             result["ready_for_issue"] = False
             result["status"] = "DRAFT"
+
+        buyer_name = str((result.get("buyer") or {}).get("legal_name") or "").strip().casefold()
+        buyer_key = re.sub(r"[^a-z0-9]", "", buyer_name)
+        if expected_type != "PO" and result.get("product_family") == "cosmetics" and "dearglow" not in buyer_key:
+            st.warning("The current ECLADO sale-price catalog is for Dear Glow only. This buyer has no stored catalog price yet, so enter an approved price before creating a document.")
 
         calculation_blockers = [issue for issue in result["blocking_issues"]
                                 if issue.startswith("Valid positive number required for paid quantity")
