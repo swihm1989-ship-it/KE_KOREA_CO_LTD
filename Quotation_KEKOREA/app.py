@@ -5,6 +5,7 @@ import tempfile
 from pathlib import Path
 import sys
 from decimal import Decimal, InvalidOperation
+import re
 
 import streamlit as st
 
@@ -42,6 +43,24 @@ def _synchronize_extracted_quantities(draft):
             item["shipped_quantity"] = format(Decimal(str(paid)) + free, "f")
         except (InvalidOperation, TypeError, ValueError):
             pass
+
+
+def _explicit_remark(prompt):
+    """Only use remark text that the user explicitly labels in the prompt."""
+    match = re.search(
+        r"\bREMARKS?\s*:\s*(.*?)(?=\s+(?:BUYER|SELLER|PRODUCT|QUANTITY|PRICE|DELIVERY|PAYMENT|INCOTERMS|CURRENCY|SHIPMENT|SHIP\s+TO|BILL\s+TO|CONTACT)\s*:|$)",
+        prompt or "", flags=re.IGNORECASE | re.DOTALL)
+    return (match.group(1).strip(" \t\r\n;,") or "N/A") if match else "N/A"
+
+
+def _keep_delivery_note_in_terms(draft, auto_remark):
+    """Keep a model-classified delivery deadline under delivery terms, not remarks."""
+    if not auto_remark or not re.search(r"\b(delivery|deliver|shipment deadline|ship before)\b", str(auto_remark), re.I):
+        return
+    terms = str(draft.get("incoterms") or "").strip()
+    note = str(auto_remark).strip()
+    if note and note.casefold() not in terms.casefold():
+        draft["incoterms"] = f"{terms}; {note}" if terms else note
 
 
 st.set_page_config(page_title="CONTRACT TEMPLATE MAKER | KE KOREA", page_icon="📄", layout="wide")
@@ -137,7 +156,7 @@ with st.expander("What this menu creates"):
 
 st.markdown('<div class="ke-section">1 · 주문 정보</div>', unsafe_allow_html=True)
 prompt = st.text_area("거래 조건을 입력하세요", height=180,
-    placeholder=f"Example: Create a {title} for [company name, address, contact, phone, email]. List products, exact quantities, currency and prices, Incoterms and named place, payment or shipment terms, and remarks.")
+    placeholder=f"Example: Create a {title} for [company name, address, contact, phone, email]. List products, exact quantities, currency and prices, Incoterms and named place, payment or shipment terms. Optional: REMARK: [text]. If omitted, the document shows N/A.")
 uploaded_images = st.file_uploader("바이어 주문 이미지 첨부", type=["png", "jpg", "jpeg", "webp"], accept_multiple_files=True,
     help="이미지 최대 5개, 파일당 10 MB, 총 20 MB까지 첨부할 수 있습니다.")
 if uploaded_images:
@@ -164,6 +183,11 @@ if extract_clicked:
             # The selected sidebar workflow is authoritative, even if the order image mentions another form.
             draft["document_type"] = expected_type
             draft = verify_item_quotes(draft, prompt, image_context=bool(image_inputs))
+            auto_remark = draft.get("remarks")
+            _keep_delivery_note_in_terms(draft, auto_remark)
+            draft["remarks"] = _explicit_remark(prompt)
+            draft["conflicts"] = [issue for issue in draft.get("conflicts", [])
+                                  if not issue.lower().startswith("remarks was not found verbatim")]
             _synchronize_extracted_quantities(draft)
             company_role = "buyer" if expected_type == "PO" else "seller"
             company = draft.get(company_role) or {}

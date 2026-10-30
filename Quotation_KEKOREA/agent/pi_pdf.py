@@ -487,16 +487,8 @@ def render_trade_document(data, bank_details=None, *, logo_path=None, seal_path=
     currency = str(data.get("currency") or "TO CONFIRM").upper()
     items = data.get("items") or []
     rows = [_document_row(item, is_packing_list, currency) for item in items]
-    open_items = data.get("blocking_issues") or data.get("missing_fields") or []
-    review_parts = ["Confirm: " + "; ".join(str(value) for value in open_items)] if open_items else []
-    if data.get("remarks"):
-        review_parts.append("Remarks: " + str(data["remarks"]))
-    if not review_parts:
-        review_parts.append("Review all commercial and shipping details before approval.")
-    review_lines = []
-    for part in review_parts:
-        review_lines.extend(_wrap(part.replace("\n", " "), 145))
-    review_height = max(40, 22 + len(review_lines) * 6.5)
+    remark_lines = _wrap(str(data.get("remarks") or "N/A").replace("\n", " "), 145)
+    review_height = max(40, 22 + len(remark_lines) * 6.5)
 
     logo_path = Path(logo_path) if logo_path else None
     seal_path = Path(seal_path) if seal_path else None
@@ -610,10 +602,10 @@ def render_trade_document(data, bank_details=None, *, logo_path=None, seal_path=
                 canvas.text(left, bottom + 10, f"TOTAL QUANTITY: {total_quantity:g}", 6.0, True, MUTED)
                 bottom += 31
 
-            canvas.rect(35, bottom, 542, review_height, (1.0, 0.97, 0.94))
-            canvas.rect(35, bottom, 3, review_height, WARNING)
-            canvas.text(45, bottom + 11, "DRAFT - REVIEW REQUIRED BEFORE ISSUE", 5.7, True, WARNING)
-            for line_index, line in enumerate(review_lines):
+            canvas.rect(35, bottom, 542, review_height, (1, 1, 1), PALE, 0.7)
+            canvas.rect(35, bottom, 3, review_height, BRAND_BLUE)
+            canvas.text(45, bottom + 11, "REMARK", 5.7, True, BRAND_BLUE)
+            for line_index, line in enumerate(remark_lines):
                 canvas.text(45, bottom + 22 + line_index * 6.5, line, 5.0, False, INK)
             bottom += review_height + 7
 
