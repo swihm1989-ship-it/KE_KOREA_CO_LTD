@@ -100,9 +100,33 @@ def _discount_instruction(prompt):
     text = prompt or ""
     if not re.search(r"discount|할인", text, re.IGNORECASE):
         return "0", None
-    rates = re.findall(r"(?<![\w.])(\d+(?:\.\d+)?)\s*%", text)
+
+    # Remove rates that are explicitly denied before looking for active rates.
+    # Without this, a phrase such as "10% 할인율 적용하지마" is incorrectly
+    # parsed as a request to apply a 10% discount simply because it contains 10%.
+    denied_patterns = (
+        r"(?<![\w.])\d+(?:\.\d+)?\s*%\s*할인(?:율)?\s*(?:(?:을|은|는)\s*)?(?:적용\s*하지\s*마(?:세요|라)?|적용\s*안\s*(?:해|함|합니다|돼|됩니다)?|적용하지\s*않(?:아|는다|습니다)?|미적용|적용\s*제외|제외)",
+        r"할인(?:율)?\s*(?:(?:을|은|는)\s*)?\d+(?:\.\d+)?\s*%\s*(?:적용\s*하지\s*마(?:세요|라)?|적용\s*안\s*(?:해|함|합니다|돼|됩니다)?|적용하지\s*않(?:아|는다|습니다)?|미적용|제외)",
+        r"\b(?:do\s+not|don't|dont|does\s+not|doesn't)\s+(?:apply|use|give)\b[^.!?;\n]{0,40}\bdiscount(?:\s+rate)?\b",
+        r"\bdiscount(?:\s+rate)?\b[^.!?;\n]{0,32}\b(?:not\s+applied|not\s+apply|do\s+not\s+apply|don't\s+apply|excluded|omit)\b",
+    )
+    denied_spans = []
+    for pattern in denied_patterns:
+        denied_spans.extend(match.span() for match in re.finditer(pattern, text, re.IGNORECASE))
+    remaining = list(text)
+    for start, end in denied_spans:
+        remaining[start:end] = " " * (end - start)
+    remaining_text = "".join(remaining)
+
+    # "At list price" / "정가로" is also an explicit zero-discount instruction.
+    list_price_instruction = re.search(
+        r"\b(?:at\s+(?:the\s+)?list\s+price|full\s+price|regular\s+price|no\s+discount|without\s+discount)\b|정가(?:로|격으로)",
+        text, re.IGNORECASE)
+    rates = re.findall(r"(?<![\w.])(\d+(?:\.\d+)?)\s*%", remaining_text)
+    if not rates and (denied_spans or list_price_instruction):
+        return "0", None
     if not rates:
-        if re.search(r"no\s+discount|without\s+discount|할인\s*없|할인율\s*미적용", text, re.IGNORECASE):
+        if re.search(r"할인\s*없|할인율\s*미적용|할인\s*미적용|할인\s*없이", text, re.IGNORECASE):
             return "0", None
         return None, "Discount was mentioned without a percentage; specify a single discount rate."
     correction = re.search(r"not|instead|rather than|아니라|아닌|대신|수정|변경", text, re.IGNORECASE)
