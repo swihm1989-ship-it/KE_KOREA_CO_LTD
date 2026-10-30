@@ -403,11 +403,18 @@ if raw:
         missing_bank_keys = [f"KEKOREA_USD_{key}" for key, value in bank_details.items() if not value]
         encoded_seal = str(runtime_env.get("KEKOREA_COMPANY_SEAL_BASE64", "")).strip()
         seal_bytes = None
+        seal_secret_error = None
         if encoded_seal:
+            encoded_seal = re.sub(r"\s+", "", encoded_seal)
+            encoded_seal = re.sub(r"^data:image/png;base64,", "", encoded_seal, flags=re.IGNORECASE)
             try:
                 seal_bytes = base64.b64decode(encoded_seal, validate=True)
+                if not seal_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
+                    seal_bytes = None
+                    seal_secret_error = "KEKOREA_COMPANY_SEAL_BASE64 is set, but it does not decode to a PNG image"
             except (ValueError, TypeError):
                 seal_bytes = None
+                seal_secret_error = "KEKOREA_COMPANY_SEAL_BASE64 is present but is not valid Base64"
         # Prefer the company-provided seal asset in every local document flow;
         # keep the private copy as a backward-compatible fallback.
         seal_asset_path = ROOT / "assets" / "\uBA85\uD310\uC9C1\uC778.png"
@@ -421,7 +428,7 @@ if raw:
             result["ready_for_issue"] = False
             result["status"] = "DRAFT"
         if missing_seal:
-            issue = "KE Korea company seal is unavailable; add KEKOREA_COMPANY_SEAL_BASE64 to Streamlit Cloud Secrets"
+            issue = seal_secret_error or "KEKOREA_COMPANY_SEAL_BASE64 is missing from Streamlit Cloud Secrets"
             if issue not in result["blocking_issues"]:
                 result["blocking_issues"].append(issue)
             result["ready_for_issue"] = False
@@ -547,7 +554,9 @@ if raw:
 
         pdf_col, excel_col = st.columns(2)
         bank_blockers = [issue for issue in result["blocking_issues"] if "bank profile is incomplete" in issue.lower()]
-        seal_blockers = [issue for issue in result["blocking_issues"] if "company seal is unavailable" in issue.lower()]
+        seal_blockers = [issue for issue in result["blocking_issues"]
+                         if "company seal is unavailable" in issue.lower()
+                         or "KEKOREA_COMPANY_SEAL_BASE64" in issue]
         financial_blockers = calculation_blockers + discount_blockers
         export_blocked = bool(financial_blockers or bank_blockers or seal_blockers or unconfirmed_aliases)
         if financial_blockers:
@@ -557,7 +566,8 @@ if raw:
         if bank_blockers:
             st.error("PI download is disabled until all six KEKOREA_USD_* bank details are configured in this runtime.")
         if seal_blockers:
-            st.error("Document download is disabled because this deployment has no local seal asset. Set KEKOREA_COMPANY_SEAL_BASE64 in Streamlit Cloud Secrets from assets/명판직인.png.")
+            st.error("Document download is disabled: " + seal_blockers[0] + ".")
+            st.caption("In Streamlit Cloud, add the top-level secret KEKOREA_COMPANY_SEAL_BASE64. A local .env file is not available to the cloud runtime.")
         make_pdf = pdf_col.button("Create PDF", type="primary", use_container_width=True,
                                   disabled=export_blocked)
         make_excel = excel_col.button("Create Excel", use_container_width=True,
