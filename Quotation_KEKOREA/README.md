@@ -258,14 +258,15 @@ API 기반 판독을 선택하면 어떤 자료가 외부로 전송되는지 표
 
 ### 구현 범위
 
-- `app.py`: Streamlit 화면에서 거래 프롬프트 입력, 추출 JSON 검토·수정, 검증 오류 확인 및 PDF/XLSX/HTML 초안 다운로드.
-- `agent/extractor.py`: OpenAI Responses API의 strict structured output. 사용자가 Extract를 눌렀을 때만 프롬프트 본문을 OpenAI로 전송한다.
+- `app.py`: Streamlit screen for typed transaction details and buyer order-image uploads. Users review extracted JSON, resolve blocking issues, and download PDF/XLSX/HTML drafts.
+- `agent/extractor.py`: OpenAI Responses API structured extraction from transaction text and attached order screenshots. Prompt and images are sent only after the user clicks Extract.
 - 입력 언어: 중국어·인도네시아어·한국어를 GPT가 해석해 영문 필드로 정리한다. 중국어 회사명·주소는 중국어 원문 뒤에 영문 번역을 괄호로 병기하고, 나머지 중국어는 영문만 남긴다. PDF는 중국어 글리프용 CID 폰트 인코딩으로 병기 이름·주소를 보존한다.
+- KE Korea default profile: `KE Korea Co. LTD`, `#1510, 157 Yangpyung Ro, Yungdeungpo Gu, Seoul, South Korea`, `Representative: DAVID, SEOKWON IHM`. Transaction-specific company details take priority. Solar PI uses `assets/company_logo.png` in the header and the private seal from `private/company_seal.png`; never commit the private seal.
 - `agent/pricing.py`: Supabase REST API에서 최신 `kekorea_catalog_imports` ID, ECLADO 제품, 해당 import의 매입가·판매가를 서버에서 조회한다. ECLADO 공급 PO에는 매입가만, Dear Glow 판매 PI/CI에는 해당 구매처 판매가만 exact match로 적용한다. 구매처·공급처/통화가 다르면 해당 가격을 쓰지 않는다.
 - Supabase 신형 `SUPABASE_SECRET_KEY`는 HTTPS REST 요청의 `apikey` 헤더로만 전달한다. 브라우저 코드, URL, 로그에 키를 노출하지 않는다. Secret key는 전체 DB 접근 권한이 있으므로 Streamlit 앱 공개 범위를 반드시 비공개로 설정한다.
 - Supabase 연결 설정이 없으면 개발용 로컬 seed를 사용할 수 있으나, Cloud에서는 seed를 Git에서 제외하므로 Supabase 비밀 키가 필요하다. Supabase 조회 실패 시 오래된 로컬 가격으로 조용히 대체하지 않는다.
 - `agent/trade_documents.py`: Decimal 계산, 할인·FOC 분리, 거래 역할·통화·가격 기준·포장 검증. 필수값 누락/충돌이면 DRAFT 상태로 막는다.
-- `agent/renderers.py`: English-only PDF/XLSX/HTML review drafts. 회사 승인 템플릿과 시각 대조는 미완료다.
+- `agent/renderers.py`: English PDF/XLSX/HTML review drafts. Solar PI uses the corporate-blue header with the company logo and PI-only bank details.
 
 ### 로컬 실행
 
@@ -295,5 +296,30 @@ SUPABASE_SECRET_KEY = "새로 발급한 Supabase Secret key"
 - Python `unittest`에서 SQL importer·계산·렌더러·OpenAI 모의요청·Supabase REST 모의요청 검증을 실행한다. 모의 테스트는 실제 Supabase 인증이나 실제 테이블 상태를 증명하지 않는다.
 - 앱이 실제 Supabase에 연결되면 화면에 최근 catalog import 시각과 제품 수를 표시한다. “No ECLADO catalog import”는 테이블은 있어도 seed rows가 없을 때, HTTP 401/403은 키 또는 권한 문제, 404는 API 노출/테이블명 문제를 뜻한다.
 - 실제 Supabase key, DB row, Streamlit Cloud Secrets로 라이브 연결은 아직 확인하지 않았다. 이 환경에서는 외부 Supabase endpoint에 접속하지 않고 비밀 키 없이 모의 응답으로만 검증한다.
-- 이미지·PDF·XLSX 입력, 승인 회사 양식, 은행/회사 프로필, 최종 채번·발행, CI/PL 선적 연동은 미완료다. 현재 출력은 검토용 DRAFT라 통관/거래처 제출용이 아니다.
+- Order screenshots are supported. PDF/XLSX order uploads, final numbering/issuance, and CI/PL shipping integration are not connected. Generated files remain review drafts.
 - PDF 화면 렌더링과 Excel 앱 검증은 미완료다. 회사 템플릿에 맞춘 편집 전 시각 검수가 필요하다.
+
+
+## Buyer order image input and cosmetics money display
+
+The Streamlit form accepts up to five PNG/JPG/JPEG/WEBP order screenshots (10 MB each, 20 MB total) alongside buyer/company details. On Extract, the prompt and images are sent to OpenAI for structured extraction. The app keeps the resulting document as a DRAFT and flags image-derived item details for visual review before download. OpenAI image inputs use billable tokens; upload only transaction images that are appropriate to send to the configured API.
+
+For cosmetics, the final unit price is rounded before extending the line amount: KRW to whole won (`KRW 15,000` in English documents) and USD to two decimal places (`$10.57`). Totals, PI/PO/CI line items, spreadsheet outputs, and the app total display use the same rounding rule. Other product families retain their existing unit-price precision.
+
+
+## PI corporate branding
+
+The solar PI header displays the supplied company logo in a white brand panel. The faint body watermark was removed because the white party panels and pricing table obscured it. The former charcoal/gold fills and rules now use the logo's navy and blue palette.
+
+
+## Brand assets and Cloud secrets
+
+- The solar PI displays the supplied logo in a white header area. Navy and blue replace the previous charcoal and gold theme. No body watermark is used.
+- `assets/company_logo.png` is tracked. `private/company_seal.png`, `.env`, generated outputs, and catalog seed data are excluded from Git.
+- Streamlit Cloud uses `KEKOREA_COMPANY_SEAL_BASE64` for the private seal and the six `KEKOREA_USD_*` variables for PI bank details. Generate the seal value in PowerShell from the repository root with:
+
+```powershell
+[Convert]::ToBase64String([IO.File]::ReadAllBytes('.\Quotation_KEKOREA\private\company_seal.png')) | Set-Clipboard
+```
+
+Copy the resulting value into Streamlit Cloud Secrets. Bank details appear on PI only.
