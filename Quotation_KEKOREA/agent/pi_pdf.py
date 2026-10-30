@@ -426,9 +426,9 @@ def _document_row(item, is_packing_list, currency):
     if not is_packing_list:
         row["price"] = _formatted_money(item.get("final_unit_price", item.get("unit_price", "")), currency)
         row["amount"] = _formatted_money(item.get("line_total", ""), currency)
-        if currency != "USD" and row["price"].startswith(currency + " "):
+        if currency in {"KRW", "EUR", "CNY"} and row["price"].startswith(currency + " "):
             row["price"] = row["price"][len(currency) + 1:]
-        if currency != "USD" and row["amount"].startswith(currency + " "):
+        if currency in {"KRW", "EUR", "CNY"} and row["amount"].startswith(currency + " "):
             row["amount"] = row["amount"][len(currency) + 1:]
         row["price_lines"] = _wrap(row["price"], 16)
         row["amount_lines"] = _wrap(row["amount"], 17)

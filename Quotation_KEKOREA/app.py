@@ -126,6 +126,35 @@ def _normalize_quantity_aliases(draft, prompt):
     return draft
 
 
+def _normalize_currency_alias(draft, prompt):
+    """Infer currency only from explicit source markers; ask before treating bare $ as USD."""
+    text = prompt or ""
+    evidence = {
+        "USD": bool(re.search(r"\bUSD\b|\bUS\s*\$|\$", text, re.I)),
+        "KRW": bool(re.search(r"\bKRW\b|\bWON\b|₩|원화|한국\s*원", text, re.I)),
+        "EUR": bool(re.search(r"\bEUR\b|\bEURO\b|€", text, re.I)),
+        "CNY": bool(re.search(r"\bCNY\b|\bRMB\b|人民币|人民幣|人民币|元", text, re.I)),
+    }
+    found = [code for code, present in evidence.items() if present]
+    if len(found) > 1:
+        draft.setdefault("conflicts", []).append(
+            "More than one currency is explicitly indicated; confirm the transaction currency")
+        return draft
+    if not found:
+        return draft
+    currency = found[0]
+    current = str(draft.get("currency") or "").upper()
+    if current and current != currency:
+        draft.setdefault("conflicts", []).append(
+            f"Extracted currency {current} conflicts with explicit {currency} price evidence; confirm the currency")
+        return draft
+    draft["currency"] = currency
+    if currency == "USD" and not re.search(r"\bUSD\b|\bUS\s*\$", text, re.I):
+        draft.setdefault("pending_confirmations", []).append(
+            "The source uses '$'. Confirm that this means USD (US dollars), not another dollar currency.")
+    return draft
+
+
 def _requested_document_type(prompt):
     """Recognize document aliases only when used as an explicit create request."""
     text = prompt or ""
@@ -289,6 +318,7 @@ if extract_clicked:
         with st.spinner("Extracting candidate fields. No document is issued."):
             draft = extract_trade_data(prompt or f"Use the attached order image as source for a {title}.", images=image_inputs, env=runtime_env)
             draft = _normalize_quantity_aliases(draft, prompt)
+            draft = _normalize_currency_alias(draft, prompt)
             # The selected sidebar workflow is authoritative, even if the order image mentions another form.
             draft["document_type"] = expected_type
             draft = verify_item_quotes(draft, prompt, image_context=bool(image_inputs))
@@ -349,7 +379,8 @@ if raw:
 
         calculation_blockers = [issue for issue in result["blocking_issues"]
                                 if issue.startswith("Valid positive number required for paid quantity")
-                                or issue.startswith("Valid positive number required for unit price")]
+                                or issue.startswith("Valid positive number required for unit price")
+                                or "currency" in issue.lower()]
         discount_blockers = [issue for issue in result["blocking_issues"] if "discount" in issue.lower()]
         total_display = ("Cannot calculate" if calculation_blockers or discount_blockers else
                          format_currency_amount(result.get("total", "0"), result.get("currency")))
@@ -370,6 +401,7 @@ if raw:
         top_metrics[0].metric("Product lines", len(result.get("items", [])))
         top_metrics[1].metric("Total quantity", quantity_summary)
         top_metrics[2].metric("Total amount", total_display)
+        st.caption(f"Currency: {result.get('currency') or 'To confirm'}")
 
         seller_col, buyer_col = st.columns(2)
         for column, label, party in ((seller_col, "SELLER", result.get("seller") or {}),
@@ -396,7 +428,10 @@ if raw:
                 unit_price = f"{result.get('currency') or ''} {item.get('final_unit_price', '')}".strip()
             if price_missing:
                 unit_price = "Not provided"
-            line_total = ("Cannot calculate" if quantity_missing or price_missing or discount_missing else
+            if not result.get("currency"):
+                unit_price = "Currency to confirm"
+            line_total = ("Cannot calculate" if quantity_missing or price_missing or discount_missing or
+                          not result.get("currency") else
                           format_currency_amount(item.get("line_total", "0"), result.get("currency")))
             display_rows.append({
                 "No.": index,
@@ -456,12 +491,15 @@ if raw:
                     st.error(f"Could not apply corrections: {exc}")
 
         pdf_col, excel_col = st.columns(2)
+        bank_blockers = [issue for issue in result["blocking_issues"] if "bank profile is incomplete" in issue.lower()]
         financial_blockers = calculation_blockers + discount_blockers
-        export_blocked = bool(financial_blockers or unconfirmed_aliases)
+        export_blocked = bool(financial_blockers or bank_blockers or unconfirmed_aliases)
         if financial_blockers:
             st.error("Confirm valid quantities, unit prices, and discounts before creating a PDF or Excel file.")
         if unconfirmed_aliases:
             st.warning("Confirm the interpreted order field above before creating the documents.")
+        if bank_blockers:
+            st.error("PI download is disabled until all six KEKOREA_USD_* bank details are configured in this runtime.")
         make_pdf = pdf_col.button("Create PDF", type="primary", use_container_width=True,
                                   disabled=export_blocked)
         make_excel = excel_col.button("Create Excel", use_container_width=True,
