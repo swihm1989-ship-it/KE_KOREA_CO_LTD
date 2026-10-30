@@ -323,3 +323,10 @@ The solar PI header displays the supplied company logo in a white brand panel. T
 ```
 
 Copy the resulting value into Streamlit Cloud Secrets. Bank details appear on PI only.
+
+
+## Shared document handling and document names
+
+PI, PO, CI, PL, and CIPL use the same extraction, verified ECLADO catalog lookup, quantity synchronization, discount parsing, Decimal calculation, English translation checks, explicit REMARK handling (`N/A` when omitted), and branded PDF/XLSX renderer. PO uses ECLADO purchase prices when the supplier is ECLADO; sale documents use the Dear Glow price list only for Dear Glow buyers. Other cosmetic buyers require a separately approved price.
+
+The Streamlit sidebar offers separate PI, PO, CI, PL, and CIPL workflows. CI creates a Commercial Invoice only; PL creates a Packing List only; CIPL creates both CI and PL using the same transaction data. PI alone includes KE KOREA's USD bank details. CIPL is recognized as a paired document request; PI/Proforma Invoice, PO/Purchase Order, CI/Commercial Invoice, and PL/Packing List aliases are accepted when the prompt explicitly requests creation. If the named document conflicts with the selected menu, extraction stops and tells the user which menu to choose.

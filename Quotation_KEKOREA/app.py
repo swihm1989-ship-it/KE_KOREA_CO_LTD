@@ -73,6 +73,26 @@ def _discount_instruction(prompt):
     return None, "Multiple discount rates were requested; specify one rate for this invoice."
 
 
+def _requested_document_type(prompt):
+    """Recognize document aliases only when used as an explicit create request."""
+    text = prompt or ""
+    names = {
+        "CIPL": r"(?:\bC\s*I\s*[+&/]\s*P\s*L\b|\bCIPL\b|commercial\s+invoice\s*(?:and|\+|&)\s*packing\s+list|packing\s+list\s*(?:and|\+|&)\s*commercial\s+invoice|상업송장\s*(?:및|\+)\s*(?:포장명세서|패킹리스트))",
+        "PI": r"(?:\bPI\b|pro\s*-?\s*forma\s+invoice|프로포마\s*인보이스|견적서)",
+        "PO": r"(?:\bPO\b|purchase\s+order|구매주문서|발주서)",
+        "CI": r"(?:\bCI\b|commercial\s+invoice|상업송장)",
+        "PL": r"(?:\bPL\b|packing\s+list|포장명세서|패킹리스트)",
+    }
+    command = r"(?:create|make|prepare|generate|draft|issue|작성|만들|생성|발행)"
+    for doc_type, alias in names.items():
+        # Require a nearby action word so a buyer's attached PO or cited CI is
+        # not mistaken for the document the user is asking KE KOREA to create.
+        patterns = (rf"{command}.{{0,45}}?{alias}", rf"{alias}.{{0,25}}?(?:작성|만들|생성|발행)")
+        if any(re.search(pattern, text, re.IGNORECASE | re.DOTALL) for pattern in patterns):
+            return doc_type
+    return None
+
+
 def _keep_delivery_note_in_terms(draft, auto_remark):
     """Keep a model-classified delivery deadline under delivery terms, not remarks."""
     if not auto_remark or not re.search(r"\b(delivery|deliver|shipment deadline|ship before)\b", str(auto_remark), re.I):
@@ -111,7 +131,7 @@ with st.sidebar:
     st.markdown("### CONTRACT TEMPLATE MAKER")
     st.caption("KE KOREA CO. LTD · TRADE DOCUMENTS")
     st.markdown("---")
-    pages = ["PI 만들기", "PO 만들기", "CIPL 만들기", "계약서 만들기 · 준비 중", "커미션 계약서 만들기 · 준비 중"]
+    pages = ["PI 만들기", "PO 만들기", "CI 만들기", "PL 만들기", "CIPL 만들기", "계약서 만들기 · 준비 중", "커미션 계약서 만들기 · 준비 중"]
     page = st.radio("문서 종류", pages, label_visibility="collapsed", key="selected_document_page")
     st.markdown("---")
     st.caption("초안은 검토 후 사용하세요. 자동 발행이나 전송은 하지 않습니다.")
@@ -119,13 +139,16 @@ with st.sidebar:
 page_config = {
     "PI 만들기": ("PI", "Proforma Invoice", "바이어에게 제공할 견적·선결제 안내용 Proforma Invoice 초안을 만듭니다."),
     "PO 만들기": ("PO", "Purchase Order", "KE KOREA가 공급처에 발행할 Purchase Order 초안을 만듭니다."),
+    "CI 만들기": ("CI", "Commercial Invoice", "통관 제출용 Commercial Invoice 초안을 만듭니다."),
+    "PL 만들기": ("PL", "Packing List", "선적 포장 수량과 중량을 표시하는 Packing List 초안을 만듭니다."),
     "CIPL 만들기": ("CI", "Commercial Invoice & Packing List", "선적 정보를 입력하면 Commercial Invoice와 Packing List를 함께 만듭니다."),
 }
 if page not in page_config:
-    st.markdown('<div class="ke-header"><div class="ke-eyebrow">Coming soon</div><h1>' + page.split(" ·")[0] + '</h1><p>이 메뉴는 준비 중입니다. 현재는 PI, PO, CIPL 생성을 사용할 수 있습니다.</p></div>', unsafe_allow_html=True)
+    st.markdown('<div class="ke-header"><div class="ke-eyebrow">Coming soon</div><h1>' + page.split(" ·")[0] + '</h1><p>이 메뉴는 준비 중입니다. 현재는 PI, PO, CI, PL, CIPL 생성을 사용할 수 있습니다.</p></div>', unsafe_allow_html=True)
     st.stop()
 
 expected_type, title, description = page_config[page]
+create_cipl_bundle = page == "CIPL 만들기"
 st.markdown(f'<div class="ke-header"><div class="ke-eyebrow">KE KOREA · CONTRACT TEMPLATE MAKER</div><h1>{title}</h1><p>{description}</p></div>', unsafe_allow_html=True)
 
 st.warning("생성된 파일은 검토용 초안입니다. 발행·주문 전 정보와 금액을 확인하세요.")
@@ -168,10 +191,10 @@ else:
         st.error("Supabase catalog credentials are missing. Set SUPABASE_URL and SUPABASE_SECRET_KEY in Streamlit Cloud Settings > Secrets.")
 
 with st.expander("What this menu creates"):
-    if expected_type == "CI":
+    if create_cipl_bundle:
         st.write("CIPL creates two review files: a Commercial Invoice (CI) and a Packing List (PL). Provide actual shipment, package, and weight information; unknown details remain flagged for review.")
     else:
-        st.write(f"{title} uses the KE KOREA branded PDF template. ECLADO prices are matched against the verified catalog when available. PI includes KE KOREA USD bank details; PO does not.")
+        st.write(f"{title} uses the KE KOREA branded PDF template. ECLADO prices are matched against the verified catalog when available. PI includes KE KOREA USD bank details; PO, CI, and PL do not.")
     st.write("Order images may be PNG, JPG, JPEG, or WEBP. Image-derived information needs human review.")
 
 st.markdown('<div class="ke-section">1 · 주문 정보</div>', unsafe_allow_html=True)
@@ -187,6 +210,13 @@ if uploaded_images:
 extract_clicked = st.button("정보 추출 및 초안 검토", type="primary", disabled=not prompt.strip() and not uploaded_images)
 if extract_clicked:
     try:
+        requested_type = _requested_document_type(prompt)
+        selected_type = "CIPL" if create_cipl_bundle else expected_type
+        if requested_type and requested_type != selected_type:
+            raise ValueError(
+                f"Your prompt requests {requested_type}, but the sidebar is set to {selected_type}. "
+                "Choose the matching document menu, then extract again."
+            )
         image_inputs = []
         if len(uploaded_images or []) > 5:
             raise ValueError("Attach no more than 5 order images at a time")
@@ -381,7 +411,7 @@ if raw:
                         seal_path.write_bytes(base64.b64decode(encoded_seal, validate=True))
                         outputs = render_files(result, ROOT / "outputs", bank_details=bank_details,
                                                logo_path=logo_path, seal_path=seal_path)
-                        if expected_type == "CI":
+                        if create_cipl_bundle:
                             packing_result = validate_and_calculate({**result, "document_type": "PL"})
                             outputs.update({f"packing_{k}": v for k, v in render_files(
                                 packing_result, ROOT / "outputs", bank_details=bank_details,
@@ -389,7 +419,7 @@ if raw:
                 else:
                     outputs = render_files(result, ROOT / "outputs", bank_details=bank_details,
                                            logo_path=logo_path, seal_path=seal_path)
-                    if expected_type == "CI":
+                    if create_cipl_bundle:
                         packing_result = validate_and_calculate({**result, "document_type": "PL"})
                         outputs.update({f"packing_{k}": v for k, v in render_files(
                             packing_result, ROOT / "outputs", bank_details=bank_details,
