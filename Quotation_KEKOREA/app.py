@@ -199,7 +199,11 @@ if raw:
             result["ready_for_issue"] = False
             result["status"] = "DRAFT"
 
-        total_display = format_currency_amount(result.get("total", "0"), result.get("currency"))
+        calculation_blockers = [issue for issue in result["blocking_issues"]
+                                if issue.startswith("Valid positive number required for paid quantity")
+                                or issue.startswith("Valid positive number required for unit price")]
+        total_display = ("Cannot calculate" if calculation_blockers else
+                         format_currency_amount(result.get("total", "0"), result.get("currency")))
         unit_totals = {}
         for item in result.get("items", []):
             unit = str(item.get("unit") or "").strip()
@@ -209,6 +213,8 @@ if raw:
         quantity_summary = " · ".join(
             f"{format(amount, 'f').rstrip('0').rstrip('.') if '.' in format(amount, 'f') else format(amount, 'f')} {unit}"
             for unit, amount in unit_totals.items()) or "—"
+        if any("paid quantity for item" in issue.lower() for issue in calculation_blockers):
+            quantity_summary = "Quantity required"
 
         st.markdown('<div class="ke-section">2 · Review the order summary</div>', unsafe_allow_html=True)
         top_metrics = st.columns(3)
@@ -231,16 +237,22 @@ if raw:
 
         display_rows = []
         for index, item in enumerate(result.get("items", []), 1):
+            quantity_missing = any(f"paid quantity for item {index}" in issue.lower() for issue in calculation_blockers)
+            price_missing = any(f"unit price for item {index}" in issue.lower() for issue in calculation_blockers)
             if result.get("product_family") == "cosmetics":
                 unit_price = format_currency_amount(item.get("final_unit_price", "0"), result.get("currency"))
             else:
                 unit_price = f"{result.get('currency') or ''} {item.get('final_unit_price', '')}".strip()
-            line_total = format_currency_amount(item.get("line_total", "0"), result.get("currency"))
+            if price_missing:
+                unit_price = "Not provided"
+            line_total = ("Cannot calculate" if quantity_missing or price_missing else
+                          format_currency_amount(item.get("line_total", "0"), result.get("currency")))
             display_rows.append({
                 "No.": index,
                 "Product": item.get("product_name") or "Not provided",
                 "Capacity / Spec.": item.get("capacity") or "—",
-                "Paid Qty": f"{item.get('paid_quantity', item.get('quantity', ''))} {item.get('unit') or ''}".strip(),
+                "Paid Qty": ("Not provided" if quantity_missing else
+                             f"{item.get('paid_quantity', item.get('quantity', ''))} {item.get('unit') or ''}".strip()),
                 "Free Qty": f"{item.get('free_quantity', '0')} {item.get('unit') or ''}".strip(),
                 "Unit Price": unit_price,
                 "Discount": f"{item.get('discount_percent', '0')}%",
@@ -287,8 +299,12 @@ if raw:
                     st.error(f"Could not apply corrections: {exc}")
 
         pdf_col, excel_col = st.columns(2)
-        make_pdf = pdf_col.button("Create PDF", type="primary", use_container_width=True)
-        make_excel = excel_col.button("Create Excel", use_container_width=True)
+        if calculation_blockers:
+            st.error("Enter a valid quantity and unit price before creating a PDF or Excel file; the total cannot be calculated yet.")
+        make_pdf = pdf_col.button("Create PDF", type="primary", use_container_width=True,
+                                  disabled=bool(calculation_blockers))
+        make_excel = excel_col.button("Create Excel", use_container_width=True,
+                                     disabled=bool(calculation_blockers))
         if make_pdf or make_excel:
             logo_path = ROOT / "assets" / "company_logo.png"
             seal_path = ROOT / "private" / "company_seal.png"
