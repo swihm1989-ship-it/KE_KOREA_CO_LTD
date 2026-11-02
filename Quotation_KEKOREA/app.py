@@ -16,7 +16,7 @@ from Quotation_KEKOREA.agent.extractor import extract_trade_data, load_env, veri
 from Quotation_KEKOREA.agent.branding import resolve_company_seal
 from Quotation_KEKOREA.agent.seal_storage import download_company_seal
 from Quotation_KEKOREA.agent.pricing import apply_verified_eclado_prices, is_eclado_supplier, load_local_seed, load_supabase_catalog
-from Quotation_KEKOREA.agent.packing import (reconcile_packing, normalize_packing_inputs, packing_total_changes,
+from Quotation_KEKOREA.agent.packing_review import (reconcile_packing, normalize_packing_inputs, packing_total_changes,
                                            apply_approved_packing_totals, PACKING_SOURCE_FIELDS)
 from Quotation_KEKOREA.agent.renderers import format_currency_amount, render_files
 from Quotation_KEKOREA.agent.review_fields import missing_review_fields, apply_review_value
