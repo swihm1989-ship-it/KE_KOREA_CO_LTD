@@ -10,6 +10,35 @@ from Quotation_KEKOREA.tests.test_review_fields import complete_draft
 
 @unittest.skipUnless(importlib.util.find_spec('streamlit'), 'Streamlit is not installed')
 class ReviewUiTests(unittest.TestCase):
+    def test_po_supplier_aliases_load_purchase_prices_and_show_recognition(self):
+        from streamlit.testing.v1 import AppTest
+        app_path = Path(__file__).resolve().parents[1] / 'app.py'
+        catalog = {'products': [{'id': 'p1', 'brand': 'ECLADO', 'item_name': 'Test Cream', 'capacity': '50 ml'}],
+                   'purchase_prices': [{'product_id': 'p1', 'supplier_key': 'ECLADO', 'currency': 'KRW',
+                                        'unit_price': '1000', 'source_row': 1}]}
+        with patch('Quotation_KEKOREA.agent.extractor.load_env', return_value={'OPENAI_API_KEY': 'test'}), \
+             patch('Quotation_KEKOREA.agent.pricing.load_local_seed', return_value=catalog), \
+             patch('Quotation_KEKOREA.agent.branding.resolve_company_seal', return_value=(app_path, None, None)):
+            for supplier in ('eclado', 'ECLADO CO. LTD', '에끌라도', '에 끌 라 두 주식회사'):
+                with self.subTest(supplier=supplier):
+                    doc = complete_draft()
+                    doc.update(document_type='PO', product_family='other', currency=None)
+                    doc['seller']['legal_name'] = supplier
+                    doc['items'] = [{**doc['items'][0], 'product_name': 'Test Cream', 'capacity': '50 ml',
+                                     'quantity': str(qty), 'paid_quantity': str(qty), 'shipped_quantity': str(qty),
+                                     'unit_price': None} for qty in (0, 5)]
+                    at = AppTest.from_file(str(app_path))
+                    at.session_state['selected_document_page'] = 'PO 만들기'
+                    at.session_state['trade_draft'] = doc
+                    at.session_state['trade_draft_page'] = 'PO 만들기'
+                    at.run(timeout=20)
+                    self.assertFalse(at.exception)
+                    metrics = {metric.label: metric.value for metric in at.metric}
+                    self.assertEqual(metrics['Total quantity'], '5 PCS')
+                    self.assertEqual(metrics['Total amount'], 'KRW 5,000')
+                    self.assertFalse(any('unit price' in entry.label for entry in at.text_input))
+                    self.assertTrue(any('ECLADO 공급처로 인식됨' in entry.value for entry in at.caption))
+
     def test_zero_quantity_calculates_but_missing_and_negative_quantities_block_exports(self):
         from streamlit.testing.v1 import AppTest
         app_path = Path(__file__).resolve().parents[1] / 'app.py'

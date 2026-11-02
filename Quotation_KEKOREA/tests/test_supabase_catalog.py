@@ -22,6 +22,51 @@ class FakeResponse:
 
 
 class SupabaseCatalogTests(unittest.TestCase):
+    def test_eclado_supplier_aliases_share_the_verified_purchase_profile(self):
+        catalog = {'products': [{'id': 'p1', 'brand': 'ECLADO', 'item_name': 'Test Cream', 'capacity': '50 ml'}],
+                   'purchase_prices': [{'product_id': 'p1', 'supplier_key': 'ECLADO', 'currency': 'KRW',
+                                        'unit_price': '1000', 'source_row': 1}]}
+        aliases = ('eclado', 'ECLADO', 'ECLADO CO. LTD', 'e C l A d O Co., Ltd.',
+                   '에끌라도', '에끌라두', '주식회사 에 끌 라 도', '에 끌 라 두 주식회사', 'ＥＣＬＡＤＯ')
+        for name in aliases:
+            with self.subTest(supplier=name):
+                draft = {'document_type': 'PO', 'product_family': 'other', 'currency': None,
+                         'seller': {'legal_name': name},
+                         'items': [{'product_name': 'Test Cream', 'capacity': '50 ml'}]}
+                pricing.apply_verified_eclado_prices(draft, catalog)
+                self.assertEqual(draft['currency'], 'KRW')
+                self.assertEqual(draft['items'][0].get('unit_price'), '1000')
+                self.assertTrue(draft['items'][0]['master_price'])
+                self.assertEqual(draft['seller']['legal_name'], name)
+                self.assertEqual(draft.get('pending_confirmations'), [])
+
+    def test_recognized_supplier_loads_matching_rows_even_if_one_product_is_unmatched(self):
+        catalog = {'products': [{'id': 'p1', 'brand': 'ECLADO', 'item_name': 'Test Cream', 'capacity': '50 ml'}],
+                   'purchase_prices': [{'product_id': 'p1', 'supplier_key': 'ECLADO', 'currency': 'KRW',
+                                        'unit_price': '1000', 'source_row': 1}]}
+        draft = {'document_type': 'PO', 'product_family': 'other', 'currency': None,
+                 'seller': {'legal_name': 'ECLADO CO. LTD'},
+                 'items': [{'product_name': 'Test Cream', 'capacity': '50 ml'},
+                           {'product_name': 'Unconfirmed Product', 'capacity': '10 ml'}]}
+        pricing.apply_verified_eclado_prices(draft, catalog)
+        self.assertEqual(draft['product_family'], 'cosmetics')
+        self.assertEqual(draft['currency'], 'KRW')
+        self.assertEqual(draft['items'][0].get('unit_price'), '1000')
+        self.assertIsNone(draft['items'][1].get('unit_price'))
+        self.assertTrue(any('Unconfirmed Product' in entry for entry in draft['missing_fields']))
+
+    def test_other_korean_supplier_is_not_treated_as_an_omitted_eclado_supplier(self):
+        catalog = {'products': [{'id': 'p1', 'brand': 'ECLADO', 'item_name': 'Test Cream', 'capacity': '50 ml'}],
+                   'purchase_prices': [{'product_id': 'p1', 'supplier_key': 'ECLADO', 'currency': 'KRW',
+                                        'unit_price': '1000', 'source_row': 1}]}
+        draft = {'document_type': 'PO', 'product_family': 'cosmetics', 'currency': None,
+                 'seller': {'legal_name': '다른 공급처'},
+                 'items': [{'product_name': 'Test Cream', 'capacity': '50 ml'}]}
+        pricing.apply_verified_eclado_prices(draft, catalog)
+        self.assertIsNone(draft['items'][0].get('unit_price'))
+        self.assertFalse(draft['items'][0]['master_price'])
+        self.assertEqual(draft.get('pending_confirmations'), [])
+
     def test_loads_one_consistent_catalog_snapshot_using_server_secret_apikey(self):
         product = {"id": "product-1", "brand": "ECLADO", "kind": "standard",
                    "item_name": "Sample Cream", "capacity": "50 ml"}

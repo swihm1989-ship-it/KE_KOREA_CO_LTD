@@ -15,7 +15,7 @@ sys.path.insert(0, str(REPOSITORY_ROOT))
 from Quotation_KEKOREA.agent.extractor import extract_trade_data, load_env, verify_item_quotes
 from Quotation_KEKOREA.agent.branding import resolve_company_seal
 from Quotation_KEKOREA.agent.seal_storage import download_company_seal
-from Quotation_KEKOREA.agent.pricing import apply_verified_eclado_prices, load_local_seed, load_supabase_catalog
+from Quotation_KEKOREA.agent.pricing import apply_verified_eclado_prices, is_eclado_supplier, load_local_seed, load_supabase_catalog
 from Quotation_KEKOREA.agent.packing import reconcile_packing
 from Quotation_KEKOREA.agent.renderers import format_currency_amount, render_files
 from Quotation_KEKOREA.agent.review_fields import missing_review_fields, apply_review_value
@@ -532,6 +532,9 @@ if raw:
             if expected_type != "PL":
                 apply_verified_eclado_prices(data, active_catalog)
         pending_review_fields = missing_review_fields(data, packing=create_cipl_bundle)
+        if expected_type == "PO" and is_eclado_supplier((data.get("seller") or {}).get("legal_name")):
+            verified_count = sum(item.get("master_price") is True for item in data.get("items", []))
+            st.caption(f"ECLADO 공급처로 인식됨 · 카탈로그 매입가격 적용: {verified_count}/{len(data.get('items', []))}개 상품")
         if pending_review_fields:
             st.warning("PDF/Excel 생성 전에 다음 항목을 입력해 주세요: " + "; ".join(field.label for field in pending_review_fields))
         result = validate_and_calculate(data)

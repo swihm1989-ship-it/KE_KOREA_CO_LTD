@@ -2,6 +2,7 @@
 import json
 from pathlib import Path
 import re
+import unicodedata
 from decimal import Decimal, InvalidOperation
 import json as json_module
 import urllib.error
@@ -118,6 +119,13 @@ def resolve_price(product_id, prices=None, role="sale", currency=None, party_key
     return rows[0] if len(rows) == 1 else None
 
 
+def is_eclado_supplier(name):
+    """Recognize the supplied ECLADO brand aliases without rewriting the legal name."""
+    normalized = unicodedata.normalize("NFKC", str(name or "")).casefold()
+    key = re.sub(r"[\W_]+", "", normalized)
+    return any(alias in key for alias in ("eclado", "에끌라도", "에끌라두"))
+
+
 def apply_verified_eclado_prices(draft, seed=None):
     """Replace ECLADO candidate price with exact catalog price or mark the uncertainty."""
     # Recompute catalog-owned warnings after the user completes buyer/product/currency fields.
@@ -134,21 +142,26 @@ def apply_verified_eclado_prices(draft, seed=None):
     # existing role/currency-specific price lookup proceed for both PI and PO.
     exact_matches = [match_eclado_product(item.get("product_name"), item.get("capacity"), products)
                      for item in items]
-    if items and draft.get("product_family") != "cosmetics":
-        if all(match["status"] == "matched" for match in exact_matches):
-            draft["product_family"] = "cosmetics"
     price_table = "purchase_prices" if draft.get("document_type") == "PO" else "buyer_prices"
     default_currency = "KRW" if draft.get("document_type") == "PO" else None
     counterparty_role = "seller" if draft.get("document_type") == "PO" else "buyer"
+    counterparty_name = str((draft.get(counterparty_role) or {}).get("legal_name") or "").strip()
     counterparty = re.sub(r"\b(CO|COMPANY|PTE|LTD|LIMITED|INC|CORP|CORPORATION)\b", " ",
-                          str((draft.get(counterparty_role) or {}).get("legal_name") or "").upper())
+                          counterparty_name.upper())
     counterparty = "".join(re.findall(r"[A-Z0-9]+", counterparty))
     expected_party = "ECLADO" if draft.get("document_type") == "PO" else "DEAR GLOW"
-    party_matches = ("ECLADO" in counterparty if draft.get("document_type") == "PO"
+    party_matches = (is_eclado_supplier(counterparty_name) if draft.get("document_type") == "PO"
                      else "DEARGLOW" in counterparty)
+    if items and draft.get("product_family") != "cosmetics":
+        all_matched = all(match["status"] == "matched" for match in exact_matches)
+        recognized_po = (draft.get("document_type") == "PO" and party_matches
+                         and draft.get("product_family") in (None, "", "other")
+                         and any(match["status"] == "matched" for match in exact_matches))
+        if all_matched or recognized_po:
+            draft["product_family"] = "cosmetics"
     supplier_confirmation = "The seller was not supplied. Use the ECLADO purchase price catalog for this PO? Confirm the supplier and legal details."
     pending = draft.setdefault("pending_confirmations", [])
-    if draft.get("document_type") == "PO" and not counterparty and items and all(m["status"] == "matched" for m in exact_matches):
+    if draft.get("document_type") == "PO" and not counterparty_name and items and all(m["status"] == "matched" for m in exact_matches):
         party_matches = all(resolve_price(m["product"]["id"], seed, "purchase", "KRW", "ECLADO")
                             for m in exact_matches)
         if party_matches and supplier_confirmation not in pending:
