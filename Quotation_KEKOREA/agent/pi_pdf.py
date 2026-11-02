@@ -496,44 +496,26 @@ def _document_row(item, is_packing_list, currency):
 
 
 def _paginate_rows(rows, first_table_top, review_height, is_packing_list, packing_quantity_lines=1):
-    """Fit measured row heights around reserved totals, review, signature, and footer areas."""
+    """Fill product pages first; move the entire closing section when it cannot fit."""
     content_bottom = 752
     last_page_reserve = (185 + max(0, packing_quantity_lines - 1) * 8 if is_packing_list else 154) + review_height
-    first_final_capacity = content_bottom - first_table_top - 17 - last_page_reserve
-    if sum(row["height"] for row in rows) <= first_final_capacity:
-        return [rows]
-
-    first_capacity = content_bottom - first_table_top - 21
-    chunks, remaining = [], list(rows)
-    used = 0
-    while remaining and used + remaining[0]["height"] <= first_capacity:
-        row = remaining.pop(0)
-        chunks.append(row)
-        used += row["height"]
-    if not remaining and chunks:
-        remaining.append(chunks.pop())
-    elif not chunks and remaining and first_capacity >= remaining[0]["height"]:
-        chunks.append(remaining.pop(0))
-    chunks = [chunks]
-
     continuation_table_top = 166
-    continuation_final_capacity = content_bottom - continuation_table_top - 17 - last_page_reserve
-    continuation_capacity = content_bottom - continuation_table_top - 21
-    while remaining:
-        if sum(row["height"] for row in remaining) <= continuation_final_capacity:
-            chunks.append(remaining)
-            remaining = []
-            break
-        page, used = [], 0
-        while remaining and used + remaining[0]["height"] <= continuation_capacity:
-            row = remaining.pop(0)
-            page.append(row)
-            used += row["height"]
-        if not remaining and page:
-            remaining.append(page.pop())
-        if not page and remaining:
-            page.append(remaining.pop(0))
-        chunks.append(page)
+    chunks, page = [], []
+    table_top, used = first_table_top, 0
+    for row in rows:
+        if table_top + 17 + used + row["height"] > content_bottom:
+            chunks.append(page)
+            page, used, table_top = [], 0, continuation_table_top
+        if table_top + 17 + row["height"] > content_bottom:
+            raise ValueError("A product row is too tall to fit on one PDF page; shorten its description")
+        page.append(row)
+        used += row["height"]
+    chunks.append(page)
+
+    # An empty final chunk is a closing-section page, not a reason to relocate a product.
+    table_bottom = table_top + (17 if page else 0) + used
+    if table_bottom + last_page_reserve > content_bottom:
+        chunks.append([])
     return chunks
 
 
@@ -609,14 +591,15 @@ def render_trade_document(data, bank_details=None, *, logo_path=None, seal_path=
         xs = [left]
         for width in widths:
             xs.append(xs[-1] + width)
-        canvas.text(left, table_top - 7, "PACKING DETAILS" if is_packing_list else "PRODUCT & PRICING", 6.5, True, BRAND_BLUE)
-        canvas.rect(left, table_top, 542, 17, NAVY)
         labels = (["PRODUCT", "SPEC.", "QTY", "UNIT", "PACKAGES", "NW (KG)", "GW (KG)", "CBM"] if is_packing_list else
                   ["PRODUCT DESCRIPTION", "CAPACITY / SPEC.", "QUANTITY / UNIT", f"UNIT PRICE ({currency})", f"AMOUNT ({currency})"])
-        for column_index, label in enumerate(labels):
-            canvas.text(xs[column_index] + 3, table_top + 11, label, 5.2, True, (1, 1, 1))
+        if page_rows:
+            canvas.text(left, table_top - 7, "PACKING DETAILS" if is_packing_list else "PRODUCT & PRICING", 6.5, True, BRAND_BLUE)
+            canvas.rect(left, table_top, 542, 17, NAVY)
+            for column_index, label in enumerate(labels):
+                canvas.text(xs[column_index] + 3, table_top + 11, label, 5.2, True, (1, 1, 1))
 
-        y = table_top + 17
+        y = table_top + (17 if page_rows else 0)
         for row_index, row in enumerate(page_rows):
             height = row["height"]
             if row_index % 2 == 0:
