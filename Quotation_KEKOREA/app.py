@@ -14,6 +14,7 @@ REPOSITORY_ROOT = ROOT.parent
 sys.path.insert(0, str(REPOSITORY_ROOT))
 from Quotation_KEKOREA.agent.extractor import extract_trade_data, load_env, verify_item_quotes
 from Quotation_KEKOREA.agent.branding import resolve_company_seal
+from Quotation_KEKOREA.agent.seal_storage import download_company_seal
 from Quotation_KEKOREA.agent.pricing import apply_verified_eclado_prices, load_local_seed, load_supabase_catalog
 from Quotation_KEKOREA.agent.packing import reconcile_packing
 from Quotation_KEKOREA.agent.renderers import format_currency_amount, render_files
@@ -326,6 +327,11 @@ if not runtime_env.get("OPENAI_API_KEY"):
 def _cached_supabase_catalog(project_url, _secret_key):
     return load_supabase_catalog({"SUPABASE_URL": project_url, "SUPABASE_SECRET_KEY": _secret_key})
 
+
+@st.cache_data(ttl=900, show_spinner=False)
+def _cached_supabase_seal(project_url, _secret_key, expected_sha256):
+    return download_company_seal({"SUPABASE_URL": project_url, "SUPABASE_SECRET_KEY": _secret_key}, expected_sha256)
+
 active_catalog = {"products": [], "purchase_prices": [], "buyer_prices": []}
 if runtime_env.get("SUPABASE_URL") and runtime_env.get("SUPABASE_SECRET_KEY"):
     try:
@@ -523,7 +529,9 @@ if raw:
         bank_keys = ("BENEFICIARY", "BANK_NAME", "BRANCH", "SWIFT", "ACCOUNT_NUMBER", "BANK_ADDRESS")
         bank_details = {key: str(runtime_env.get(f"KEKOREA_USD_{key}", "")).strip() for key in bank_keys}
         missing_bank_keys = [f"KEKOREA_USD_{key}" for key, value in bank_details.items() if not value]
-        local_seal_path, seal_bytes, seal_secret_error = resolve_company_seal(ROOT, runtime_env)
+        local_seal_path, seal_bytes, seal_secret_error = resolve_company_seal(
+            ROOT, runtime_env,
+            storage_loader=lambda env, expected: _cached_supabase_seal(env["SUPABASE_URL"], env["SUPABASE_SECRET_KEY"], expected))
         missing_seal = seal_bytes is None and not local_seal_path.is_file()
         if expected_type == "PI" and missing_bank_keys:
             issue = "KE Korea USD bank profile is incomplete; missing runtime keys: " + ", ".join(missing_bank_keys)
@@ -532,7 +540,7 @@ if raw:
             result["ready_for_issue"] = False
             result["status"] = "DRAFT"
         if missing_seal:
-            issue = seal_secret_error or "KEKOREA_COMPANY_SEAL_BASE64 is missing from Streamlit Cloud Secrets"
+            issue = "Company seal is unavailable: " + (seal_secret_error or "upload the requested image to private Supabase storage")
             if issue not in result["blocking_issues"]:
                 result["blocking_issues"].append(issue)
             result["ready_for_issue"] = False
@@ -692,7 +700,7 @@ if raw:
             st.error("PI download is disabled until all six KEKOREA_USD_* bank details are configured in this runtime.")
         if seal_blockers:
             st.error("Document download is disabled: " + seal_blockers[0] + ".")
-            st.caption("In Streamlit Cloud, add the top-level secret KEKOREA_COMPANY_SEAL_BASE64. A local .env file is not available to the cloud runtime.")
+            st.caption("Streamlit Cloud uses the private Supabase seal file and the configured server-side Supabase key.")
         make_pdf = pdf_col.button("Create PDF", type="primary", use_container_width=True,
                                   disabled=export_blocked)
         make_excel = excel_col.button("Create Excel", use_container_width=True,

@@ -322,13 +322,13 @@ The solar PI header displays the supplied company logo in a white brand panel. T
 
 - The solar PI displays the supplied logo in a white header area. Navy and blue replace the previous charcoal and gold theme. No body watermark is used.
 - `assets/company_logo.png` is tracked. The complete seal image `assets/image.png` is used automatically in local runs; the seal images, `.env`, generated outputs, and catalog seed data are excluded from Git.
-- The GitHub repository is public, so keep the company seal out of Git. Streamlit Cloud uses `KEKOREA_COMPANY_SEAL_BASE64` for the seal and the six `KEKOREA_USD_*` variables for PI bank details. Replace the previous secret with the Base64 of `assets/image.png`; the app verifies the secret matches that image before use. Generate the seal value in PowerShell from the repository root with:
+- The GitHub repository is public, so keep the company seal out of Git. Streamlit Cloud loads the seal from the private Supabase Storage bucket `kekorea-private-seal`, using the top-level `SUPABASE_URL` and server-only `SUPABASE_SECRET_KEY` secrets. Keep the six `KEKOREA_USD_*` variables for PI bank details. Upload the local seal from the repository root with:
 
 ```powershell
-[Convert]::ToBase64String([IO.File]::ReadAllBytes('.\Quotation_KEKOREA\assets\image.png')) | Set-Clipboard
+python Quotation_KEKOREA/scripts/upload_company_seal.py
 ```
 
-Copy the resulting value into Streamlit Cloud Secrets. Bank details appear on PI only.
+The uploader uses local credentials, creates a private bucket if necessary, and verifies the uploaded image by downloading it. The app checks the PNG's SHA-256 and caches the download for 15 minutes. `KEKOREA_COMPANY_SEAL_BASE64` is an optional legacy fallback and can be removed after storage is configured. Never publish the seal or the server key. Bank details appear on PI only.
 
 
 ## Shared document handling and document names
@@ -339,7 +339,7 @@ The Streamlit sidebar offers separate PI, PO, CI, PL, and CIPL workflows. CI cre
 
 Field extraction accepts common equivalent labels instead of requiring exact schema wording: Qty/Q'ty/ordered units/Volume for quantities; Item/Product/Goods/Description for product names; Unit Price/Rate/Price per unit for prices; Shipping Terms/Terms of Shipping/Ship Conditions/Delivery Terms for Incoterms; and Payment Conditions/Terms of Payment/Settlement Terms for payment. SET, BOX, CARTON, CTN, PALLET, and similar terms are retained as units or package descriptors based on context, never converted to another unit. If a quantity uses ambiguous `Volume` or a bare package-count label such as `Box: 10`, the review screen asks the user to confirm the interpretation before enabling PDF/XLSX downloads. Cubic/package volume and delivery dates are kept distinct from ordered quantity and Incoterms.
 
-The shared PDF renderer preserves the source quantity unit on PI, PO, and CI lines (including PC/PCS/KG) and shows the unit separately in PL. It formats total quantities with thousands separators and groups different units instead of adding incompatible units together. CI/PI/PO amount boxes center both label and amount. Every PDF type embeds the full `assets/image.png` company seal below `KE KOREA CO. LTD` in its signature panel; if that image is unavailable, downloads are blocked. Streamlit Cloud must provide the matching top-level `KEKOREA_COMPANY_SEAL_BASE64` secret.
+The shared PDF renderer preserves the source quantity unit on PI, PO, and CI lines (including PC/PCS/KG) and shows the unit separately in PL. It formats total quantities with thousands separators and groups different units instead of adding incompatible units together. CI/PI/PO amount boxes center both label and amount. Every PDF type embeds the full `assets/image.png` company seal below `KE KOREA CO. LTD` in its signature panel; if that image is unavailable, downloads are blocked. Streamlit Cloud retrieves the matching image from private Supabase Storage using its server-side secrets.
 
 ### Automatic document fields
 
