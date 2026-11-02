@@ -120,6 +120,11 @@ def resolve_price(product_id, prices=None, role="sale", currency=None, party_key
 
 def apply_verified_eclado_prices(draft, seed=None):
     """Replace ECLADO candidate price with exact catalog price or mark the uncertainty."""
+    # Recompute catalog-owned warnings after the user completes buyer/product/currency fields.
+    draft["missing_fields"] = [entry for entry in draft.get("missing_fields", []) if not (
+        (str(entry).startswith("Exact ECLADO product match for ") and str(entry).endswith("; capacity/SKU may be needed"))
+        or (str(entry).startswith("Confirm a transaction-specific price for ") and "; local catalog price is only for " in str(entry))
+        or re.fullmatch(r"Verified \S+ catalog price for .+", str(entry)))]
     seed = seed if seed is not None else load_local_seed()
     products = seed.get("products", [])
     items = draft.get("items", [])

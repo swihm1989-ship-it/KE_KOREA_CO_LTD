@@ -18,6 +18,7 @@ from Quotation_KEKOREA.agent.seal_storage import download_company_seal
 from Quotation_KEKOREA.agent.pricing import apply_verified_eclado_prices, load_local_seed, load_supabase_catalog
 from Quotation_KEKOREA.agent.packing import reconcile_packing
 from Quotation_KEKOREA.agent.renderers import format_currency_amount, render_files
+from Quotation_KEKOREA.agent.review_fields import missing_review_fields, apply_review_value
 from Quotation_KEKOREA.agent.trade_documents import apply_promotion, current_issue_date, normalize_quantity_unit, validate_and_calculate
 
 
@@ -378,7 +379,7 @@ if extract_clicked:
                 "Choose the matching document menu, then extract again."
             )
         for state_key in list(st.session_state):
-            if str(state_key).startswith((f"confirm_source_alias_{page}_", f"packing_{page}_", f"po_seller_name_{page}", f"po_seller_address_{page}")):
+            if str(state_key).startswith((f"confirm_source_alias_{page}_", f"packing_{page}_", f"po_seller_name_{page}", f"po_seller_address_{page}", f"review_missing_{page}_", f"review_values_{page}", f"advanced_json_{page}", f"advanced_source_{page}")):
                 del st.session_state[state_key]
         image_inputs = []
         if len(uploaded_images or []) > 5:
@@ -498,6 +499,32 @@ if raw:
                 data[field] = column.text_input(label, value=str(data.get(field) or ""), key=f"packing_{page}_{field}") or None
         if expected_type != "PL":
             apply_verified_eclado_prices(data, active_catalog)
+        review_fields = missing_review_fields(data, packing=create_cipl_bundle)
+        existing_review_paths = set()
+        if expected_type == "PO":
+            existing_review_paths.update({("seller", "legal_name"), ("seller", "address")})
+        if expected_type == "PL" or create_cipl_bundle:
+            existing_review_paths.update({("buyer", "legal_name"), ("buyer", "address"), ("ship_to",),
+                                          ("shipment_reference",), ("country_of_origin",), ("container_count",)})
+        if review_fields:
+            st.markdown("### 문서 생성 전 누락 정보 입력")
+            st.caption("빈 항목을 영문으로 입력해 주세요. * 항목은 필수입니다. 선택 항목이 해당 없으면 N/A를 직접 입력해 주세요.")
+            review_columns = st.columns(2)
+            review_values = st.session_state.setdefault(f"review_values_{page}", {})
+            for index, field in enumerate(field for field in review_fields if field.path not in existing_review_paths):
+                widget_key = f"review_missing_{page}_" + "_".join(map(str, field.path))
+                if widget_key not in st.session_state:
+                    st.session_state[widget_key] = review_values.get(widget_key, "")
+                value = review_columns[index % 2].text_input(
+                    field.label + (" *" if field.required else ""), key=widget_key,
+                    help="Enter the confirmed value in English." if field.required else "Enter the value, or N/A if not applicable.")
+                review_values[widget_key] = value
+                apply_review_value(data, field, value)
+            if expected_type != "PL":
+                apply_verified_eclado_prices(data, active_catalog)
+        pending_review_fields = missing_review_fields(data, packing=create_cipl_bundle)
+        if pending_review_fields:
+            st.warning("PDF/Excel 생성 전에 다음 항목을 입력해 주세요: " + "; ".join(field.label for field in pending_review_fields))
         result = validate_and_calculate(data)
         packing_check = reconcile_packing(data) if expected_type == "PL" or create_cipl_bundle else None
         if create_cipl_bundle:
@@ -667,8 +694,11 @@ if raw:
             st.success("Summary is ready for your final review.")
 
         with st.expander("Advanced: view or correct extracted details"):
-            edited_json = st.text_area("Extracted details", value=json.dumps(raw, ensure_ascii=False, indent=2),
-                                       height=350, key=f"advanced_json_{page}")
+            advanced_source = json.dumps(data, ensure_ascii=False, indent=2)
+            if st.session_state.get(f"advanced_source_{page}") != advanced_source:
+                st.session_state[f"advanced_json_{page}"] = advanced_source
+                st.session_state[f"advanced_source_{page}"] = advanced_source
+            edited_json = st.text_area("Extracted details", height=350, key=f"advanced_json_{page}")
             if st.button("Apply corrections", key=f"apply_json_{page}"):
                 try:
                     corrected = json.loads(edited_json)
@@ -676,6 +706,9 @@ if raw:
                     corrected.pop("pending_confirmations", None)
                     apply_verified_eclado_prices(corrected, active_catalog)
                     st.session_state["trade_draft"] = corrected
+                    for state_key in list(st.session_state):
+                        if str(state_key).startswith((f"review_missing_{page}_", f"review_values_{page}", f"packing_{page}_", f"po_seller_name_{page}", f"po_seller_address_{page}")):
+                            del st.session_state[state_key]
                     st.session_state["rendered_paths"] = {}
                     st.session_state.pop("rendered_json", None)
                     st.rerun()
@@ -683,12 +716,17 @@ if raw:
                     st.error(f"Could not apply corrections: {exc}")
 
         pdf_col, excel_col = st.columns(2)
+        render_context = json.dumps({"document": result, "bank": bank_details}, sort_keys=True, ensure_ascii=False)
+        if st.session_state.get("rendered_json") != render_context:
+            st.session_state["rendered_paths"] = {}
+            st.session_state.pop("download_format", None)
+        st.session_state["rendered_json"] = render_context
         bank_blockers = [issue for issue in result["blocking_issues"] if "bank profile is incomplete" in issue.lower()]
         seal_blockers = [issue for issue in result["blocking_issues"]
                          if "company seal is unavailable" in issue.lower()
                          or "KEKOREA_COMPANY_SEAL_BASE64" in issue]
         financial_blockers = calculation_blockers + discount_blockers
-        export_blocked = bool(financial_blockers or bank_blockers or seal_blockers or unconfirmed_aliases or
+        export_blocked = bool(pending_review_fields or financial_blockers or bank_blockers or seal_blockers or unconfirmed_aliases or
                               (packing_check and packing_check["issues"]) or not packing_image_confirmed)
         if financial_blockers:
             st.error("Confirm valid quantities, unit prices, and discounts before creating a PDF or Excel file.")
