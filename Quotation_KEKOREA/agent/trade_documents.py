@@ -161,8 +161,9 @@ def validate_and_calculate(data):
             block(f"Quantity unit for item {i}")
         if doc_type != "PL" and not item.get("price_basis"):
             block(f"Price basis for {name or f'item {i}'}")
-        quantity_value = (item.get("shipped_quantity") or item.get("quantity") or item.get("paid_quantity")) if doc_type == "PL" else item.get("paid_quantity", item.get("quantity"))
-        quantity = _decimal(quantity_value, f"paid quantity for item {i}", issues, allow_zero=False)
+        quantity_keys = ("shipped_quantity", "quantity", "paid_quantity") if doc_type == "PL" else ("paid_quantity", "quantity")
+        quantity_value = next((item.get(key) for key in quantity_keys if item.get(key) not in (None, "")), None)
+        quantity = _decimal(quantity_value, f"paid quantity for item {i}", issues)
         base = Decimal("0") if doc_type == "PL" else _decimal(item.get("unit_price"), f"unit price for item {i}", issues, allow_zero=False)
         discount = Decimal("0") if doc_type == "PL" else _decimal(item.get("discount_percent", 0), f"discount percent for item {i}", issues)
         if doc_type in {"PI", "CI"} and data.get("product_family") == "cosmetics" and item.get("discount_percent") is None:

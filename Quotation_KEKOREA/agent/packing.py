@@ -29,7 +29,9 @@ def reconcile_packing(data):
     quantities = {}
     quantity_complete = bool(items)
     for index, item in enumerate(items, 1):
-        amount = _number(item.get("shipped_quantity") or item.get("quantity") or item.get("paid_quantity"))
+        quantity_value = next((item.get(key) for key in ("shipped_quantity", "quantity", "paid_quantity")
+                               if item.get(key) not in (None, "")), None)
+        amount = _number(quantity_value)
         unit = normalize_quantity_unit(item.get("unit"))
         if amount is None or not unit:
             quantity_complete = False

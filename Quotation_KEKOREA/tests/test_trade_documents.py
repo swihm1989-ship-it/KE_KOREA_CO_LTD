@@ -28,6 +28,40 @@ def sample_trade(**updates):
 
 
 class TradeDocumentTests(unittest.TestCase):
+    def test_explicit_zero_quantity_is_valid_and_kept_in_every_document_type(self):
+        for dtype in ('PI', 'PO', 'CI', 'PL'):
+            for zero in ('0', '0.0', 0):
+                with self.subTest(dtype=dtype, zero=zero):
+                    doc = sample_trade(document_type=dtype)
+                    doc['items'][0].update(quantity=zero, paid_quantity=zero, shipped_quantity=zero)
+                    result = trade.validate_and_calculate(doc)
+                    self.assertFalse(any('paid quantity' in issue for issue in result['blocking_issues']))
+                    self.assertEqual(Decimal(result['items'][0]['quantity']), 0)
+                    self.assertEqual(result['items'][0]['line_total'], '0.00')
+                    self.assertEqual(result['total'], '0.00')
+                    self.assertEqual(len(result['items']), 1)
+
+    def test_missing_negative_and_nonfinite_quantities_remain_invalid(self):
+        for value in (None, '', '-1', 'invalid', 'NaN', 'Infinity'):
+            with self.subTest(value=value):
+                doc = sample_trade()
+                doc['items'][0].update(quantity=value, paid_quantity=value, shipped_quantity=value)
+                result = trade.validate_and_calculate(doc)
+                self.assertTrue(any('paid quantity' in issue for issue in result['blocking_issues']))
+
+    def test_image_quantity_total_includes_zero_row_without_blocking_calculation(self):
+        quantities = [10, 15, 23, 20, 30, 405, 0, 10, 20, 30, 40, 50, 60, 70, 70, 40,
+                      320, 10, 2040, 20, 10, 10, 20, 20]
+        doc = sample_trade(product_family='other')
+        template = doc['items'][0]
+        doc['items'] = [{**template, 'quantity': str(qty), 'paid_quantity': str(qty),
+                         'shipped_quantity': str(qty), 'unit_price': '1', 'discount_percent': '0'}
+                        for qty in quantities]
+        result = trade.validate_and_calculate(doc)
+        self.assertFalse(any('paid quantity' in issue for issue in result['blocking_issues']))
+        self.assertEqual(sum(Decimal(item['quantity']) for item in result['items']), 3343)
+        self.assertEqual(result['total'], '3343.00')
+
     def test_decimal_discount_is_applied_once_to_final_unit_price(self):
         result = trade.validate_and_calculate(sample_trade())
         item = result["items"][0]

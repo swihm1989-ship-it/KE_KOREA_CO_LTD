@@ -49,7 +49,8 @@ def _synchronize_extracted_quantities(draft):
         # separates paid units from free units. The validator calculates totals
         # from paid_quantity, so keep both quantity fields synchronized.
         paid = item.get("paid_quantity") if item.get("promotion") else item.get("quantity")
-        paid = paid or item.get("quantity") or item.get("paid_quantity")
+        if paid in (None, ""):
+            paid = next((item.get(key) for key in ("quantity", "paid_quantity") if item.get(key) not in (None, "")), None)
         if paid in (None, ""):
             continue
         item["quantity"] = str(paid)
@@ -467,8 +468,16 @@ if raw:
                               ("package_type", "Package type"), ("package_count", "Packages"),
                               ("net_weight_kg", "NW (kg)"), ("gross_weight_kg", "GW (kg)"), ("volume_cbm", "CBM"), ("hs_code", "HS code"))
             original_items = data.get("items", [])
-            packing_rows = [{"Row": str(index), **{label: str((item.get("shipped_quantity") or item.get(field) or "") if field == "quantity" and create_cipl_bundle else (item.get(field) or ""))
-                             for field, label in packing_fields}} for index, item in enumerate(original_items, 1)]
+            packing_rows = []
+            for index, item in enumerate(original_items, 1):
+                row = {"Row": str(index)}
+                for field, label in packing_fields:
+                    value = item.get(field)
+                    if field == "quantity" and create_cipl_bundle:
+                        value = next((item.get(key) for key in ("shipped_quantity", "quantity")
+                                      if item.get(key) not in (None, "")), None)
+                    row[label] = "" if value is None else str(value)
+                packing_rows.append(row)
             if not packing_rows and expected_type == "PL":
                 packing_rows = [{"Row": "", **{label: "" for _, label in packing_fields}}]
             edited_rows = st.data_editor(packing_rows, hide_index=True, num_rows="fixed" if create_cipl_bundle else "dynamic",
@@ -591,7 +600,7 @@ if raw:
             and "currency" in issue.lower()
         ]
         calculation_blockers = [issue for issue in result["blocking_issues"]
-                                if issue.startswith("Valid positive number required for paid quantity")
+                                if issue.startswith(("Valid number required for paid quantity", "Valid positive number required for paid quantity"))
                                 or issue.startswith("Valid positive number required for unit price")]
         calculation_blockers.extend(currency_conflicts)
         if expected_type != "PL" and currency not in supported_currencies:

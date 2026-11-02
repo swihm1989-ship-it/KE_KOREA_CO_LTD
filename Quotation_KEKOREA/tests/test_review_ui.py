@@ -10,6 +10,31 @@ from Quotation_KEKOREA.tests.test_review_fields import complete_draft
 
 @unittest.skipUnless(importlib.util.find_spec('streamlit'), 'Streamlit is not installed')
 class ReviewUiTests(unittest.TestCase):
+    def test_zero_quantity_calculates_but_missing_and_negative_quantities_block_exports(self):
+        from streamlit.testing.v1 import AppTest
+        app_path = Path(__file__).resolve().parents[1] / 'app.py'
+        env = {'OPENAI_API_KEY': 'test', **{f'KEKOREA_USD_{key}': 'TEST' for key in
+               ('BENEFICIARY', 'BANK_NAME', 'BRANCH', 'SWIFT', 'ACCOUNT_NUMBER', 'BANK_ADDRESS')}}
+        with patch('Quotation_KEKOREA.agent.extractor.load_env', return_value=env), \
+             patch('Quotation_KEKOREA.agent.pricing.load_local_seed', return_value={'products': []}), \
+             patch('Quotation_KEKOREA.agent.branding.resolve_company_seal', return_value=(app_path, None, None)):
+            for quantity in ('0', 0, '-1', None):
+                with self.subTest(quantity=quantity):
+                    doc = complete_draft()
+                    doc['product_family'] = 'other'
+                    doc['items'][0].update(quantity=quantity, paid_quantity=quantity, shipped_quantity=quantity)
+                    at = AppTest.from_file(str(app_path))
+                    at.session_state['trade_draft'] = doc
+                    at.session_state['trade_draft_page'] = 'PI 만들기'
+                    at.run(timeout=20)
+                    self.assertFalse(at.exception)
+                    metrics = {metric.label: metric.value for metric in at.metric}
+                    valid = quantity in ('0', 0)
+                    self.assertEqual(metrics['Total quantity'], '0 PCS' if valid else 'Quantity required')
+                    self.assertEqual(metrics['Total amount'], '$0.00' if valid else 'Cannot calculate')
+                    button = next(button for button in at.button if button.label == 'Create PDF')
+                    self.assertEqual(button.disabled, not valid)
+
     def test_missing_inputs_update_document_and_invalidate_old_downloads(self):
         from streamlit.testing.v1 import AppTest
         app_path = Path(__file__).resolve().parents[1] / 'app.py'
