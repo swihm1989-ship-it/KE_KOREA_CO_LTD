@@ -22,6 +22,7 @@
 | 주문수량 0 | 숫자 `0`, 문자열 `"0"`, `"0.0"`을 정상 수량으로 인정한다. 행은 삭제하지 않으며 해당 행 금액은 0이다. 빈 값·음수·비숫자·NaN/Infinity는 계속 오류다. 단가의 양수 검증은 별도 유지한다. | `tests/test_trade_documents.py`, `tests/test_review_ui.py`, 배포 PO의 0+5 수량/금액 표시 |
 | PO와 판매 가격 구분 | ECLADO PO는 공급처와 정확한 제품·용량·통화가 맞는 매입가격을 사용한다. Dear Glow PI/CI 판매가격을 PO에 사용하지 않는다. 공급처나 통화를 임의로 바꾸지 않는다. | `tests/test_supabase_catalog.py`, `tests/test_packing_workflow.py`, `tests/test_review_fields.py` |
 | ECLADO 공급처 별칭 | `eclado`, `ECLADO CO. LTD`, `에끌라도`, `에끌라두`를 대소문자·공백·구두점 차이 없이 같은 공급처로 인식한다. 원래 법인명 필드는 그대로 보존한다. 화면에 인식 여부와 카탈로그 매입가격 적용 상품 수를 표시한다. | `tests/test_supabase_catalog.py`, `tests/test_review_ui.py` |
+| PL/CIPL 합계 수정 승인 | 원본 합계와 항목별 계산 합계를 비교표로 보여준다. `합계를 수정할까요?`를 승인하면 원본은 보존하면서 계산된 합계를 PDF/Excel에 적용한다. PCS/KG 등 다른 단위는 따로 유지한다. 품목/원본 합계 변경 시 승인을 취소한다. 잘못된 행 값·단위 충돌·컨테이너 수는 승인으로 우회하지 못한다. | `tests/test_packing_approval.py`, `tests/test_review_ui.py` |
 | 통화와 반올림 | Decimal 계산을 유지한다. 화장품 KRW는 원 단위, USD는 소수점 두 자리로 단가를 반올림한 뒤 행 금액을 계산한다. 단위가 다른 수량은 별도로 표시한다. | `tests/test_trade_documents.py`, `tests/test_packing_workflow.py` |
 
 ### 최근 변경 이력
@@ -30,6 +31,8 @@
 - `dbb50ba`: 상품 공간 우선 배치, 하단 정보 묶음의 페이지 분할 방지.
 - `0e107d7`: 누락 정보 입력, 수정 반영, 입력 상태 유지, 오래된 다운로드 제거.
 - `ab2bf1f`: 명시적 주문수량 0 허용, 누락·음수 오류 구분, 포장 편집기의 숫자 0 보존.
+- `d75417c`: ECLADO 영문·한글 별칭 인식과 일부 상품 미일치 시 일치 상품의 가격 조회 유지.
+- 2026-11-02 PL 보완: 합계 비교·명시적 수정 승인, 단위가 붙은 원본 합계와 컨테이너 규격 입력 파싱, 수정 후 승인 초기화.
 
 ### 검증 명령과 유지 규칙
 
@@ -40,7 +43,7 @@ uv run --with streamlit python -m unittest discover -s Quotation_KEKOREA/tests
 git diff --check
 ```
 
-현재 전체 테스트는 80개이며 모두 통과했다. 테스트 수는 이후 정당한 회귀 테스트 추가에 따라 증가할 수 있다. 검토 화면 테스트는 외부 API를 모킹하며, 실제 배포 검증과 구분한다. 실제 배포 검증에는 가상 입력을 우선 사용하고, 사용자의 주문 이미지 재전송이 필요하면 외부 전송 승인을 먼저 확인한다.
+현재 전체 테스트는 86개이며 모두 통과했다. 테스트 수는 이후 정당한 회귀 테스트 추가에 따라 증가할 수 있다. 검토 화면 테스트는 외부 API를 모킹하며, 실제 배포 검증과 구분한다. 실제 배포 검증에는 가상 입력을 우선 사용하고, 사용자의 주문 이미지 재전송이 필요하면 외부 전송 승인을 먼저 확인한다.
 
 ### PO에 `Cannot calculate`가 표시될 때
 
@@ -319,6 +322,10 @@ API 기반 판독을 선택하면 어떤 자료가 외부로 전송되는지 표
 - `agent/renderers.py`: English PDF/XLSX/HTML review drafts. Solar PI uses the corporate-blue header with the company logo and PI-only bank details.
 
 ### Supplier packing-list images
+
+PL/CIPL 검토 화면은 명시적 숫자 뒤의 단위(`100 PCS`, `10 kg`, `0.1 CBM`)와 `수량 x 규격FT Containers` 형식을 분리해 읽는다. 컨테이너 개수와 규격을 곱하거나 팔레트 수에서 컨테이너 수를 추측하지 않는다. 단위가 서로 충돌하면 수정을 요청한다.
+
+합계가 다르거나 원본 합계가 비어 있고 행별 합계를 계산할 수 있으면 비교표와 `합계를 수정할까요?` 승인란을 표시한다. 승인은 계산된 합계에만 적용하며 원본 값을 `_packing_original_totals`에 보존한다. 다른 단위의 수량은 `_packing_approved_quantities`에 별도로 보존한다. 단가·상업송장 품목 수량·포장 행 자체는 변경하지 않는다. 승인 후 PDF 생성에는 나머지 필수 정보와 행 검증도 통과해야 한다. 원본 합계나 품목을 다시 수정하면 이전 승인과 이전 다운로드를 무효화한다.
 
 The PL and CIPL workflows accept up to five supplier document images and extract each product's quantity and unit, package type and count, net and gross weight, and CBM. Printed totals and the explicit container count are stored separately from calculated row sums; containers are never inferred from pallet counts or volume. The review table and printed-total fields are editable. Quantities and package types are not added across incompatible units, and fractional pallet allocations are allowed. When complete row values differ from printed totals, documents use the calculated row totals, preserve the source values for review, and require the user to confirm the extracted values before download. Invalid values and inconsistent package types still block download. Missing values remain unconfirmed. PL output does not require a price or currency. PDF, Excel, and HTML include the packing fields; CIPL includes both CI and PL outputs.
 

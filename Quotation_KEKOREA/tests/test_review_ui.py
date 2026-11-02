@@ -10,6 +10,52 @@ from Quotation_KEKOREA.tests.test_review_fields import complete_draft
 
 @unittest.skipUnless(importlib.util.find_spec('streamlit'), 'Streamlit is not installed')
 class ReviewUiTests(unittest.TestCase):
+    def test_pl_totals_approval_enables_pdf_and_resets_when_source_changes(self):
+        from streamlit.testing.v1 import AppTest
+        app_path = Path(__file__).resolve().parents[1] / 'app.py'
+        doc = complete_draft()
+        doc.update(document_type='PL', product_family='other', currency=None, shipment_reference='TEST',
+                   source_image_attached=True, container_count='5 x 40FT Containers', actual_package_count='2.5',
+                   declared_total_quantity='12 pcs', declared_total_quantity_unit='PCS',
+                   declared_net_weight_kg='3.5', declared_gross_weight_kg='4', declared_volume_cbm='0.031')
+        doc['items'] = [dict(product_name='Test A', quantity='10', unit='PCS', package_count='2',
+                             package_type='PALLET', net_weight_kg='1', gross_weight_kg='1.2', volume_cbm='0.01'),
+                        dict(product_name='Test B', quantity='2.5', unit='KG', package_count='0.5',
+                             package_type='PALLET', net_weight_kg='2.5', gross_weight_kg='2.8', volume_cbm='0.02')]
+        with patch('Quotation_KEKOREA.agent.extractor.load_env', return_value={'OPENAI_API_KEY': 'test'}), \
+             patch('Quotation_KEKOREA.agent.pricing.load_local_seed', return_value={'products': [{'id': 'test'}]}), \
+             patch('Quotation_KEKOREA.agent.branding.resolve_company_seal', return_value=(app_path, None, None)):
+            at = AppTest.from_file(str(app_path))
+            at.session_state['selected_document_page'] = 'PL 만들기'
+            at.session_state['trade_draft'] = doc
+            at.session_state['trade_draft_page'] = 'PL 만들기'
+            at.run(timeout=20)
+            self.assertFalse(at.exception)
+            self.assertFalse(at.error, [error.value for error in at.error])
+            pdf_button = lambda: next(button for button in at.button if button.label == 'Create PDF')
+            self.assertTrue(pdf_button().disabled)
+            approval = next(box for box in at.checkbox if box.label.startswith('합계를 수정할까요?'))
+            self.assertFalse(approval.value)
+            approval.check().run(timeout=20)
+            self.assertFalse(at.exception)
+            self.assertFalse(pdf_button().disabled)
+            import json
+            effective = json.loads(at.session_state['rendered_json'])['document']
+            self.assertEqual(effective['container_count'], '5')
+            self.assertEqual(effective['declared_total_quantity'], '10')
+            self.assertEqual(effective['declared_volume_cbm'], '0.03')
+            self.assertEqual(effective['_packing_original_totals']['declared_total_quantity'], '12 pcs')
+            self.assertEqual(effective['_packing_approved_quantities'], {'PCS': '10', 'KG': '2.5'})
+            at.session_state['rendered_paths'] = {'pdf': 'previous.pdf'}
+            next(entry for entry in at.text_input if entry.label == 'Source CBM').set_value('0.032').run(timeout=20)
+            self.assertTrue(pdf_button().disabled)
+            self.assertFalse(next(box for box in at.checkbox if box.label.startswith('합계를 수정할까요?')).value)
+            self.assertEqual(at.session_state['rendered_paths'], {})
+            next(entry for entry in at.text_input if entry.label == 'Containers').set_value('five').run(timeout=20)
+            self.assertTrue(at.error)
+            self.assertTrue(pdf_button().disabled)
+            self.assertTrue(next(box for box in at.checkbox if box.label.startswith('합계를 수정할까요?')).disabled)
+
     def test_po_supplier_aliases_load_purchase_prices_and_show_recognition(self):
         from streamlit.testing.v1 import AppTest
         app_path = Path(__file__).resolve().parents[1] / 'app.py'

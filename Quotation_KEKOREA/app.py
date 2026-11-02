@@ -16,7 +16,8 @@ from Quotation_KEKOREA.agent.extractor import extract_trade_data, load_env, veri
 from Quotation_KEKOREA.agent.branding import resolve_company_seal
 from Quotation_KEKOREA.agent.seal_storage import download_company_seal
 from Quotation_KEKOREA.agent.pricing import apply_verified_eclado_prices, is_eclado_supplier, load_local_seed, load_supabase_catalog
-from Quotation_KEKOREA.agent.packing import reconcile_packing
+from Quotation_KEKOREA.agent.packing import (reconcile_packing, normalize_packing_inputs, packing_total_changes,
+                                           apply_approved_packing_totals, PACKING_SOURCE_FIELDS)
 from Quotation_KEKOREA.agent.renderers import format_currency_amount, render_files
 from Quotation_KEKOREA.agent.review_fields import missing_review_fields, apply_review_value
 from Quotation_KEKOREA.agent.trade_documents import apply_promotion, current_issue_date, normalize_quantity_unit, validate_and_calculate
@@ -497,7 +498,7 @@ if raw:
                     item["free_quantity"] = "0"
                 updated_items.append(item)
             data["items"] = updated_items
-            st.caption("공급처 원본의 합계입니다. 각 행의 값이 모두 있으면 문서에는 자동 계산한 합계를 사용합니다. 원본 인식이 틀렸을 때만 수정하세요.")
+            st.caption("공급처 원본의 합계입니다. 품목별 계산 합계와 다르면 아래 비교표에서 합계 수정을 승인해 주세요. 원본 인식이 틀렸을 때는 이 입력칸을 수정하세요.")
             total_fields = (("actual_package_count", "Source total packages"), ("container_count", "Containers"),
                             ("declared_net_weight_kg", "Source NW (kg)"), ("declared_gross_weight_kg", "Source GW (kg)"),
                             ("declared_volume_cbm", "Source CBM"), ("declared_total_quantity", "Source total quantity"),
@@ -505,7 +506,9 @@ if raw:
             columns = st.columns(2)
             for index, (field, label) in enumerate(total_fields):
                 column = columns[index % len(columns)]
-                data[field] = column.text_input(label, value=str(data.get(field) or ""), key=f"packing_{page}_{field}") or None
+                data[field] = column.text_input(label, value="" if data.get(field) is None else str(data[field]), key=f"packing_{page}_{field}") or None
+            data.pop('_packing_original_totals', None)
+            data = normalize_packing_inputs(data)
         if expected_type != "PL":
             apply_verified_eclado_prices(data, active_catalog)
         review_fields = missing_review_fields(data, packing=create_cipl_bundle)
@@ -546,25 +549,39 @@ if raw:
             st.error("포장 항목에서 확인 또는 수정이 필요한 값이 있습니다:")
             for issue in packing_check["issues"]:
                 st.write(f"- {issue}")
-        if packing_check and packing_check["discrepancies"]:
-            st.warning("원본 합계와 품목별 합계가 다릅니다. 문서에는 품목별 합계를 자동으로 사용합니다. 품목별 값이 원본 이미지와 맞는지 확인해 주세요.")
-            for discrepancy in packing_check["discrepancies"]:
-                st.write(f"- {discrepancy}")
+        packing_image_confirmed = True
+        if packing_check is not None:
+            review_snapshot = {"items": data.get("items", []),
+                               "source": data.get('_packing_original_totals', {}),
+                               **{field: data.get(field) for field in PACKING_SOURCE_FIELDS}}
+            review_digest = hashlib.sha256(json.dumps(review_snapshot, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()[:12]
+            changes = packing_total_changes(data, packing_check)
+            if changes or packing_check['discrepancies']:
+                st.warning("원본 합계와 품목별 계산 합계를 비교해 주세요. 단위가 다른 수량은 각각 표시하며, 승인한 경우에만 계산된 합계로 문서를 생성합니다.")
+                if changes:
+                    st.dataframe([{"항목": change['label'], "원본 합계": change['source'],
+                                   "품목별 계산 합계": change['calculated']} for change in changes],
+                                 hide_index=True, use_container_width=True)
+                for discrepancy in packing_check['discrepancies']:
+                    st.write(f"- {discrepancy}")
+                packing_image_confirmed = st.checkbox(
+                    "합계를 수정할까요? 품목별 값을 확인했으며 계산된 합계로 수정하는 것을 승인합니다.",
+                    key=f"packing_{page}_approve_totals_{review_digest}",
+                    disabled=bool(packing_check['issues']) or not changes)
+                if packing_image_confirmed:
+                    data = apply_approved_packing_totals(data)
+                    result = validate_and_calculate(data)
+                    packing_check = reconcile_packing(data)
+                    st.success("합계 수정이 승인되었습니다. 원본 합계는 보존하며 PDF/Excel에는 계산된 합계를 적용합니다.")
+            elif data.get('source_image_attached'):
+                packing_image_confirmed = st.checkbox("원본 이미지와 추출된 포장 정보를 확인했습니다.",
+                                                      key=f"packing_{page}_confirmed_{review_digest}")
         if packing_check:
             calculated = packing_check["calculated"]
             st.caption("Calculated row totals: " + " | ".join(
                 f"{label}: {_format_quantity_display(calculated[field]) if calculated[field] is not None else 'Incomplete'}"
                 for field, label in (("package_count", "Packages"), ("net_weight_kg", "NW kg"),
                                      ("gross_weight_kg", "GW kg"), ("volume_cbm", "CBM"))))
-        packing_image_confirmed = True
-        if packing_check is not None and (data.get("source_image_attached") or packing_check["discrepancies"]):
-            review_fields = ("actual_package_count", "container_count", "declared_net_weight_kg", "declared_gross_weight_kg",
-                             "declared_volume_cbm", "declared_total_quantity", "declared_total_quantity_unit")
-            review_snapshot = {"items": data.get("items", []), **{field: data.get(field) for field in review_fields}}
-            review_digest = hashlib.sha256(json.dumps(review_snapshot, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()[:12]
-            review_label = ("원본과 품목별 값을 확인했고, 차이가 있는 합계는 품목별 합계로 적용합니다."
-                            if packing_check["discrepancies"] else "원본 이미지와 추출된 포장 정보를 확인했습니다.")
-            packing_image_confirmed = st.checkbox(review_label, key=f"packing_{page}_confirmed_{review_digest}")
         bank_keys = ("BENEFICIARY", "BANK_NAME", "BRANCH", "SWIFT", "ACCOUNT_NUMBER", "BANK_ADDRESS")
         bank_details = {key: str(runtime_env.get(f"KEKOREA_USD_{key}", "")).strip() for key in bank_keys}
         missing_bank_keys = [f"KEKOREA_USD_{key}" for key, value in bank_details.items() if not value]
