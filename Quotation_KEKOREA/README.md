@@ -1,7 +1,55 @@
 # KE KOREA 무역 문서 생성 AI Agent 설계안
 
 작성일: 2026-10-30 (Asia/Seoul)  
-상태: ECLADO 가격 SQL과 로컬 텍스트 프롬프트 기반 초안 Agent가 준비되어 있으며, 앱에 Supabase REST 카탈로그 조회를 연결했다. 실제 Supabase/Cloud 연결은 아직 확인되지 않았다. 업무 서식 재현·첨부자료 판독·발행 절차는 미완료이며 모든 출력은 검토용 초안이다.
+최종 갱신: 2026-11-02 (Asia/Seoul)
+
+상태: Streamlit 배포, Supabase 카탈로그 조회, 비공개 직인 다운로드 및 초안 PDF 생성·다운로드를 확인했다. 모든 출력은 사용자 검토용 초안이며 실제 발주·발송은 자동 수행하지 않는다. 아래 초기 설계 기록보다 다음 현재 동작 및 변경 보호 기준을 우선한다.
+
+## 현재 동작 및 변경 보호 기준 — 2026-11-02
+
+배포 앱: https://kekoreacoltdgit-69eu27cywmml3jfwtdsappb.streamlit.app/
+
+배포 소스: GitHub `main`, 진입점 `Quotation_KEKOREA/app.py`
+
+향후 작업 지침: [AGENTS.md](AGENTS.md)
+
+| 수정 사항 | 현재 동작 | 회귀 검증 |
+| --- | --- | --- |
+| 회사 직인 저장 | `kekorea-private-seal` 비공개 Supabase 버킷에서 서버 전용 키로 읽고 PNG SHA-256을 검증한다. 다운로드는 15분간 캐시한다. 큰 Base64 Secret은 필요하지 않으며 선택적인 이전 방식의 대체 경로만 남아 있다. | `tests/test_branding.py`, 실제 배포 PDF의 직인 픽셀 대조 |
+| PDF 페이지 분할 | 상품 행은 실제 남은 공간이 부족할 때만 다음 페이지로 이동한다. 하단 영역 때문에 마지막 상품 하나를 강제로 옮기지 않는다. 합계·REMARK·계좌정보·회사 명판/직인 묶음이 들어가지 않으면 묶음 전체를 다음 페이지로 이동한다. | `tests/test_pdf_pagination.py`, 배포 앱의 20개 상품 PI PDF |
+| 누락 정보 입력 | `Not provided`/`TO BE CONFIRMED` 등으로 남을 값은 검토 화면에서 입력한다. 필수 정보는 입력 전 PDF/Excel 생성을 막고, 선택 정보는 사용자가 `N/A`를 명시할 수 있다. | `tests/test_review_fields.py`, `tests/test_review_ui.py`, 배포 앱의 배송·결제조건 입력 후 PDF |
+| 입력값 유지와 새 파일 생성 | 메뉴를 이동해도 보완 입력값을 유지한다. 새 주문 추출 또는 명시적 JSON 정정 시 이전 입력을 초기화한다. 내용 수정 시 기존 다운로드를 무효화한다. | `tests/test_review_ui.py` |
+| 주문수량 0 | 숫자 `0`, 문자열 `"0"`, `"0.0"`을 정상 수량으로 인정한다. 행은 삭제하지 않으며 해당 행 금액은 0이다. 빈 값·음수·비숫자·NaN/Infinity는 계속 오류다. 단가의 양수 검증은 별도 유지한다. | `tests/test_trade_documents.py`, `tests/test_review_ui.py`, 배포 PO의 0+5 수량/금액 표시 |
+| PO와 판매 가격 구분 | ECLADO PO는 공급처와 정확한 제품·용량·통화가 맞는 매입가격을 사용한다. Dear Glow PI/CI 판매가격을 PO에 사용하지 않는다. 공급처나 통화를 임의로 바꾸지 않는다. | `tests/test_supabase_catalog.py`, `tests/test_packing_workflow.py`, `tests/test_review_fields.py` |
+| 통화와 반올림 | Decimal 계산을 유지한다. 화장품 KRW는 원 단위, USD는 소수점 두 자리로 단가를 반올림한 뒤 행 금액을 계산한다. 단위가 다른 수량은 별도로 표시한다. | `tests/test_trade_documents.py`, `tests/test_packing_workflow.py` |
+
+### 최근 변경 이력
+
+- `46ab479`: 비공개 Supabase 직인 로딩 및 검증.
+- `dbb50ba`: 상품 공간 우선 배치, 하단 정보 묶음의 페이지 분할 방지.
+- `0e107d7`: 누락 정보 입력, 수정 반영, 입력 상태 유지, 오래된 다운로드 제거.
+- `ab2bf1f`: 명시적 주문수량 0 허용, 누락·음수 오류 구분, 포장 편집기의 숫자 0 보존.
+
+### 검증 명령과 유지 규칙
+
+저장소 루트에서 다음 명령을 실행한다. `--with streamlit`을 포함해야 화면 회귀 테스트가 건너뛰어지지 않는다.
+
+```powershell
+uv run --with streamlit python -m unittest discover -s Quotation_KEKOREA/tests
+git diff --check
+```
+
+현재 전체 테스트는 76개이며 모두 통과했다. 테스트 수는 이후 정당한 회귀 테스트 추가에 따라 증가할 수 있다. 검토 화면 테스트는 외부 API를 모킹하며, 실제 배포 검증과 구분한다. 실제 배포 검증에는 가상 입력을 우선 사용하고, 사용자의 주문 이미지 재전송이 필요하면 외부 전송 승인을 먼저 확인한다.
+
+### PO에 `Cannot calculate`가 표시될 때
+
+1. `Items to confirm`의 실제 오류를 확인한다. 수량, 단가, 할인율, 통화 오류를 구분한다. 일반 정보 누락으로 파일 생성이 막히는 것과 수치 계산 오류를 혼동하지 않는다.
+2. 0 수량은 유효하다. 수량 0만을 이유로 `Quantity required`/`Cannot calculate`가 표시되면 회귀 오류다.
+3. ECLADO PO는 매입가격과 KRW를 확인한다. 명시된 다른 통화를 몰래 KRW로 바꾸거나 판매가격으로 대체하지 않는다.
+4. 상품명과 용량의 추출 결과를 원본 및 카탈로그와 대조한다. 확정되지 않은 상품/용량의 가격은 추측해서 채우지 않는다.
+5. 오류가 남으면 해당 행의 추출값과 오류 문구를 확인한 뒤 수정한다. 계산이 되게 하려고 검증 전체를 끄지 않는다.
+
+배포 PO에서 가상의 수량 0과 5를 합산하고 KRW 금액을 정상 표시하는 것을 확인했다. 로컬 회귀 테스트는 PO 매입가격, 0 행의 금액, 명시된 통화 유지까지 함께 검증한다. 이는 사용자의 현재 브라우저 세션에서 어떤 값이 추출됐는지까지 증명하지 않는다.
 
 ## 1. 이해한 목표
 
@@ -301,9 +349,9 @@ SUPABASE_SECRET_KEY = "새로 발급한 Supabase Secret key"
 
 - Python `unittest`에서 SQL importer·계산·렌더러·OpenAI 모의요청·Supabase REST 모의요청 검증을 실행한다. 모의 테스트는 실제 Supabase 인증이나 실제 테이블 상태를 증명하지 않는다.
 - 앱이 실제 Supabase에 연결되면 화면에 최근 catalog import 시각과 제품 수를 표시한다. “No ECLADO catalog import”는 테이블은 있어도 seed rows가 없을 때, HTTP 401/403은 키 또는 권한 문제, 404는 API 노출/테이블명 문제를 뜻한다.
-- 실제 Supabase key, DB row, Streamlit Cloud Secrets로 라이브 연결은 아직 확인하지 않았다. 이 환경에서는 외부 Supabase endpoint에 접속하지 않고 비밀 키 없이 모의 응답으로만 검증한다.
+- 2026-11-02: 배포 앱의 실제 Supabase 카탈로그 연결과 비공개 직인 다운로드를 확인했다. 키 자체는 코드·문서·로그에 기록하지 않는다.
 - Order screenshots are supported. PDF/XLSX order uploads, final numbering/issuance, and CI/PL shipping integration are not connected. Generated files remain review drafts.
-- PDF 화면 렌더링과 Excel 앱 검증은 미완료다. 회사 템플릿에 맞춘 편집 전 시각 검수가 필요하다.
+- PDF 렌더링과 직인·페이지 배치는 로컬 및 배포 앱 생성 파일로 검증했다. Excel 데스크톱 앱 자체의 시각 검수는 별도이며, 실제 거래 문서는 발송 전에 사용자가 검토한다.
 
 
 ## Buyer order image input and cosmetics money display
