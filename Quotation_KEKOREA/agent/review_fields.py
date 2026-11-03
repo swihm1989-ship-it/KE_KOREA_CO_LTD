@@ -79,7 +79,9 @@ def apply_review_value(data, field, value):
                 pass
         if field.path[-1] == "discount_percent":
             try:
-                discounts = {Decimal(str(item.get('discount_percent'))) for item in data.get('items', [])}
+                from Quotation_KEKOREA.agent.samples import is_manual_sample
+                discounts = {Decimal(str(item.get('discount_percent'))) for item in data.get('items', [])
+                             if not is_manual_sample(data, item)}
                 valid = len(discounts) == 1 and all(rate.is_finite() and 0 <= rate <= 100 for rate in discounts)
             except InvalidOperation:
                 valid = False

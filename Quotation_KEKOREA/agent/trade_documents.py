@@ -87,6 +87,8 @@ def validate_and_calculate(data):
     """Validate extracted user data, calculate sums, and identify issue blockers."""
     # Issue date is a system field: the issue date is always the current Seoul date.
     data = {**data, "issue_date": current_issue_date()}
+    from Quotation_KEKOREA.agent.promotions import recalculate_order_promotions
+    data = recalculate_order_promotions(data)
     issues, blocking = [], []
 
     def block(message):
@@ -147,6 +149,10 @@ def validate_and_calculate(data):
     calculated, total = [], Decimal("0")
     for i, original in enumerate(items, 1):
         item = dict(original)
+        from Quotation_KEKOREA.agent.samples import is_manual_sample
+        sample = is_manual_sample(data, item)
+        row_issue_start = len(issues)
+        row_block_start = len(blocking)
         name = item.get("product_name")
         if not name:
             block(f"Product name is required for item {i}")
@@ -164,7 +170,7 @@ def validate_and_calculate(data):
         quantity_keys = ("shipped_quantity", "quantity", "paid_quantity") if doc_type == "PL" else ("paid_quantity", "quantity")
         quantity_value = next((item.get(key) for key in quantity_keys if item.get(key) not in (None, "")), None)
         quantity = _decimal(quantity_value, f"paid quantity for item {i}", issues)
-        base = Decimal("0") if doc_type == "PL" else _decimal(item.get("unit_price"), f"unit price for item {i}", issues, allow_zero=False)
+        base = Decimal("0") if doc_type == "PL" else _decimal(item.get("unit_price"), f"unit price for item {i}", issues, allow_zero=sample)
         discount = Decimal("0") if doc_type == "PL" else _decimal(item.get("discount_percent", 0), f"discount percent for item {i}", issues)
         if doc_type in {"PI", "CI"} and data.get("product_family") == "cosmetics" and item.get("discount_percent") is None:
             block(f"Confirm discount percentage, including whether no discount applies, for {name or f'item {i}'}")
@@ -199,6 +205,8 @@ def validate_and_calculate(data):
                      "paid_quantity": format(quantity, "f"), "free_quantity": format(free, "f"),
                      "shipped_quantity": format(shipped, "f"), "discount_percent": format(discount, "f")})
         item["display_quantity"] = format(shipped if doc_type == "PL" else quantity + free, "f")
+        if sample and (len(issues) > row_issue_start or len(blocking) > row_block_start):
+            block(f"Sample {i}: confirm a valid name, quantity, unit and non-negative unit price")
         calculated.append(item)
         total += line
     total = total.quantize(money_quantum, rounding=ROUND_HALF_UP)

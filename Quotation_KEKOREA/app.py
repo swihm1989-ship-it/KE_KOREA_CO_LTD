@@ -15,6 +15,8 @@ REPOSITORY_ROOT = ROOT.parent
 sys.path.insert(0, str(REPOSITORY_ROOT))
 from Quotation_KEKOREA.agent.workflow_state import DocumentWorkspaces
 from Quotation_KEKOREA.agent.counterparties import load_company_profiles, apply_company_profiles
+from Quotation_KEKOREA.agent.promotions import apply_promotion_commands, recalculate_order_promotions
+from Quotation_KEKOREA.agent.samples import ensure_sample_rows, edit_sample_rows, is_manual_sample
 from Quotation_KEKOREA.agent.extractor import extract_trade_data, load_env, verify_item_quotes
 from Quotation_KEKOREA.agent.branding import resolve_company_seal
 from Quotation_KEKOREA.agent.seal_storage import download_company_seal
@@ -286,6 +288,8 @@ def _extract_draft(prompt, title, expected_type, create_cipl_bundle, image_input
     draft["remarks"] = _explicit_remark(prompt)
     draft["conflicts"] = [issue for issue in draft.get("conflicts", [])
                           if not issue.lower().startswith("remarks was not found verbatim")]
+    ensure_sample_rows(draft, prompt)
+    apply_promotion_commands(draft, prompt, products=catalog.get("products", []))
     _synchronize_extracted_quantities(draft)
     _apply_ke_korea_company_defaults(draft, expected_type)
     apply_company_profiles(draft, company_profiles, prompt=prompt)
@@ -294,13 +298,18 @@ def _extract_draft(prompt, title, expected_type, create_cipl_bundle, image_input
     discount_rate, discount_issue = _discount_instruction(prompt)
     if discount_rate is not None:
         for item in draft.get("items", []):
+            if is_manual_sample(draft, item):
+                continue
             item["discount_percent"] = discount_rate
         draft["conflicts"] = [issue for issue in draft.get("conflicts", [])
                               if "discount percent was not found in its source quote" not in issue.lower()]
     else:
         for item in draft.get("items", []):
+            if is_manual_sample(draft, item):
+                continue
             item["discount_percent"] = None
-        draft.setdefault("conflicts", []).append(discount_issue)
+        if not draft.get('_samples_requested') or any(not is_manual_sample(draft, item) for item in draft.get("items", [])):
+            draft.setdefault("conflicts", []).append(discount_issue)
     return draft
 
 
@@ -592,8 +601,9 @@ if raw:
         apply_company_profiles(data, active_company_profiles)
         if expected_type != "PL":
             apply_verified_eclado_prices(data, active_catalog)
+        sample_review_paths = edit_sample_rows(data, page)
         review_fields = missing_review_fields(data, packing=create_cipl_bundle)
-        existing_review_paths = set()
+        existing_review_paths = set(sample_review_paths)
         if expected_type == "PO":
             existing_review_paths.update({("seller", "legal_name"), ("seller", "address")})
         if expected_type == "PL" or create_cipl_bundle:
@@ -616,6 +626,7 @@ if raw:
             apply_company_profiles(data, active_company_profiles)
             if expected_type != "PL":
                 apply_verified_eclado_prices(data, active_catalog)
+        data = recalculate_order_promotions(data)
         pending_review_fields = missing_review_fields(data, packing=create_cipl_bundle)
         if expected_type == "PO" and is_eclado_supplier((data.get("seller") or {}).get("legal_name")):
             verified_count = sum(item.get("master_price") is True for item in data.get("items", []))
@@ -705,6 +716,7 @@ if raw:
                                 if issue.startswith(("Valid number required for paid quantity", "Valid positive number required for paid quantity"))
                                 or issue.startswith("Valid positive number required for unit price")]
         calculation_blockers.extend(currency_conflicts)
+        calculation_blockers.extend(issue for issue in result["blocking_issues"] if issue.startswith("Sample "))
         if expected_type != "PL" and currency not in supported_currencies:
             calculation_blockers.append("Currency must be confirmed as a supported three-letter code")
         discount_blockers = [] if expected_type == "PL" else [issue for issue in result["blocking_issues"] if "discount" in issue.lower()]
@@ -839,8 +851,17 @@ if raw:
                          if "company seal is unavailable" in issue.lower()
                          or "KEKOREA_COMPANY_SEAL_BASE64" in issue]
         financial_blockers = calculation_blockers + discount_blockers
+        promotion_blockers = ([issue for issue in result["blocking_issues"]
+                               if any(marker in issue.lower() for marker in
+                                      ("promotion rule", "promotion quantity", "promotion command"))]
+                              if expected_type in {"PO", "PI"} else [])
+        sample_blockers = [issue for issue in result["blocking_issues"] if issue.startswith("Sample ")]
         export_blocked = bool(pending_review_fields or financial_blockers or bank_blockers or seal_blockers or unconfirmed_aliases or
-                              (packing_check and packing_check["issues"]) or not packing_image_confirmed)
+                              promotion_blockers or sample_blockers or (packing_check and packing_check["issues"]) or not packing_image_confirmed)
+        if sample_blockers:
+            st.error("샘플 입력값을 확인해 주세요: " + "; ".join(sample_blockers))
+        if promotion_blockers:
+            st.error("행사 조건 또는 행사 수량을 확인해 주세요: " + "; ".join(promotion_blockers))
         if financial_blockers:
             st.error("Confirm valid quantities, unit prices, and discounts before creating a PDF or Excel file.")
         if unconfirmed_aliases:

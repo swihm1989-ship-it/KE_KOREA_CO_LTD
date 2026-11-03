@@ -455,12 +455,14 @@ def _party_panel(canvas, x, title, party):
     return panel_top + panel_height
 
 
-def _document_row(item, is_packing_list, currency):
+def _document_row(item, is_packing_list, currency, *, paid_promotion=False):
     name = str(item.get("product_name") or "TO BE CONFIRMED")
     if is_packing_list and item.get("hs_code"):
         name += " | HS: " + str(item["hs_code"])
     capacity = str(item.get("capacity") or item.get("specification") or "-")
-    quantity = _format_quantity(item.get("display_quantity") or item.get("paid_quantity") or item.get("quantity") or "-")
+    quantity_value = (item.get("paid_quantity") if paid_promotion else
+                      item.get("display_quantity") or item.get("paid_quantity") or item.get("quantity") or "-")
+    quantity = _format_quantity(quantity_value if quantity_value not in (None, "") else "-")
     unit = str(item.get("unit") or "PCS")
     try:
         free_quantity = Decimal(str(item.get("free_quantity") or "0"))
@@ -528,7 +530,9 @@ def render_trade_document(data, bank_details=None, *, logo_path=None, seal_path=
     is_packing_list = doc_type == "PL"
     currency = str(data.get("currency") or "TO CONFIRM").upper()
     items = data.get("items") or []
-    rows = [_document_row(item, is_packing_list, currency) for item in items]
+    rows = [_document_row(item, is_packing_list, currency,
+                          paid_promotion=data.get("document_type") in {"PO", "PI"} and bool(item.get("promotion")))
+            for item in items]
     remark_lines = _wrap(str(data.get("remarks") or "N/A").replace("\n", " "), 145)
     review_height = max(40, 22 + len(remark_lines) * 6.5)
 

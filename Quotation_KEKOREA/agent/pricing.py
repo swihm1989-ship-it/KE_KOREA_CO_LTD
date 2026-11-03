@@ -121,6 +121,7 @@ def is_eclado_supplier(name):
 
 def apply_verified_eclado_prices(draft, seed=None):
     """Replace ECLADO candidate price with exact catalog price or mark the uncertainty."""
+    from Quotation_KEKOREA.agent.samples import is_manual_sample
     # Recompute catalog-owned warnings after the user completes buyer/product/currency fields.
     draft["missing_fields"] = [entry for entry in draft.get("missing_fields", []) if not (
         (str(entry).startswith("Exact ECLADO product match for ") and str(entry).endswith("; capacity/SKU may be needed"))
@@ -136,6 +137,7 @@ def apply_verified_eclado_prices(draft, seed=None):
     exact_matches = [match_eclado_product(item.get("product_name"), item.get("capacity"), products,
                                          item.get("product_code"))
                      for item in items]
+    regular_matches = [match for item, match in zip(items, exact_matches) if not is_manual_sample(draft, item)]
     price_table = "purchase_prices" if draft.get("document_type") == "PO" else "buyer_prices"
     default_currency = "KRW" if draft.get("document_type") == "PO" else None
     counterparty_role = "seller" if draft.get("document_type") == "PO" else "buyer"
@@ -146,11 +148,11 @@ def apply_verified_eclado_prices(draft, seed=None):
     expected_party = "ECLADO" if draft.get("document_type") == "PO" else "DEAR GLOW"
     party_matches = (is_eclado_supplier(counterparty_name) if draft.get("document_type") == "PO"
                      else "DEARGLOW" in counterparty)
-    if items and draft.get("product_family") != "cosmetics":
-        all_matched = all(match["status"] == "matched" for match in exact_matches)
+    if regular_matches and draft.get("product_family") != "cosmetics":
+        all_matched = all(match["status"] == "matched" for match in regular_matches)
         recognized_order = (draft.get("document_type") in {"PO", "PI", "CI"} and party_matches
                             and draft.get("product_family") in (None, "", "other")
-                            and any(match["status"] == "matched" for match in exact_matches))
+                            and any(match["status"] == "matched" for match in regular_matches))
         if all_matched or recognized_order:
             draft["product_family"] = "cosmetics"
     supplier_confirmation = "The seller was not supplied. Use the ECLADO purchase price catalog for this PO? Confirm the supplier and legal details."
@@ -170,6 +172,9 @@ def apply_verified_eclado_prices(draft, seed=None):
         draft["currency"] = None
         draft.pop("_catalog_currency_inferred", None)
     for item, match in zip(items, exact_matches):
+        if is_manual_sample(draft, item):
+            item['master_price'] = False
+            continue
         if draft.get("product_family") != "cosmetics":
             item["master_price"] = False
             continue

@@ -480,3 +480,32 @@ The shared PDF renderer preserves the source quantity unit on PI, PO, and CI lin
 - The issue date is always generated from the current date in `Asia/Seoul` and displayed in English (for example, `30 October 2026`). Dates copied from an order or email are not used as the issue date. This rule applies to PI, PO, CI, PL, CIPL, PDF, Excel, and HTML outputs.
 - The PDF title badge shows the document identifier without a `DRAFT | NO.` prefix: PI and CI use `INVOICE #`, PO uses `PO #`, and PL uses `PACKING LIST #`. Draft status remains visible in the footer.
 - `SHIP TO` contains only a specifically stated delivery destination, recognized from labels such as `Ship To`, `Delivered To`, `Delivery To`, `Delivery Address`, `Destination`, or equivalent supported-language labels. The buyer address, seller address, origin country, and EXW/FOB named place are not used as a destination. If no specific destination is provided, the document displays `N/A`.
+
+### PO/PI 행사 계산 보완 (2026-11-03)
+
+PO/PI의 행사 명령은 기존 주문 행에 적용합니다. `전체 제품 3+1 행사`는 전체 행에, `Melaser Whitening Toner 3+1 행사`는 해당 제품에 적용합니다. 같은 이름의 다른 용량이 있으면 용량을 함께 지정합니다. `Buy 3, get 1 free`, 한국어 구매/증정 표현, 전각 숫자와 더하기 기호도 숫자형 행사로 정규화합니다. 서로 충돌하거나 제외/취소가 섞인 명령은 확인 전 생성을 막습니다.
+
+주문 수량은 유상 수량이며, 증정 수량은 `floor(유상 수량 / 구매 기준) × 증정 기준`, 출고 수량은 `유상 + 증정`입니다. 금액은 유상 수량에만 단가를 곱합니다. 용량이나 포장 내부 개수는 행사 배수가 아닙니다. 수량을 검토 화면에서 나중에 입력하거나 변경해도 다시 계산합니다. PDF에는 유상 수량과 `+ 증정 수량 FOC`를 표시하여 증정분을 중복 표시하지 않습니다.
+
+| 행사 | 유상 수량 | 증정 수량 | 출고 수량 |
+| --- | ---: | ---: | ---: |
+| 1+1 | 10 | 10 | 20 |
+| 2+1 | 10 | 5 | 15 |
+| 3+1 | 10 | 3 | 13 |
+| 4+1 | 10 | 2 | 12 |
+| 4+3 | 10 | 6 | 16 |
+| 3+2 | 10 | 6 | 16 |
+
+기존 `apply_promotion` 산식은 유지했습니다. 변경 범위는 PO/PI 행사 명령 연결, 재계산, 행사 오류 생성 차단, 행사 행의 PDF 수량 표시입니다. 가격 정책, 제품 매칭, 거래처 DB, 메뉴별 작업 보관, CI/PL/CIPL 동작은 이번 수정 대상이 아닙니다. 회귀 테스트는 `tests/test_order_promotions.py`, `tests/test_order_promotions_ui.py`에 추가했습니다. 실제 모델/API 추출과 배포 앱 반영 여부는 로컬 테스트와 별도로 확인해야 합니다.
+
+로컬 검증: `uv run --offline --with streamlit python -m unittest discover -s Quotation_KEKOREA/tests` 전체 151개 통과(기존 134개 + 신규 17개, Streamlit AppTest 포함). 여섯 행사 각각 PO/PI의 PDF/XLSX 생성과 유상 수량 기준 금액을 확인했습니다. 운영 앱에는 아직 배포하지 않았습니다.
+
+### PI 샘플 수동 입력 (2026-11-03)
+
+PI 요청에 `샘플` 또는 대소문자 구분 없는 `sample`이 있으면 **샘플 수동 입력** 영역을 표시합니다. `SAMPLE도 있어`처럼 한국어 조사가 붙어도 인식합니다. 예: `Dearglow에 PI 작성해줘. 샘플도 있어`. 샘플 품명·용량·수량·단위·단가를 직접 입력하고, **샘플 행 추가**로 여러 행을 추가할 수 있습니다. 필요 없는 행은 해당 행의 **include in invoice**를 해제합니다. 수량과 단가는 미리 추측하지 않으므로 직접 입력해야 하며, 단가 `0`도 유효합니다. 음수·비숫자·NaN·Infinity 등 잘못된 값은 파일 생성을 막습니다.
+
+샘플은 해당 PI 안에만 저장하는 거래별 행이며 SQL 상품/가격 테이블에 등록하지 않습니다. 카탈로그에 같은 이름이 있어도 수동 단가를 덮어쓰지 않습니다. 새 샘플 행의 품명은 빈칸으로 시작하며, 사용자가 입력한 실제 제품명을 그대로 PDF/Excel에 출력합니다. `SAMPLE`로 고정하거나 `(SAMPLE)`을 자동으로 붙이지 않습니다. 샘플 여부는 내부 `is_sample` 정보로 관리하므로 품명을 바꿔도 수동 입력값은 유지됩니다. 수량은 전체 수량에 포함하고, 금액은 `수량 × 직접 입력한 단가`를 전체 금액에 합산합니다. 예: 일반 상품 10개/20 USD와 샘플 5개/단가 0 USD는 총 15개/20 USD, 샘플 단가를 0.25 USD로 입력하면 총 15개/21.25 USD입니다. 샘플에는 일반 상품의 행사·할인을 자동 적용하지 않습니다.
+
+입력값은 기존 메뉴별 초안 보관 경로를 사용해 메뉴 이동 후에도 유지합니다. 새 자료 추출 시 이전 샘플 입력은 초기화하고, 수정한 인보이스에는 이전 다운로드 파일을 노출하지 않습니다. PO/CI/PL/CIPL 및 일반 상품의 양수 단가·카탈로그 검증은 이번 샘플 기능의 적용 대상이 아닙니다. 회귀 테스트: `tests/test_pi_samples.py`, `tests/test_pi_samples_ui.py`. 운영 배포 및 실제 모델 추출 검증은 별도입니다.
+
+최종 로컬 검증: 전체 164개 테스트 통과(기존 행사 수정까지 151개 + 샘플 신규 13개, Streamlit AppTest 포함). 자유로운 품명 입력·변경, 0/양수 단가, PDF/XLSX 수량·금액 합산, 카탈로그 단가 덮어쓰기 방지, 일반 상품 분류/할인 검증 유지, 메뉴 복귀와 새 추출 초기화를 확인했습니다. 운영 앱에는 아직 배포하지 않았습니다.
