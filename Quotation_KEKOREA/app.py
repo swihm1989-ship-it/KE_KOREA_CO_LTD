@@ -17,10 +17,13 @@ from Quotation_KEKOREA.agent.workflow_state import DocumentWorkspaces
 from Quotation_KEKOREA.agent.counterparties import load_company_profiles, apply_company_profiles
 from Quotation_KEKOREA.agent.promotions import apply_promotion_commands, recalculate_order_promotions
 from Quotation_KEKOREA.agent.samples import ensure_sample_rows, edit_sample_rows, is_manual_sample
+from Quotation_KEKOREA.agent.attachments import prepare_uploads
 from Quotation_KEKOREA.agent.extractor import extract_trade_data, load_env, verify_item_quotes
 from Quotation_KEKOREA.agent.branding import resolve_company_seal
 from Quotation_KEKOREA.agent.seal_storage import download_company_seal
-from Quotation_KEKOREA.agent.pricing import apply_verified_eclado_prices, is_eclado_supplier, load_local_seed, load_supabase_catalog
+from Quotation_KEKOREA.agent.pricing import is_eclado_supplier, load_local_seed, load_supabase_catalog
+from Quotation_KEKOREA.agent.ci_import import (prepare_ci_import, is_pi_import, ci_import_issues, ci_render_data,
+                                           is_ci_conversion_request, apply_document_prices as apply_verified_eclado_prices)
 from Quotation_KEKOREA.agent.packing_review import (reconcile_packing, normalize_packing_inputs, packing_total_changes,
                                            apply_approved_packing_totals, PACKING_SOURCE_FIELDS)
 from Quotation_KEKOREA.agent.renderers import format_currency_amount, render_files
@@ -267,14 +270,16 @@ def _keep_delivery_note_in_terms(draft, auto_remark):
 
 def _extract_draft(prompt, title, expected_type, create_cipl_bundle, image_inputs, runtime_env, catalog, company_profiles=()):
     """Run the existing extraction/verification pipeline on a worker-owned snapshot."""
-    draft = extract_trade_data(prompt or f"Use the attached order image as source for a {title}.", images=image_inputs, env=runtime_env,
+    draft = extract_trade_data(prompt or f"Use the attached source documents for a {title}.", images=image_inputs, env=runtime_env,
                                requested_document_type=expected_type, packing_source=expected_type == "PL" or create_cipl_bundle)
+    prepare_ci_import(draft, requested_type=expected_type, has_attachments=bool(image_inputs))
     draft = _normalize_quantity_aliases(draft, prompt)
     draft = _normalize_currency_alias(draft, prompt)
     # The selected sidebar workflow is authoritative, even if the order image mentions another form.
     draft["document_type"] = expected_type
     draft = verify_item_quotes(draft, prompt, image_context=bool(image_inputs))
     draft["source_image_attached"] = bool(image_inputs)
+    draft["source_pdf_attached"] = any(item.get('mime_type') == 'application/pdf' for item in image_inputs)
     draft["issue_date"] = current_issue_date()
     ship_to_source = draft.pop("ship_to_source", None)
     if not _has_explicit_ship_to(prompt) and not (image_inputs and _has_explicit_ship_to(ship_to_source)):
@@ -284,8 +289,11 @@ def _extract_draft(prompt, title, expected_type, create_cipl_bundle, image_input
     draft["missing_fields"] = [field for field in draft.get("missing_fields", [])
                                if not re.search(r"issue\s+date|date\s+of\s+issue", str(field), re.IGNORECASE)]
     auto_remark = draft.get("remarks")
-    _keep_delivery_note_in_terms(draft, auto_remark)
-    draft["remarks"] = _explicit_remark(prompt)
+    if not is_pi_import(draft):
+        _keep_delivery_note_in_terms(draft, auto_remark)
+        draft["remarks"] = _explicit_remark(prompt)
+    elif _explicit_remark(prompt) != 'N/A':
+        draft['remarks'] = _explicit_remark(prompt)
     draft["conflicts"] = [issue for issue in draft.get("conflicts", [])
                           if not issue.lower().startswith("remarks was not found verbatim")]
     ensure_sample_rows(draft, prompt)
@@ -295,6 +303,8 @@ def _extract_draft(prompt, title, expected_type, create_cipl_bundle, image_input
     apply_company_profiles(draft, company_profiles, prompt=prompt)
     if expected_type != "PL":
         apply_verified_eclado_prices(draft, catalog)
+    if is_pi_import(draft):
+        return draft  # Printed PI prices/discounts remain transaction-specific.
     discount_rate, discount_issue = _discount_instruction(prompt)
     if discount_rate is not None:
         for item in draft.get("items", []):
@@ -315,6 +325,7 @@ def _extract_draft(prompt, title, expected_type, create_cipl_bundle, image_input
 
 def _render_draft(result, output_root, bank_details, logo_path, local_seal_path, seal_bytes, create_cipl_bundle):
     """Keep existing render rules; each background job owns its output directory."""
+    result = ci_render_data(result)
     output_dir = Path(output_root) / uuid4().hex
     seal_path = local_seal_path
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -473,7 +484,7 @@ with st.expander("What this menu creates"):
         st.write("CIPL creates two review files: a Commercial Invoice (CI) and a Packing List (PL). Provide actual shipment, package, and weight information; unknown details remain flagged for review.")
     else:
         st.write(f"{title} uses the KE KOREA branded PDF template. ECLADO prices are matched against the verified catalog when available. PI includes KE KOREA USD bank details; PO, CI, and PL do not.")
-    st.write("Order images may be PNG, JPG, JPEG, or WEBP. Image-derived information needs human review.")
+    st.write("Source documents may be PNG, JPG, JPEG, WEBP, or PDF. Extracted information needs human review.")
 
 st.markdown('<div class="ke-section">1 · 주문 정보</div>', unsafe_allow_html=True)
 prompt = st.text_area("거래 조건을 입력하세요", height=180, key=f"order_prompt_{page}",
@@ -482,44 +493,40 @@ def _remember_order_uploads():
     work.remember_uploads(page, st.session_state.get(f"order_upload_{page}") or [])
 
 
-current_uploads = st.file_uploader("공급처 패킹리스트 이미지 첨부" if expected_type == "PL" or create_cipl_bundle else "바이어 주문 이미지 첨부", type=["png", "jpg", "jpeg", "webp"], accept_multiple_files=True,
+current_uploads = st.file_uploader("공급처 패킹리스트 이미지/PDF 첨부" if expected_type == "PL" or create_cipl_bundle else "주문·PI 이미지/PDF 첨부", type=["png", "jpg", "jpeg", "webp", "pdf"], accept_multiple_files=True,
     key=f"order_upload_{page}", on_change=_remember_order_uploads,
-    help="이미지 최대 5개, 파일당 10 MB, 총 20 MB까지 첨부할 수 있습니다.")
+    help="이미지/PDF를 섞어서 최대 5개, 파일당 10 MB, 총 20 MB까지 첨부할 수 있습니다. PDF의 모든 페이지를 추출 대상으로 전달합니다.")
 if current_uploads:
     work.remember_uploads(page, current_uploads)
 uploaded_images = work.uploads.get(page, [])
-if uploaded_images and st.button("첨부 이미지 모두 지우기", key=f"clear_uploads_{page}"):
+has_pdf_upload = any(upload.type == 'application/pdf' or upload.name.lower().endswith('.pdf') for upload in uploaded_images)
+if uploaded_images and st.button("첨부 파일 모두 지우기" if has_pdf_upload else "첨부 이미지 모두 지우기", key=f"clear_uploads_{page}"):
     work.remember_uploads(page, [])
     st.session_state.pop(f"order_upload_{page}", None)
     st.rerun()
 st.caption("For ECLADO, the entered discount is applied to the Supabase list price. If no discount is stated, the full list price (0% discount) is used. Enter one discount rate per invoice.")
 st.caption("Common labels such as Qty/Q'ty/Volume, Unit Price/Rate, Shipping Terms/Delivery Terms, and Payment Conditions are interpreted by meaning. Volume and package-count labels may require your confirmation.")
 if uploaded_images:
-    st.caption(f"첨부 이미지 {len(uploaded_images)}개 · Extract를 누를 때 OpenAI로 전송됩니다.")
-    st.image([upload.getvalue() for upload in uploaded_images], caption=[upload.name for upload in uploaded_images], use_container_width=True)
+    st.caption(f"첨부 {'파일' if has_pdf_upload else '이미지'} {len(uploaded_images)}개 · Extract를 누를 때 OpenAI로 전송됩니다.")
+    preview_images = [upload for upload in uploaded_images if upload.type != 'application/pdf' and not upload.name.lower().endswith('.pdf')]
+    if preview_images:
+        st.image([upload.getvalue() for upload in preview_images], caption=[upload.name for upload in preview_images], use_container_width=True)
+    for upload in uploaded_images:
+        if upload not in preview_images:
+            st.caption(f"PDF: {upload.name} · 모든 페이지를 추출합니다.")
 
 extract_clicked = st.button("정보 추출 및 초안 검토", type="primary", disabled=(not prompt.strip() and not uploaded_images) or work.busy(page, "extract") or work.busy(page, "render"))
 if extract_clicked:
     try:
-        requested_type = _requested_document_type(prompt)
+        requested_type = ('CI' if expected_type == 'CI' and uploaded_images and is_ci_conversion_request(prompt)
+                          else _requested_document_type(prompt))
         selected_type = "CIPL" if create_cipl_bundle else expected_type
         if requested_type and requested_type != selected_type:
             raise ValueError(
                 f"Your prompt requests {requested_type}, but the sidebar is set to {selected_type}. "
                 "Choose the matching document menu, then extract again."
             )
-        image_inputs = []
-        if len(uploaded_images or []) > 5:
-            raise ValueError("Attach no more than 5 order images at a time")
-        total_image_bytes = 0
-        for upload in uploaded_images or []:
-            image_data = upload.getvalue()
-            if len(image_data) > 10 * 1024 * 1024:
-                raise ValueError(f"{upload.name} exceeds the 10 MB per-image limit")
-            total_image_bytes += len(image_data)
-            image_inputs.append({"name": upload.name, "mime_type": upload.type, "data": image_data})
-        if total_image_bytes > 20 * 1024 * 1024:
-            raise ValueError("Order images exceed the 20 MB combined limit")
+        image_inputs = prepare_uploads(uploaded_images)
         work.start(page, "extract", _extract_draft, prompt, title, expected_type,
                    create_cipl_bundle, image_inputs, runtime_env, active_catalog, active_company_profiles)
         st.rerun()
@@ -667,7 +674,7 @@ if raw:
                     packing_check = reconcile_packing(data)
                     st.success("합계 수정이 승인되었습니다. 원본 합계는 보존하며 PDF/Excel에는 계산된 합계를 적용합니다.")
             elif data.get('source_image_attached'):
-                packing_image_confirmed = st.checkbox("원본 이미지와 추출된 포장 정보를 확인했습니다.",
+                packing_image_confirmed = st.checkbox("원본 문서와 추출된 포장 정보를 확인했습니다." if data.get('source_pdf_attached') else "원본 이미지와 추출된 포장 정보를 확인했습니다.",
                                                       key=f"packing_{page}_confirmed_{review_digest}")
         if packing_check:
             calculated = packing_check["calculated"]
@@ -696,6 +703,13 @@ if raw:
             result["status"] = "DRAFT"
 
         buyer_name = str((result.get("buyer") or {}).get("legal_name") or "").strip().casefold()
+        source_import_blockers = ci_import_issues(result)
+        if source_import_blockers:
+            result['blocking_issues'].extend(source_import_blockers)
+            result.update(ready_for_issue=False, status='DRAFT')
+            st.error('원본 PI와 추출값을 확인해 주세요: ' + '; '.join(source_import_blockers))
+        if is_pi_import(result):
+            st.caption('첨부 PI의 거래 단가·할인율·수량을 사용합니다. 은행·결제 값은 CI에 가져오지 않습니다.')
         buyer_key = re.sub(r"[^a-z0-9]", "", buyer_name)
         if expected_type != "PO" and result.get("product_family") == "cosmetics" and "dearglow" not in buyer_key:
             st.warning("The current ECLADO sale-price catalog is for Dear Glow only. This buyer has no stored catalog price yet, so enter an approved price before creating a document.")
@@ -717,6 +731,7 @@ if raw:
                                 or issue.startswith("Valid positive number required for unit price")]
         calculation_blockers.extend(currency_conflicts)
         calculation_blockers.extend(issue for issue in result["blocking_issues"] if issue.startswith("Sample "))
+        calculation_blockers.extend(source_import_blockers)
         if expected_type != "PL" and currency not in supported_currencies:
             calculation_blockers.append("Currency must be confirmed as a supported three-letter code")
         discount_blockers = [] if expected_type == "PL" else [issue for issue in result["blocking_issues"] if "discount" in issue.lower()]
@@ -857,7 +872,7 @@ if raw:
                               if expected_type in {"PO", "PI"} else [])
         sample_blockers = [issue for issue in result["blocking_issues"] if issue.startswith("Sample ")]
         export_blocked = bool(pending_review_fields or financial_blockers or bank_blockers or seal_blockers or unconfirmed_aliases or
-                              promotion_blockers or sample_blockers or (packing_check and packing_check["issues"]) or not packing_image_confirmed)
+                              promotion_blockers or sample_blockers or source_import_blockers or (packing_check and packing_check["issues"]) or not packing_image_confirmed)
         if sample_blockers:
             st.error("샘플 입력값을 확인해 주세요: " + "; ".join(sample_blockers))
         if promotion_blockers:

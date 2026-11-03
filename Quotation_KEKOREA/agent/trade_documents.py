@@ -150,6 +150,7 @@ def validate_and_calculate(data):
     for i, original in enumerate(items, 1):
         item = dict(original)
         from Quotation_KEKOREA.agent.samples import is_manual_sample
+        from Quotation_KEKOREA.agent.ci_import import pi_source_zero_price
         sample = is_manual_sample(data, item)
         row_issue_start = len(issues)
         row_block_start = len(blocking)
@@ -170,7 +171,7 @@ def validate_and_calculate(data):
         quantity_keys = ("shipped_quantity", "quantity", "paid_quantity") if doc_type == "PL" else ("paid_quantity", "quantity")
         quantity_value = next((item.get(key) for key in quantity_keys if item.get(key) not in (None, "")), None)
         quantity = _decimal(quantity_value, f"paid quantity for item {i}", issues)
-        base = Decimal("0") if doc_type == "PL" else _decimal(item.get("unit_price"), f"unit price for item {i}", issues, allow_zero=sample)
+        base = Decimal("0") if doc_type == "PL" else _decimal(item.get("unit_price"), f"unit price for item {i}", issues, allow_zero=sample or pi_source_zero_price(data, item))
         discount = Decimal("0") if doc_type == "PL" else _decimal(item.get("discount_percent", 0), f"discount percent for item {i}", issues)
         if doc_type in {"PI", "CI"} and data.get("product_family") == "cosmetics" and item.get("discount_percent") is None:
             block(f"Confirm discount percentage, including whether no discount applies, for {name or f'item {i}'}")
