@@ -22,6 +22,17 @@ class FakeResponse:
 
 
 class ExtractorTests(unittest.TestCase):
+    def test_request_keeps_visible_product_codes_separate_from_product_names(self):
+        captured = {}
+        def opener(request, timeout):
+            captured['body'] = json.loads(request.data)
+            return FakeResponse({'output': [{'content': [{'type': 'output_text', 'text': '{"items":[]}'}]}]})
+        extractor.extract_trade_data('Create a PO from the attached table',
+                                     env={'OPENAI_API_KEY': 'test'}, opener=opener)
+        schema = captured['body']['text']['format']['schema']['properties']['items']['items']
+        self.assertIn('product_code', schema['properties'])
+        self.assertIn('product_code', schema['required'])
+
     def test_packing_image_request_includes_packing_fields_and_source_context(self):
         captured = {}
         def opener(request, timeout):

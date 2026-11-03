@@ -8,6 +8,7 @@ import json as json_module
 import urllib.error
 import urllib.parse
 import urllib.request
+from Quotation_KEKOREA.agent.product_matching import match_product
 
 
 def load_local_seed(seed_path=None):
@@ -91,18 +92,10 @@ def load_supabase_catalog(env, *, opener=urllib.request.urlopen, timeout=20):
             "purchase_prices": purchase_prices, "buyer_prices": buyer_prices}
 
 
-def match_eclado_product(name, capacity=None, products=None):
-    """Match exact English item ignoring whitespace and exact capacity ignoring whitespace."""
+def match_eclado_product(name, capacity=None, products=None, product_code=None):
+    """Resolve a complete catalog name, verified SKU and equivalent size notation."""
     products = products if products is not None else load_local_catalog()
-    key = re.sub(r"\s+", "", str(name or "")).casefold()
-    capacity_key = re.sub(r"\s+", "", str(capacity or "")).casefold() or None
-    exact = [p for p in products if p.get("brand") == "ECLADO" and
-             re.sub(r"\s+", "", str(p.get("item_name") or "")).casefold() == key]
-    if capacity_key is not None:
-        exact = [p for p in exact if re.sub(r"\s+", "", str(p.get("capacity") or "")).casefold() == capacity_key]
-    if len(exact) != 1:
-        return {"status": "not_found" if not exact else "ambiguous", "matches": exact}
-    return {"status": "matched", "product": exact[0]}
+    return match_product(name, capacity, products, product_code)
 
 
 def resolve_price(product_id, prices=None, role="sale", currency=None, party_key=None):
@@ -140,7 +133,8 @@ def apply_verified_eclado_prices(draft, seed=None):
     # shows products and sizes but no explicit category. An exact match of every
     # line against the ECLADO product master is stronger evidence and lets the
     # existing role/currency-specific price lookup proceed for both PI and PO.
-    exact_matches = [match_eclado_product(item.get("product_name"), item.get("capacity"), products)
+    exact_matches = [match_eclado_product(item.get("product_name"), item.get("capacity"), products,
+                                         item.get("product_code"))
                      for item in items]
     price_table = "purchase_prices" if draft.get("document_type") == "PO" else "buyer_prices"
     default_currency = "KRW" if draft.get("document_type") == "PO" else None
@@ -161,6 +155,7 @@ def apply_verified_eclado_prices(draft, seed=None):
             draft["product_family"] = "cosmetics"
     supplier_confirmation = "The seller was not supplied. Use the ECLADO purchase price catalog for this PO? Confirm the supplier and legal details."
     pending = draft.setdefault("pending_confirmations", [])
+    pending[:] = [entry for entry in pending if not str(entry).startswith("Confirm product annotation for ")]
     if draft.get("document_type") == "PO" and not counterparty_name and items:
         # A separate unresolved promotion must not disable verified prices for
         # every other row. These remain candidates requiring supplier confirmation;
@@ -174,17 +169,22 @@ def apply_verified_eclado_prices(draft, seed=None):
     if not party_matches and draft.get("_catalog_currency_inferred"):
         draft["currency"] = None
         draft.pop("_catalog_currency_inferred", None)
-    for item in items:
+    for item, match in zip(items, exact_matches):
         if draft.get("product_family") != "cosmetics":
             item["master_price"] = False
             continue
-        match = match_eclado_product(item.get("product_name"), item.get("capacity"), products)
         if match["status"] != "matched":
+            if item.get("master_price") is True:
+                item["unit_price"] = None
+                item["price_source"] = None
+                item.pop("product_id", None)
             item["master_price"] = False
             draft.setdefault("missing_fields", []).append(
                 f"Exact ECLADO product match for {item.get('product_name') or 'item'}; capacity/SKU may be needed")
             continue
         product = match["product"]
+        if match.get("confirmation") and match["confirmation"] not in pending:
+            pending.append(match["confirmation"])
         if not party_matches:
             if item.get("master_price") is True:
                 item["unit_price"] = None

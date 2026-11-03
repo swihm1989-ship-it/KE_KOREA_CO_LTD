@@ -2,6 +2,7 @@
 import json
 import hashlib
 import tempfile
+from uuid import uuid4
 from pathlib import Path
 import sys
 from decimal import Decimal, InvalidOperation
@@ -12,6 +13,7 @@ import streamlit as st
 ROOT = Path(__file__).resolve().parent
 REPOSITORY_ROOT = ROOT.parent
 sys.path.insert(0, str(REPOSITORY_ROOT))
+from Quotation_KEKOREA.agent.workflow_state import DocumentWorkspaces
 from Quotation_KEKOREA.agent.extractor import extract_trade_data, load_env, verify_item_quotes
 from Quotation_KEKOREA.agent.branding import resolve_company_seal
 from Quotation_KEKOREA.agent.seal_storage import download_company_seal
@@ -260,6 +262,73 @@ def _keep_delivery_note_in_terms(draft, auto_remark):
         draft["incoterms"] = f"{terms}; {note}" if terms else note
 
 
+def _extract_draft(prompt, title, expected_type, create_cipl_bundle, image_inputs, runtime_env, catalog):
+    """Run the existing extraction/verification pipeline on a worker-owned snapshot."""
+    draft = extract_trade_data(prompt or f"Use the attached order image as source for a {title}.", images=image_inputs, env=runtime_env,
+                               requested_document_type=expected_type, packing_source=expected_type == "PL" or create_cipl_bundle)
+    draft = _normalize_quantity_aliases(draft, prompt)
+    draft = _normalize_currency_alias(draft, prompt)
+    # The selected sidebar workflow is authoritative, even if the order image mentions another form.
+    draft["document_type"] = expected_type
+    draft = verify_item_quotes(draft, prompt, image_context=bool(image_inputs))
+    draft["source_image_attached"] = bool(image_inputs)
+    draft["issue_date"] = current_issue_date()
+    ship_to_source = draft.pop("ship_to_source", None)
+    if not _has_explicit_ship_to(prompt) and not (image_inputs and _has_explicit_ship_to(ship_to_source)):
+        draft["ship_to"] = None
+    elif re.fullmatch(r"\s*(?:N/?A|NONE|NOT\s+PROVIDED|TO\s+CONFIRM|TBC|TBD|UNKNOWN)\s*[.!]?\s*", str(draft.get("ship_to") or ""), re.IGNORECASE):
+        draft["ship_to"] = None
+    draft["missing_fields"] = [field for field in draft.get("missing_fields", [])
+                               if not re.search(r"issue\s+date|date\s+of\s+issue", str(field), re.IGNORECASE)]
+    auto_remark = draft.get("remarks")
+    _keep_delivery_note_in_terms(draft, auto_remark)
+    draft["remarks"] = _explicit_remark(prompt)
+    draft["conflicts"] = [issue for issue in draft.get("conflicts", [])
+                          if not issue.lower().startswith("remarks was not found verbatim")]
+    _synchronize_extracted_quantities(draft)
+    _apply_ke_korea_company_defaults(draft, expected_type)
+    if expected_type != "PL":
+        apply_verified_eclado_prices(draft, catalog)
+    discount_rate, discount_issue = _discount_instruction(prompt)
+    if discount_rate is not None:
+        for item in draft.get("items", []):
+            item["discount_percent"] = discount_rate
+        draft["conflicts"] = [issue for issue in draft.get("conflicts", [])
+                              if "discount percent was not found in its source quote" not in issue.lower()]
+    else:
+        for item in draft.get("items", []):
+            item["discount_percent"] = None
+        draft.setdefault("conflicts", []).append(discount_issue)
+    return draft
+
+
+def _render_draft(result, output_root, bank_details, logo_path, local_seal_path, seal_bytes, create_cipl_bundle):
+    """Keep existing render rules; each background job owns its output directory."""
+    output_dir = Path(output_root) / uuid4().hex
+    seal_path = local_seal_path
+    output_dir.mkdir(parents=True, exist_ok=True)
+    if seal_bytes is not None:
+        with tempfile.TemporaryDirectory(dir=output_dir) as temp_dir:
+            seal_path = Path(temp_dir) / "company_seal.png"
+            seal_path.write_bytes(seal_bytes)
+            outputs = render_files(result, output_dir, bank_details=bank_details,
+                                   logo_path=logo_path, seal_path=seal_path)
+            if create_cipl_bundle:
+                packing_result = validate_and_calculate({**result, "document_type": "PL"})
+                outputs.update({f"packing_{k}": v for k, v in render_files(
+                    packing_result, output_dir, bank_details=bank_details,
+                    logo_path=logo_path, seal_path=seal_path).items()})
+    else:
+        outputs = render_files(result, output_dir, bank_details=bank_details,
+                               logo_path=logo_path, seal_path=seal_path)
+        if create_cipl_bundle:
+            packing_result = validate_and_calculate({**result, "document_type": "PL"})
+            outputs.update({f"packing_{k}": v for k, v in render_files(
+                packing_result, output_dir, bank_details=bank_details,
+                logo_path=logo_path, seal_path=seal_path).items()})
+    return outputs
+
+
 st.set_page_config(page_title="CONTRACT TEMPLATE MAKER | KE KOREA", page_icon="📄", layout="wide")
 st.markdown("""
 <style>
@@ -292,6 +361,29 @@ with st.sidebar:
     page = st.radio("문서 종류", pages, label_visibility="collapsed", key="selected_document_page")
     st.markdown("---")
     st.caption("초안은 검토 후 사용하세요. 자동 발행이나 전송은 하지 않습니다.")
+
+work = st.session_state.setdefault("_document_workspaces", DocumentWorkspaces())
+work.activate(st.session_state, page)
+work.collect(st.session_state)
+
+
+@st.fragment(run_every=1 if work.jobs else None)
+def _show_background_jobs():
+    # Only the UI thread applies results, before widgets are instantiated.
+    if any(job.future.done() for job in work.jobs.values()):
+        st.rerun()
+    with st.sidebar:
+        for (job_page, kind), job in work.jobs.items():
+            action = "자료 추출" if kind == "extract" else "서류 생성"
+            st.caption(f"⏳ {job_page}: {action} 진행 중")
+        for saved_page, values in work.pages.items():
+            if saved_page != page and values.get("trade_draft"):
+                st.caption(f"✓ {saved_page}: 초안 보관 중")
+    if page in work.errors:
+        st.error(work.errors[page])
+
+
+_show_background_jobs()
 
 page_config = {
     "PI 만들기": ("PI", "Proforma Invoice", "바이어에게 제공할 견적·선결제 안내용 Proforma Invoice 초안을 만듭니다."),
@@ -360,17 +452,29 @@ with st.expander("What this menu creates"):
     st.write("Order images may be PNG, JPG, JPEG, or WEBP. Image-derived information needs human review.")
 
 st.markdown('<div class="ke-section">1 · 주문 정보</div>', unsafe_allow_html=True)
-prompt = st.text_area("거래 조건을 입력하세요", height=180,
+prompt = st.text_area("거래 조건을 입력하세요", height=180, key=f"order_prompt_{page}",
     placeholder=f"Example: Create a {title} for [company name, address, contact, phone, email]. List products, exact quantities, currency and prices, Incoterms and named place, payment or shipment terms. Optional: REMARK: [text]. If omitted, the document shows N/A.")
-uploaded_images = st.file_uploader("공급처 패킹리스트 이미지 첨부" if expected_type == "PL" or create_cipl_bundle else "바이어 주문 이미지 첨부", type=["png", "jpg", "jpeg", "webp"], accept_multiple_files=True,
+def _remember_order_uploads():
+    work.remember_uploads(page, st.session_state.get(f"order_upload_{page}") or [])
+
+
+current_uploads = st.file_uploader("공급처 패킹리스트 이미지 첨부" if expected_type == "PL" or create_cipl_bundle else "바이어 주문 이미지 첨부", type=["png", "jpg", "jpeg", "webp"], accept_multiple_files=True,
+    key=f"order_upload_{page}", on_change=_remember_order_uploads,
     help="이미지 최대 5개, 파일당 10 MB, 총 20 MB까지 첨부할 수 있습니다.")
+if current_uploads:
+    work.remember_uploads(page, current_uploads)
+uploaded_images = work.uploads.get(page, [])
+if uploaded_images and st.button("첨부 이미지 모두 지우기", key=f"clear_uploads_{page}"):
+    work.remember_uploads(page, [])
+    st.session_state.pop(f"order_upload_{page}", None)
+    st.rerun()
 st.caption("For ECLADO, the entered discount is applied to the Supabase list price. If no discount is stated, the full list price (0% discount) is used. Enter one discount rate per invoice.")
 st.caption("Common labels such as Qty/Q'ty/Volume, Unit Price/Rate, Shipping Terms/Delivery Terms, and Payment Conditions are interpreted by meaning. Volume and package-count labels may require your confirmation.")
 if uploaded_images:
     st.caption(f"첨부 이미지 {len(uploaded_images)}개 · Extract를 누를 때 OpenAI로 전송됩니다.")
     st.image([upload.getvalue() for upload in uploaded_images], caption=[upload.name for upload in uploaded_images], use_container_width=True)
 
-extract_clicked = st.button("정보 추출 및 초안 검토", type="primary", disabled=not prompt.strip() and not uploaded_images)
+extract_clicked = st.button("정보 추출 및 초안 검토", type="primary", disabled=(not prompt.strip() and not uploaded_images) or work.busy(page, "extract") or work.busy(page, "render"))
 if extract_clicked:
     try:
         requested_type = _requested_document_type(prompt)
@@ -380,9 +484,6 @@ if extract_clicked:
                 f"Your prompt requests {requested_type}, but the sidebar is set to {selected_type}. "
                 "Choose the matching document menu, then extract again."
             )
-        for state_key in list(st.session_state):
-            if str(state_key).startswith((f"confirm_source_alias_{page}_", f"packing_{page}_", f"po_seller_name_{page}", f"po_seller_address_{page}", f"review_missing_{page}_", f"review_values_{page}", f"advanced_json_{page}", f"advanced_source_{page}")):
-                del st.session_state[state_key]
         image_inputs = []
         if len(uploaded_images or []) > 5:
             raise ValueError("Attach no more than 5 order images at a time")
@@ -395,47 +496,9 @@ if extract_clicked:
             image_inputs.append({"name": upload.name, "mime_type": upload.type, "data": image_data})
         if total_image_bytes > 20 * 1024 * 1024:
             raise ValueError("Order images exceed the 20 MB combined limit")
-        with st.spinner("Extracting candidate fields. No document is issued."):
-            draft = extract_trade_data(prompt or f"Use the attached order image as source for a {title}.", images=image_inputs, env=runtime_env,
-                                       requested_document_type=expected_type, packing_source=expected_type == "PL" or create_cipl_bundle)
-            draft = _normalize_quantity_aliases(draft, prompt)
-            draft = _normalize_currency_alias(draft, prompt)
-            # The selected sidebar workflow is authoritative, even if the order image mentions another form.
-            draft["document_type"] = expected_type
-            draft = verify_item_quotes(draft, prompt, image_context=bool(image_inputs))
-            draft["source_image_attached"] = bool(image_inputs)
-            draft["issue_date"] = current_issue_date()
-            ship_to_source = draft.pop("ship_to_source", None)
-            if not _has_explicit_ship_to(prompt) and not (image_inputs and _has_explicit_ship_to(ship_to_source)):
-                draft["ship_to"] = None
-            elif re.fullmatch(r"\s*(?:N/?A|NONE|NOT\s+PROVIDED|TO\s+CONFIRM|TBC|TBD|UNKNOWN)\s*[.!]?\s*", str(draft.get("ship_to") or ""), re.IGNORECASE):
-                draft["ship_to"] = None
-            draft["missing_fields"] = [field for field in draft.get("missing_fields", [])
-                                       if not re.search(r"issue\s+date|date\s+of\s+issue", str(field), re.IGNORECASE)]
-            auto_remark = draft.get("remarks")
-            _keep_delivery_note_in_terms(draft, auto_remark)
-            draft["remarks"] = _explicit_remark(prompt)
-            draft["conflicts"] = [issue for issue in draft.get("conflicts", [])
-                                  if not issue.lower().startswith("remarks was not found verbatim")]
-            _synchronize_extracted_quantities(draft)
-            _apply_ke_korea_company_defaults(draft, expected_type)
-            if expected_type != "PL":
-                apply_verified_eclado_prices(draft, active_catalog)
-            discount_rate, discount_issue = _discount_instruction(prompt)
-            if discount_rate is not None:
-                for item in draft.get("items", []):
-                    item["discount_percent"] = discount_rate
-                draft["conflicts"] = [issue for issue in draft.get("conflicts", [])
-                                      if "discount percent was not found in its source quote" not in issue.lower()]
-            else:
-                for item in draft.get("items", []):
-                    item["discount_percent"] = None
-                draft.setdefault("conflicts", []).append(discount_issue)
-            st.session_state["trade_draft"] = draft
-            st.session_state["trade_draft_page"] = page
-            st.session_state["rendered_paths"] = {}
-            st.session_state.pop("download_format", None)
-            st.session_state.pop("rendered_json", None)
+        work.start(page, "extract", _extract_draft, prompt, title, expected_type,
+                   create_cipl_bundle, image_inputs, runtime_env, active_catalog)
+        st.rerun()
     except Exception as exc:
         st.error(str(exc))
 
@@ -481,8 +544,10 @@ if raw:
                 packing_rows.append(row)
             if not packing_rows and expected_type == "PL":
                 packing_rows = [{"Row": "", **{label: "" for _, label in packing_fields}}]
+            packing_rows = work.editor_input(page, packing_rows)
             edited_rows = st.data_editor(packing_rows, hide_index=True, num_rows="fixed" if create_cipl_bundle else "dynamic",
                                          disabled=["Row"], use_container_width=True, key=f"packing_{page}_rows")
+            work.editor_rows[page] = json.loads(json.dumps(edited_rows))
             updated_items = []
             for row in edited_rows:
                 row_id = str(row.get("Row") or "")
@@ -735,6 +800,7 @@ if raw:
                     corrected.pop("pending_confirmations", None)
                     apply_verified_eclado_prices(corrected, active_catalog)
                     st.session_state["trade_draft"] = corrected
+                    work.reset_editor(page)
                     for state_key in list(st.session_state):
                         if str(state_key).startswith((f"review_missing_{page}_", f"review_values_{page}", f"packing_{page}_", f"po_seller_name_{page}", f"po_seller_address_{page}")):
                             del st.session_state[state_key]
@@ -769,37 +835,17 @@ if raw:
             st.error("Document download is disabled: " + seal_blockers[0] + ".")
             st.caption("Streamlit Cloud uses the private Supabase seal file and the configured server-side Supabase key.")
         make_pdf = pdf_col.button("Create PDF", type="primary", use_container_width=True,
-                                  disabled=export_blocked)
+                                  disabled=export_blocked or work.busy(page, "extract") or work.busy(page, "render"))
         make_excel = excel_col.button("Create Excel", use_container_width=True,
-                                     disabled=export_blocked)
+                                     disabled=export_blocked or work.busy(page, "extract") or work.busy(page, "render"))
         if make_pdf or make_excel:
-            logo_path = ROOT / "assets" / "company_logo.png"
-            seal_path = local_seal_path
-            try:
-                (ROOT / "outputs").mkdir(parents=True, exist_ok=True)
-                if seal_bytes is not None:
-                    with tempfile.TemporaryDirectory(dir=ROOT / "outputs") as temp_dir:
-                        seal_path = Path(temp_dir) / "company_seal.png"
-                        seal_path.write_bytes(seal_bytes)
-                        outputs = render_files(result, ROOT / "outputs", bank_details=bank_details,
-                                               logo_path=logo_path, seal_path=seal_path)
-                        if create_cipl_bundle:
-                            packing_result = validate_and_calculate({**result, "document_type": "PL"})
-                            outputs.update({f"packing_{k}": v for k, v in render_files(
-                                packing_result, ROOT / "outputs", bank_details=bank_details,
-                                logo_path=logo_path, seal_path=seal_path).items()})
-                else:
-                    outputs = render_files(result, ROOT / "outputs", bank_details=bank_details,
-                                           logo_path=logo_path, seal_path=seal_path)
-                    if create_cipl_bundle:
-                        packing_result = validate_and_calculate({**result, "document_type": "PL"})
-                        outputs.update({f"packing_{k}": v for k, v in render_files(
-                            packing_result, ROOT / "outputs", bank_details=bank_details,
-                            logo_path=logo_path, seal_path=seal_path).items()})
-                st.session_state["rendered_paths"] = {key: str(value) for key, value in outputs.items()}
-                st.session_state["download_format"] = "pdf" if make_pdf else "xlsx"
-            except (ValueError, OSError, TypeError, KeyError) as exc:
-                st.error(f"Could not create review files: {exc}")
+            work.save(st.session_state)
+            work.start(page, "render", _render_draft, result,
+                       ROOT / "outputs" / work.session_id, bank_details,
+                       ROOT / "assets" / "company_logo.png", local_seal_path,
+                       seal_bytes, create_cipl_bundle, context=render_context,
+                       file_format="pdf" if make_pdf else "xlsx")
+            st.rerun()
 
         selected_format = st.session_state.get("download_format")
         for kind, file_path in st.session_state.get("rendered_paths", {}).items():
@@ -811,3 +857,6 @@ if raw:
                                    file_name=path.name, key=f"download_{kind}_{path.name}")
     except (ValueError, TypeError, KeyError, json.JSONDecodeError, InvalidOperation) as exc:
         st.error(f"Could not build the order summary: {exc}")
+
+# Keep non-widget snapshots before Streamlit cleans up hidden menu widgets.
+work.save(st.session_state)
