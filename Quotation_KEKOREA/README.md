@@ -24,6 +24,7 @@
 | PO와 판매 가격 구분 | ECLADO PO는 공급처와 정확한 제품·용량·통화가 맞는 매입가격을 사용한다. Dear Glow PI/CI 판매가격을 PO에 사용하지 않는다. 공급처나 통화를 임의로 바꾸지 않는다. | `tests/test_supabase_catalog.py`, `tests/test_packing_workflow.py`, `tests/test_review_fields.py` |
 | ECLADO 공급처 별칭 | `eclado`, `ECLADO CO. LTD`, `에끌라도`, `에끌라두`를 대소문자·공백·구두점 차이 없이 같은 공급처로 인식한다. 원래 법인명 필드는 그대로 보존한다. 화면에 인식 여부와 카탈로그 매입가격 적용 상품 수를 표시한다. | `tests/test_supabase_catalog.py`, `tests/test_review_ui.py` |
 | 상품명 부가 표기 인식 (로컬 구현) | 완전한 카탈로그 상품명에 붙은 괄호·제품코드·라벨·유니코드 서식을 처리하고 코드·용량을 함께 검증한다. 추가 설명은 가격 후보와 상품 확인으로 처리하며, 코드/용량/제품 구분 정보가 충돌하면 자동 가격을 적용하지 않는다. | `tests/test_product_matching.py`, `tests/test_product_matching_ui.py`, `tests/test_extractor.py`; 배포 검증 전 |
+| 거래처 정보 DB (데이터 저장 완료, 자동 반영 코드는 로컬) | Supabase 비공개 `kekorea_counterparties`에 등록된 거래처의 법인명·주소·담당자·명시적 기본 배송지를 누락 필드에 적용한다. 주문에 명시한 값과 N/A가 우선한다. | `tests/test_counterparties.py`, `tests/test_counterparties_api.py`, `tests/test_counterparties_ui.py` |
 | PL/CIPL 합계 수정 승인 | 원본 합계와 항목별 계산 합계를 비교표로 보여준다. `합계를 수정할까요?`를 승인하면 원본은 보존하면서 계산된 합계를 PDF/Excel에 적용한다. PCS/KG 등 다른 단위는 따로 유지한다. 품목/원본 합계 변경 시 승인을 취소한다. 잘못된 행 값·단위 충돌·컨테이너 수는 승인으로 우회하지 못한다. | `tests/test_packing_approval.py`, `tests/test_review_ui.py` |
 | 통화와 반올림 | Decimal 계산을 유지한다. 화장품 KRW는 원 단위, USD는 소수점 두 자리로 단가를 반올림한 뒤 행 금액을 계산한다. 단위가 다른 수량은 별도로 표시한다. | `tests/test_trade_documents.py`, `tests/test_packing_workflow.py` |
 
@@ -94,6 +95,20 @@ git diff --check
 배포 소스 정보 조회에서는 저장소 `swihm1989-ship-it/ke_korea_co_ltd`, 브랜치 `main`, 진입점 `Quotation_KEKOREA/app.py`를 확인했다. 같은 시점 GitHub main의 `pricing.py`에는 새 `match_product` 호출이 있고 `extractor.py`에는 `product_code` 스키마가 있었다. 즉 저장소의 수정과 실제 실행 중인 앱 사이의 버전 불일치가 확인됐다. 정확히 어떤 배포/프로세스 캐시 단계가 갱신되지 않았는지는 아직 확정하지 않았다. 브라우저 연결 호스트가 없어 관리자 재부팅은 수행하지 못했다. 앱 Reboot/재배포 후 동일한 괄호 코드 검증이 통과하기 전까지 배포 문제가 해결됐다고 기록하지 않는다. 이 증상을 새 상품명 오류로 단정하고 매칭/가격 정책을 추가 완화하지 않는다.
 
 재부팅 후 실제 배포 검증: 사용자가 Reboot 완료를 알린 뒤 같은 독립 가상 PI 검증을 재실행했다. 새로 추출된 한 행에 `product_code` 필드가 포함됐고 USD 판매가격이 연결됐다. 이어 그 행을 `Cell Memory Cream (E-165)`/`50g`로 정정하고 단가를 비운 뒤 적용해도 `master_price=true`와 USD 판매가격 연결이 유지되는 것을 확인했다. 따라서 재부팅 전 실패했던 괄호 코드의 PI 가격 연결은 현재 배포 앱에서 정상화됐다. 제공된 24개 상품 전체는 로컬에서 검증한 범위이며, 재부팅 후 실제 배포 검증은 가상 한 행이다. 실제 주문 이미지 재전송, PDF 발행, 주문/발송은 하지 않았다. 첫 재검증은 검증 스크립트의 대기 시간이 짧아 결과를 받기 전에 종료됐으므로 이를 제품 오류로 집계하지 않았다. 충분한 대기 후 검증 스크립트가 성공 종료했다.
+
+### 2026-11-03 비공개 거래처 디렉터리
+
+사용자가 제공한 Dear Glow 정보를 `public.kekorea_counterparties`에 저장했다. `DEAR_GLOW` 키로 법인명과 `Dear Glow`/`Dearglow` 별칭, 담당자, 회사 주소, 별도로 명시한 배송지와 배송지 전화 N/A를 보관한다. 회사 전화·이메일은 제공되지 않았으므로 추측하거나 N/A로 바꾸지 않는다. 개인 연락처와 배송지 원문은 Git/README/테스트에 복사하지 않는다. 원본은 Git에서 제외된 `private/counterparties/companies.sqlite3`에도 준비해 두었다.
+
+초기 테이블 생성은 `supabase/migrations/202611030001_counterparties.sql`을 사용자가 SQL Editor에서 실행했다. 이 대화의 Supabase SQL 도구는 노출되지 않았으므로 SQL 실행을 에이전트가 했다고 기록하지 않는다. 테이블에 RLS를 활성화하고 PUBLIC/anon/authenticated 접근을 회수했으며, 서버 역할에 SELECT/INSERT/UPDATE만 부여한다. 저장 명령은 `python Quotation_KEKOREA/scripts/save_company_profile.py --company-key DEAR_GLOW`다. 기존 회사 행의 미제공 필드는 유지하며 다른 회사 행은 수정하지 않는다. 저장 응답과 독립 GET으로 내용 일치를 검증했고, 공개 키의 조회는 HTTP 401로 거부됐다.
+
+`agent/counterparties.py`는 법인명/등록 별칭을 식별하여 PI/CI/PL/CIPL에서는 구매자, PO에서는 공급처 정보를 채운다. 대상 이름이 비어 있을 때만 명령문의 유일한 등록 거래처명을 보조 근거로 사용한다. 다른 거래처가 명시되거나 별칭이 중복되면 임의로 적용하지 않는다. 등록 주소를 배송지로 추측하지 않으며, 명시적으로 등록한 기본 배송지만 판매 문서에 사용한다. PO의 배송지는 공급처 배송지로 대체하지 않는다. 기존 KE KOREA 정보, 가격·통화·상품·수량·포장 검증은 유지한다.
+
+DB 데이터는 추출 후 서버에서 적용하며 저장된 연락처를 AI 프롬프트에 추가해 보내지 않는다. 주문에 명시된 주소/담당자/배송지와 N/A는 DB 기본값보다 우선한다. DB가 채운 필드는 출처를 추적하여 거래처 변경 시 다른 회사 자료가 남지 않게 한다. DB 조회 장애가 나더라도 이미 검토 중인 동일 거래처의 저장 정보와 사용자가 직접 입력한 법인명은 지우지 않는다. 회사 레코드는 60초 캐시한다. 테이블/연결 장애 시에는 경고하고 직접 입력 경로를 유지한다.
+
+검증: 가상 회사 정보만 사용하는 **134개 전체 테스트가 통과했다(화면 테스트 포함, 생략 없음)**. DB 저장/재조회, 별칭 명령 자동 입력, PI/PO/CIPL 검토 화면, 명시 값 우선, 거래처 변경/중복/미일치, 회사 주소와 배송지 분리, DB 장애 시 문서 보존, 기존 기능을 검증한다. 독립 검토에서 지적된 DB 장애 시 법인명 소실은 실패 테스트로 재현 후 수정했고, Windows SQLite 연결을 명시적으로 닫는 것도 검증했다. `git diff --check`를 함께 실행한다.
+
+배포 상태: 거래처 **데이터는 실제 Supabase에 저장 완료**했지만 자동 입력 코드의 커밋/배포 및 실제 배포 앱 자동 입력 검증은 아직 하지 않았다. DB의 비공개 권한과 앱 화면의 접근 제어는 별개다. 현재 앱은 로그인 없이 접속되므로, 연락처/배송지 자동 조회 기능을 배포할 때에는 앱 이용 대상과 접근 제한을 먼저 확인해야 한다. 저장 성공만으로 배포 앱의 자동 입력이 동작한다고 안내하지 않는다.
 
 ### PO에 `Cannot calculate`가 표시될 때
 

@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parent
 REPOSITORY_ROOT = ROOT.parent
 sys.path.insert(0, str(REPOSITORY_ROOT))
 from Quotation_KEKOREA.agent.workflow_state import DocumentWorkspaces
+from Quotation_KEKOREA.agent.counterparties import load_company_profiles, apply_company_profiles
 from Quotation_KEKOREA.agent.extractor import extract_trade_data, load_env, verify_item_quotes
 from Quotation_KEKOREA.agent.branding import resolve_company_seal
 from Quotation_KEKOREA.agent.seal_storage import download_company_seal
@@ -262,7 +263,7 @@ def _keep_delivery_note_in_terms(draft, auto_remark):
         draft["incoterms"] = f"{terms}; {note}" if terms else note
 
 
-def _extract_draft(prompt, title, expected_type, create_cipl_bundle, image_inputs, runtime_env, catalog):
+def _extract_draft(prompt, title, expected_type, create_cipl_bundle, image_inputs, runtime_env, catalog, company_profiles=()):
     """Run the existing extraction/verification pipeline on a worker-owned snapshot."""
     draft = extract_trade_data(prompt or f"Use the attached order image as source for a {title}.", images=image_inputs, env=runtime_env,
                                requested_document_type=expected_type, packing_source=expected_type == "PL" or create_cipl_bundle)
@@ -287,6 +288,7 @@ def _extract_draft(prompt, title, expected_type, create_cipl_bundle, image_input
                           if not issue.lower().startswith("remarks was not found verbatim")]
     _synchronize_extracted_quantities(draft)
     _apply_ke_korea_company_defaults(draft, expected_type)
+    apply_company_profiles(draft, company_profiles, prompt=prompt)
     if expected_type != "PL":
         apply_verified_eclado_prices(draft, catalog)
     discount_rate, discount_issue = _discount_instruction(prompt)
@@ -427,6 +429,19 @@ def _cached_supabase_catalog(project_url, _secret_key):
 def _cached_supabase_seal(project_url, _secret_key, expected_sha256):
     return download_company_seal({"SUPABASE_URL": project_url, "SUPABASE_SECRET_KEY": _secret_key}, expected_sha256)
 
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _cached_company_profiles(project_url, _secret_key):
+    return load_company_profiles({"SUPABASE_URL": project_url, "SUPABASE_SECRET_KEY": _secret_key})
+
+
+active_company_profiles = []
+if runtime_env.get("SUPABASE_URL") and runtime_env.get("SUPABASE_SECRET_KEY"):
+    try:
+        active_company_profiles = _cached_company_profiles(runtime_env["SUPABASE_URL"], runtime_env["SUPABASE_SECRET_KEY"])
+    except (ValueError, RuntimeError) as exc:
+        st.warning("거래처 DB 자동 입력을 사용할 수 없습니다. 회사 정보를 직접 입력해 주세요. " + str(exc))
+
 active_catalog = {"products": [], "purchase_prices": [], "buyer_prices": []}
 if runtime_env.get("SUPABASE_URL") and runtime_env.get("SUPABASE_SECRET_KEY"):
     try:
@@ -497,7 +512,7 @@ if extract_clicked:
         if total_image_bytes > 20 * 1024 * 1024:
             raise ValueError("Order images exceed the 20 MB combined limit")
         work.start(page, "extract", _extract_draft, prompt, title, expected_type,
-                   create_cipl_bundle, image_inputs, runtime_env, active_catalog)
+                   create_cipl_bundle, image_inputs, runtime_env, active_catalog, active_company_profiles)
         st.rerun()
     except Exception as exc:
         st.error(str(exc))
@@ -574,6 +589,7 @@ if raw:
                 data[field] = column.text_input(label, value="" if data.get(field) is None else str(data[field]), key=f"packing_{page}_{field}") or None
             data.pop('_packing_original_totals', None)
             data = normalize_packing_inputs(data)
+        apply_company_profiles(data, active_company_profiles)
         if expected_type != "PL":
             apply_verified_eclado_prices(data, active_catalog)
         review_fields = missing_review_fields(data, packing=create_cipl_bundle)
@@ -597,6 +613,7 @@ if raw:
                     help="Enter the confirmed value in English." if field.required else "Enter the value, or N/A if not applicable.")
                 review_values[widget_key] = value
                 apply_review_value(data, field, value)
+            apply_company_profiles(data, active_company_profiles)
             if expected_type != "PL":
                 apply_verified_eclado_prices(data, active_catalog)
         pending_review_fields = missing_review_fields(data, packing=create_cipl_bundle)
@@ -798,6 +815,7 @@ if raw:
                     corrected = json.loads(edited_json)
                     corrected["document_type"] = expected_type
                     corrected.pop("pending_confirmations", None)
+                    apply_company_profiles(corrected, active_company_profiles, prompt=prompt)
                     apply_verified_eclado_prices(corrected, active_catalog)
                     st.session_state["trade_draft"] = corrected
                     work.reset_editor(page)
