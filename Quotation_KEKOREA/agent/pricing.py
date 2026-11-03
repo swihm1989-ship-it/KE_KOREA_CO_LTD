@@ -148,10 +148,10 @@ def apply_verified_eclado_prices(draft, seed=None):
                      else "DEARGLOW" in counterparty)
     if items and draft.get("product_family") != "cosmetics":
         all_matched = all(match["status"] == "matched" for match in exact_matches)
-        recognized_po = (draft.get("document_type") == "PO" and party_matches
-                         and draft.get("product_family") in (None, "", "other")
-                         and any(match["status"] == "matched" for match in exact_matches))
-        if all_matched or recognized_po:
+        recognized_order = (draft.get("document_type") in {"PO", "PI", "CI"} and party_matches
+                            and draft.get("product_family") in (None, "", "other")
+                            and any(match["status"] == "matched" for match in exact_matches))
+        if all_matched or recognized_order:
             draft["product_family"] = "cosmetics"
     supplier_confirmation = "The seller was not supplied. Use the ECLADO purchase price catalog for this PO? Confirm the supplier and legal details."
     pending = draft.setdefault("pending_confirmations", [])

@@ -7,7 +7,7 @@
 
 ## 현재 동작 및 변경 보호 기준 — 2026-11-02
 
-배포 앱: https://kekoreacoltdgit-69eu27cywmml3jfwtdsappb.streamlit.app/
+배포 앱: https://ke-korea.streamlit.app/ (사용자가 2026-11-03 확인한 현재 주소). 이전 `kekoreacoltdgit-69eu27cywmml3jfwtdsappb.streamlit.app` 주소는 접속 확인 시 404였다.
 
 배포 소스: GitHub `main`, 진입점 `Quotation_KEKOREA/app.py`
 
@@ -78,6 +78,22 @@ git diff --check
 검증: 제공된 최신 24개 행을 로컬 카탈로그로 재검사하여 **24/24 가격 연결과 KRW 적용**을 확인했다. 연락처·실제 주문 수량·비공개 단가를 테스트 코드에 복사하지 않았다. 전체 카탈로그 이름/용량의 재인식 결과는 표준 제품 131개 일치, 용량 없는 중복 후보 26개 모호 상태로 기존 구분을 보존했다. `tests/test_product_matching.py`는 정상 표기·코드/용량/세트 충돌·SPF/PA·코드 접두부·설명 확인·중복·원본 보존을 검증한다. 화면 테스트는 단가 입력 요구가 사라지고 상품 설명 확인만 남는지 확인한다. 실제 배포 반영과 원본 이미지의 OpenAI 재추출 검증은 아직 수행하지 않았다.
 
 최종 회귀 검증: `uv run --offline --with streamlit python -m unittest discover -s Quotation_KEKOREA/tests`로 **116개 테스트가 모두 통과했다(화면 테스트 포함, 생략 없음)**. 작업 폴더 uv 캐시와 테스트 임시 파일 권한을 허용한 실행을 사용했다. `git diff --check`도 통과했다. 독립 검토에서 확인한 긴 코드의 접두부 충돌, SPF/PA 기호 소실, 붙여 쓴 곱셈 용량, 설명이 붙은 불완전 복합 용량은 실패 테스트로 재현한 후 수정했다. 추가 설명 속 `mg`/`g`/`ml` 등 단위 충돌도 차단한다. 기존 Streamlit 위젯 API 경고는 남아 있다.
+
+### 2026-11-03 PI/CI 부분 상품 미일치 가격 조회 보완 (로컬 구현)
+
+상품명 부가 표기 인식은 PO/PI/CI가 같은 함수를 사용한다. 앞서 제공된 24개 상품 JSON을 PI로 바꾸고 구매자를 Dear Glow로 지정한 로컬 검증에서는 24/24 상품이 USD 판매가격에 연결되었다. 구매자가 비어 있거나 다른 구매자이면 Dear Glow 전용 판매가격을 자동 적용하지 않는다. 이 경우는 이미지 인식 실패와 구분한다.
+
+추가로 재현한 오류: 구매자가 Dear Glow로 확인되어도 제품 분류가 미확정/`other`이고 일부 행이 미일치하면, PO에만 있던 부분 인식 보완이 PI/CI에는 적용되지 않아 일치 상품의 가격까지 건너뛰었다. `agent/pricing.py`의 분류 보완 조건을 PI/CI의 확인된 거래처에도 적용한다. 일치한 행만 해당 구매자의 판매가격을 조회하고 미일치 행은 확인 대상으로 남긴다. 명시된 통화를 변경하거나 PO의 KRW 매입가격을 PI/CI에 대입하지 않는다.
+
+회귀 검증은 `tests/test_sale_partial_catalog.py`에서 PI/CI 분류 미확정+일부 미일치, 구매자 누락/타 구매자 보호, KRW 명시 시 매입가격 대체 금지, 실제 검토 화면의 미일치 행 단가 입력 요구를 다룬다. 이후 제공된 실제 PI JSON은 구매자 `dear glow`, 분류 `cosmetics`, 괄호 코드가 붙은 24개 상품이었다. 따라서 이 주문의 문제는 구매자 누락이나 `other` 분류가 아니다. 아래 배포 검증 결과를 따른다.
+
+최종 검증: 수정 전 PI/CI의 `other` 분류 재현 테스트가 실패했고, 수정 후 화면 테스트를 포함한 **120개 테스트가 모두 통과했다(생략 없음)**. 실행 명령은 `uv run --offline --with streamlit python -m unittest discover -s Quotation_KEKOREA/tests`이며 작업 폴더 캐시 및 테스트 임시 파일 권한을 허용했다. `git diff --check`도 통과했다. 기존 Streamlit API 경고는 유지된다.
+
+2026-11-03 실제 배포 재현: `https://ke-korea.streamlit.app/`의 독립 세션에 실제 사용자 주문 대신 가상의 Dear Glow PI 한 행을 사용했다. `Cell Memory Cream`, `50g`, 수량 1은 USD 판매가격에 연결됐다. 같은 초안의 이름을 `Cell Memory Cream (E-165)`로 정정하고 단가를 비운 뒤 적용하면 가격 연결이 실패했다. 새 추출 결과에도 최신 스키마의 `product_code` 필드가 없었다. 단가 원문과 연락처는 검증 로그에 출력하지 않았다. `tmp/verify_live_pi_matcher.py`가 이 검증을 재현한다.
+
+배포 소스 정보 조회에서는 저장소 `swihm1989-ship-it/ke_korea_co_ltd`, 브랜치 `main`, 진입점 `Quotation_KEKOREA/app.py`를 확인했다. 같은 시점 GitHub main의 `pricing.py`에는 새 `match_product` 호출이 있고 `extractor.py`에는 `product_code` 스키마가 있었다. 즉 저장소의 수정과 실제 실행 중인 앱 사이의 버전 불일치가 확인됐다. 정확히 어떤 배포/프로세스 캐시 단계가 갱신되지 않았는지는 아직 확정하지 않았다. 브라우저 연결 호스트가 없어 관리자 재부팅은 수행하지 못했다. 앱 Reboot/재배포 후 동일한 괄호 코드 검증이 통과하기 전까지 배포 문제가 해결됐다고 기록하지 않는다. 이 증상을 새 상품명 오류로 단정하고 매칭/가격 정책을 추가 완화하지 않는다.
+
+재부팅 후 실제 배포 검증: 사용자가 Reboot 완료를 알린 뒤 같은 독립 가상 PI 검증을 재실행했다. 새로 추출된 한 행에 `product_code` 필드가 포함됐고 USD 판매가격이 연결됐다. 이어 그 행을 `Cell Memory Cream (E-165)`/`50g`로 정정하고 단가를 비운 뒤 적용해도 `master_price=true`와 USD 판매가격 연결이 유지되는 것을 확인했다. 따라서 재부팅 전 실패했던 괄호 코드의 PI 가격 연결은 현재 배포 앱에서 정상화됐다. 제공된 24개 상품 전체는 로컬에서 검증한 범위이며, 재부팅 후 실제 배포 검증은 가상 한 행이다. 실제 주문 이미지 재전송, PDF 발행, 주문/발송은 하지 않았다. 첫 재검증은 검증 스크립트의 대기 시간이 짧아 결과를 받기 전에 종료됐으므로 이를 제품 오류로 집계하지 않았다. 충분한 대기 후 검증 스크립트가 성공 종료했다.
 
 ### PO에 `Cannot calculate`가 표시될 때
 
