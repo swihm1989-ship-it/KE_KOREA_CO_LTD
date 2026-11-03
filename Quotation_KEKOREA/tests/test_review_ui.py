@@ -10,6 +10,29 @@ from Quotation_KEKOREA.tests.test_review_fields import complete_draft
 
 @unittest.skipUnless(importlib.util.find_spec('streamlit'), 'Streamlit is not installed')
 class ReviewUiTests(unittest.TestCase):
+    def test_po_unresolved_promotion_does_not_request_all_24_prices(self):
+        from streamlit.testing.v1 import AppTest
+        from Quotation_KEKOREA.tests.test_po_partial_catalog import partial_order
+        app_path = Path(__file__).resolve().parents[1] / 'app.py'
+        partial, catalog = partial_order()
+        doc = complete_draft()
+        doc.update(partial)
+        with patch('Quotation_KEKOREA.agent.extractor.load_env', return_value={'OPENAI_API_KEY': 'test'}), \
+             patch('Quotation_KEKOREA.agent.pricing.load_local_seed', return_value=catalog), \
+             patch('Quotation_KEKOREA.agent.branding.resolve_company_seal', return_value=(app_path, None, None)):
+            at = AppTest.from_file(str(app_path))
+            at.session_state['selected_document_page'] = 'PO 만들기'
+            at.session_state['trade_draft'] = doc
+            at.session_state['trade_draft_page'] = 'PO 만들기'
+            at.run(timeout=20)
+            self.assertFalse(at.exception)
+            price_inputs = [entry.label for entry in at.text_input if 'unit price' in entry.label]
+            self.assertEqual(price_inputs, ['Item 25: unit price *'])
+            self.assertTrue(next(button for button in at.button if button.label == 'Create PDF').disabled)
+            effective = __import__('json').loads(at.session_state['rendered_json'])['document']
+            self.assertEqual(effective['currency'], 'KRW')
+            self.assertTrue(effective['pending_confirmations'])
+
     def test_pl_totals_approval_enables_pdf_and_resets_when_source_changes(self):
         from streamlit.testing.v1 import AppTest
         app_path = Path(__file__).resolve().parents[1] / 'app.py'

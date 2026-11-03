@@ -161,9 +161,12 @@ def apply_verified_eclado_prices(draft, seed=None):
             draft["product_family"] = "cosmetics"
     supplier_confirmation = "The seller was not supplied. Use the ECLADO purchase price catalog for this PO? Confirm the supplier and legal details."
     pending = draft.setdefault("pending_confirmations", [])
-    if draft.get("document_type") == "PO" and not counterparty_name and items and all(m["status"] == "matched" for m in exact_matches):
-        party_matches = all(resolve_price(m["product"]["id"], seed, "purchase", "KRW", "ECLADO")
-                            for m in exact_matches)
+    if draft.get("document_type") == "PO" and not counterparty_name and items:
+        # A separate unresolved promotion must not disable verified prices for
+        # every other row. These remain candidates requiring supplier confirmation;
+        # the per-item exact match below still rejects ambiguous products/sizes.
+        party_matches = any(resolve_price(m["product"]["id"], seed, "purchase", "KRW", "ECLADO")
+                            for m in exact_matches if m["status"] == "matched")
         if party_matches and supplier_confirmation not in pending:
             pending.append(supplier_confirmation)
     elif supplier_confirmation in pending:

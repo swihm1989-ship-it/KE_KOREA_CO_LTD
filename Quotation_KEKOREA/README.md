@@ -327,9 +327,21 @@ PL/CIPL 검토·승인 로직은 `agent/packing_review.py`, 기존 합계 계산
 
 합계가 다르거나 원본 합계가 비어 있고 행별 합계를 계산할 수 있으면 비교표와 `합계를 수정할까요?` 승인란을 표시한다. 승인은 계산된 합계에만 적용하며 원본 값을 `_packing_original_totals`에 보존한다. 다른 단위의 수량은 `_packing_approved_quantities`에 별도로 보존한다. 단가·상업송장 품목 수량·포장 행 자체는 변경하지 않는다. 승인 후 PDF 생성에는 나머지 필수 정보와 행 검증도 통과해야 한다. 원본 합계나 품목을 다시 수정하면 이전 승인과 이전 다운로드를 무효화한다.
 
+2026-11-02 실제 배포 검증: 가상 PL 두 행에서 승인 전 PDF 생성 차단, 승인 후 계산된 CBM과 단위별 수량·컨테이너 수가 반영된 PDF 다운로드, 원본 합계 수정 시 승인 취소 및 기존 다운로드 제거를 확인했다. 다운로드 PDF를 이미지로 렌더링하여 표·합계·직인 배치도 확인했다.
+
 The PL and CIPL workflows accept up to five supplier document images and extract each product's quantity and unit, package type and count, net and gross weight, and CBM. Printed totals and the explicit container count are stored separately from calculated row sums; containers are never inferred from pallet counts or volume. The review table and printed-total fields are editable. Quantities and package types are not added across incompatible units, and fractional pallet allocations are allowed. When complete row values differ from printed totals, documents use the calculated row totals, preserve the source values for review, and require the user to confirm the extracted values before download. Invalid values and inconsistent package types still block download. Missing values remain unconfirmed. PL output does not require a price or currency. PDF, Excel, and HTML include the packing fields; CIPL includes both CI and PL outputs.
 
-For an ECLADO PO with no seller name, exact catalog matches can supply a KRW purchase-price candidate only when every line has an ECLADO supplier price. The user must confirm that price source; the supplier's legal name and address remain separate fields. A different specified supplier does not receive ECLADO catalog prices.
+For a cosmetics PO with no seller name, each exact catalog match can supply a verified ECLADO purchase-price candidate independently. An unresolved row must not suppress prices for other matched rows. The user must confirm that price source; the supplier's legal name and address remain separate fields. A different specified supplier does not receive ECLADO catalog prices. Explicit transaction currencies remain unchanged.
+
+### 2026-11-03 PO 단가 전체 누락 재발 방지
+
+사용자가 제공한 추출 JSON에서 이미지의 24개 상품은 상품명·용량이 카탈로그와 일치했지만, 별도 문구 `Melaser Whitening Toner는 3+1이야.`가 용량·수량 없는 25번째 행으로 추가되어 있었다. 공급처 법인명도 비어 있었다. 기존의 “모든 행이 일치해야 공급처 미입력 PO의 가격 후보를 조회” 조건 때문에 이 한 행이 정상 24개 행의 단가와 통화 조회까지 막았다. 이미지 해상도나 응답 길이 제한으로 확인된 문제가 아니다.
+
+수정 범위는 `agent/pricing.py`의 공급처 미입력 PO 가격 후보 조회 조건뿐이다. 정확히 일치하고 ECLADO 매입가격이 있는 행은 개별 조회하고, 미일치·모호한 행은 가격을 추측하지 않는다. 공급처 확인, 법인명·주소 입력, 명시된 통화, 수량 0, 프로모션 계산, 다른 공급처, PI/CI/PL/CIPL 및 PDF 서식 규칙을 유지한다. 해당 토너는 용량과 실제 주문수량을 확인해야 하며 자동 삭제하거나 다른 상품에 3+1을 적용하지 않는다.
+
+재발 방지 테스트: `tests/test_po_partial_catalog.py`는 24개 정상 행+미확정 프로모션 행, 공급처/통화 보호, 전 행 미일치, 재실행 시 중복 확인 방지를 검증한다. `tests/test_review_ui.py`는 화면에서 24개 단가 입력 요구가 사라지고 미확정 25번째 행과 공급처 확인이 유지되며 PDF 생성은 계속 차단되는지 검증한다. 실제 주문과 개인 연락처·비공개 단가를 테스트에 저장하지 않고 가상 자료를 사용한다. README 기록만으로 재발을 방지한다고 간주하지 말고 이 테스트를 유지한다.
+
+검증: 수정 전 회귀 테스트에서 통화 `null`로 실패하는 것을 확인했고, 수정 후 `uv run --offline --with streamlit python -m unittest discover -s Quotation_KEKOREA/tests`로 화면 테스트를 포함한 90개 테스트가 모두 통과했다(생략 없음). 기존 Streamlit 경고는 남아 있다. 기본 uv 캐시/임시 파일 권한 및 네트워크 제한 때문에 작업 폴더 캐시와 오프라인 실행을 사용했고, PDF 임시 파일 권한을 허용한 실행에서 전체 통과를 확인했다. 이 변경의 실제 배포 앱 검증은 아직 수행하지 않았다.
 
 ### 로컬 실행
 
