@@ -1,7 +1,7 @@
 # KE KOREA 무역 문서 생성 AI Agent 설계안
 
 작성일: 2026-10-30 (Asia/Seoul)  
-최종 갱신: 2026-11-03 (Asia/Seoul)
+최종 갱신: 2026-11-05 (Asia/Seoul)
 
 상태: Streamlit 배포, Supabase 카탈로그 조회, 비공개 직인 다운로드 및 초안 PDF 생성·다운로드를 확인했다. 모든 출력은 사용자 검토용 초안이며 실제 발주·발송은 자동 수행하지 않는다. 아래 초기 설계 기록보다 다음 현재 동작 및 변경 보호 기준을 우선한다.
 
@@ -437,7 +437,7 @@ SUPABASE_SECRET_KEY = "새로 발급한 Supabase Secret key"
 - Python `unittest`에서 SQL importer·계산·렌더러·OpenAI 모의요청·Supabase REST 모의요청 검증을 실행한다. 모의 테스트는 실제 Supabase 인증이나 실제 테이블 상태를 증명하지 않는다.
 - 앱이 실제 Supabase에 연결되면 화면에 최근 catalog import 시각과 제품 수를 표시한다. “No ECLADO catalog import”는 테이블은 있어도 seed rows가 없을 때, HTTP 401/403은 키 또는 권한 문제, 404는 API 노출/테이블명 문제를 뜻한다.
 - 2026-11-02: 배포 앱의 실제 Supabase 카탈로그 연결과 비공개 직인 다운로드를 확인했다. 키 자체는 코드·문서·로그에 기록하지 않는다.
-- Order screenshots are supported. PDF/XLSX order uploads, final numbering/issuance, and CI/PL shipping integration are not connected. Generated files remain review drafts.
+- Image and PDF order uploads are supported in the current source. PyMuPDF extracts selectable PDF text page by page and renders text-poor pages as images for vision extraction; original PDFs are also sent as source files. This local-source implementation has not been revalidated against the live deployment. PyMuPDF licensing must be cleared before commercial deployment. Final numbering/issuance and persistent CI/PL shipping integration are not connected. Generated files remain review drafts.
 - PDF 렌더링과 직인·페이지 배치는 로컬 및 배포 앱 생성 파일로 검증했다. Excel 데스크톱 앱 자체의 시각 검수는 별도이며, 실제 거래 문서는 발송 전에 사용자가 검토한다.
 
 
