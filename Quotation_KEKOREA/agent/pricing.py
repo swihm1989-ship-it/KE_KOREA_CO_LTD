@@ -130,6 +130,17 @@ def apply_verified_eclado_prices(draft, seed=None):
         or re.fullmatch(r"Verified \S+ catalog price for .+", str(entry))
         or (is_purchase_order and "currency" in str(entry).casefold()))]
     if is_purchase_order:
+        buyer = draft.get("buyer") or {}
+        seller = draft.get("seller") or {}
+        draft["missing_fields"] = [
+            entry for entry in draft["missing_fields"]
+            if not (
+                (str(entry) == "PO buyer legal name and address"
+                 and buyer.get("legal_name") and buyer.get("address"))
+                or (str(entry) == "ECLADO supplier legal name and address"
+                    and seller.get("legal_name") and seller.get("address"))
+            )
+        ]
         # A PO is always placed with ECLADO in KRW; source PI currency and prices
         # are customer-sale data, not the supplier purchase-price basis.
         draft["currency"] = "KRW"
@@ -140,6 +151,12 @@ def apply_verified_eclado_prices(draft, seed=None):
     seed = seed if seed is not None else load_local_seed()
     products = seed.get("products", [])
     items = draft.get("items", [])
+    if is_purchase_order:
+        for item in items:
+            basis = str(item.get("price_basis") or "").strip()
+            basis = re.sub(r"^(?:USD|KRW|EUR|CNY)\s*(?:/\s*|PER\s+)?", "", basis, flags=re.I)
+            basis = re.sub(r"^PER\s+", "", basis, flags=re.I)
+            item["price_basis"] = basis or item.get("unit")
     # Vision extraction can label a cosmetics order as "other" when the image
     # shows products and sizes but no explicit category. An exact match of every
     # line against the ECLADO product master is stronger evidence and lets the
@@ -265,8 +282,13 @@ def apply_verified_eclado_prices(draft, seed=None):
         if not price_differs:
             item["product_id"] = product["id"]
             item["unit_price"] = str(price["unit_price"])
-            if not item.get("price_basis"):
-                item["price_basis"] = price.get("price_basis") or item.get("unit")
+            catalog_basis = str(price.get("price_basis") or "").strip()
+            catalog_basis = re.sub(r"^(?:USD|KRW|EUR|CNY)\s*(?:/\s*|PER\s+)?", "", catalog_basis, flags=re.I)
+            catalog_basis = re.sub(r"^PER\s+", "", catalog_basis, flags=re.I)
+            if is_purchase_order:
+                item["price_basis"] = catalog_basis or item.get("unit")
+            elif not item.get("price_basis"):
+                item["price_basis"] = catalog_basis or item.get("unit")
             item["price_source"] = "Verified ECLADO catalog; source workbook row " + str(price.get("source_row"))
             item["master_price"] = True
         elif item.get("price_override_confirmed"):

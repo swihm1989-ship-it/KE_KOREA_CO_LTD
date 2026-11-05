@@ -61,16 +61,22 @@ class SupabaseCatalogTests(unittest.TestCase):
                    'purchase_prices': [{'product_id': 'p1', 'supplier_key': 'ECLADO', 'currency': 'KRW',
                                         'unit_price': '1000', 'source_row': 1}]}
         draft = {'document_type': 'PO', 'product_family': 'cosmetics', 'currency': 'USD',
-                 'seller': {'legal_name': 'KE KOREA CO. LTD'},
+                 'seller': {'legal_name': 'KE KOREA CO. LTD', 'address': 'Supplier address'},
+                 'buyer': {'legal_name': 'KE KOREA CO. LTD', 'address': 'Buyer address'},
+                 'missing_fields': ['PO buyer legal name and address',
+                                    'ECLADO supplier legal name and address'],
                  'items': [{'product_name': 'Test Cream', 'capacity': '50 ml',
-                            'unit_price': '10.25', 'source': 'USD 10.25 per PCS'}]}
+                            'unit': 'PCS', 'unit_price': '10.25', 'price_basis': 'USD/PCS',
+                            'source': 'USD 10.25 per PCS'}]}
         pricing.apply_verified_eclado_prices(draft, catalog)
         self.assertEqual(draft['currency'], 'KRW')
         self.assertEqual(draft['items'][0].get('unit_price'), '1000')
+        self.assertEqual(draft['items'][0].get('price_basis'), 'PCS')
         self.assertEqual(draft['items'][0].get('price_source'),
                          'Verified ECLADO catalog; source workbook row 1')
         self.assertTrue(draft['items'][0]['master_price'])
         self.assertFalse(draft['conflicts'])
+        self.assertEqual(draft['missing_fields'], [])
         self.assertEqual(draft.get('pending_confirmations'), [])
 
     def test_loads_one_consistent_catalog_snapshot_using_server_secret_apikey(self):
@@ -148,6 +154,7 @@ class SupabaseCatalogTests(unittest.TestCase):
                  'seller': {'legal_name': 'ECLADO'}, 'buyer': {'legal_name': 'KE KOREA CO. LTD'},
                  'items': [{'product_name': 'Test Cream', 'capacity': '50 ml', 'quantity': str(qty),
                             'paid_quantity': str(qty), 'shipped_quantity': str(qty), 'unit': 'PCS',
+                            'price_basis': 'USD/PCS',
                             'discount_percent': '0'} for qty in (0, 5)]}
         apply_verified_eclado_prices(draft, catalog)
         result = validate_and_calculate(draft)
