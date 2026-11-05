@@ -1,0 +1,31 @@
+services:
+  - type: web
+    name: ke-korea-quotation
+    runtime: python
+    region: singapore
+    plan: free
+    branch: main
+    buildCommand: pip install -r Quotation_KEKOREA/requirements.txt
+    startCommand: streamlit run Quotation_KEKOREA/app.py --server.address 0.0.0.0 --server.port $PORT --server.headless true --browser.gatherUsageStats false
+    autoDeployTrigger: commit
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        value: gpt-6-luna
+      - key: SUPABASE_URL
+        value: https://jusozufdsnpdxezxptfp.supabase.co
+      - key: SUPABASE_SECRET_KEY
+        sync: false
+      - key: KEKOREA_USD_BENEFICIARY
+        sync: false
+      - key: KEKOREA_USD_BANK_NAME
+        sync: false
+      - key: KEKOREA_USD_BRANCH
+        sync: false
+      - key: KEKOREA_USD_SWIFT
+        sync: false
+      - key: KEKOREA_USD_ACCOUNT_NUMBER
+        sync: false
+      - key: KEKOREA_USD_BANK_ADDRESS
+        sync: false

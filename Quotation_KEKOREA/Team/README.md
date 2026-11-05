@@ -102,7 +102,15 @@ git diff --check
 
 환경변수/Streamlit Secrets는 `OPENAI_API_KEY`, `OPENAI_MODEL`, `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, 선택적 회사/은행 세부정보입니다. 실제 키는 `.env` 또는 호스팅 플랫폼의 서버 Secrets에만 보관합니다. UI의 추출 버튼을 누르면 입력 문서가 OpenAI에 전송됩니다. 외부 전송을 허용할 수 없는 문서를 업로드하지 마세요.
 
-**PyMuPDF 배포 전제:** `requirements.txt`의 PyMuPDF는 AGPL/상용 라이선스 선택이 필요한 듀얼 라이선스 패키지입니다. 상용 라이선스를 확보·확인했다는 기록은 이 코드 검토에서 확인하지 못했습니다. 배포/상업 사용 전에 라이선스 적용 여부를 담당자가 확인해야 합니다. LangChain은 PDF 파서가 아니므로 추가하지 않았습니다.
+### Render 테스트 배포
+
+저장소 루트의 [`.python-version`](../../.python-version)은 Render가 테스트된 Python 3.12 런타임을 사용하도록 하고, [`render.yaml`](../../render.yaml)은 기존 Streamlit 앱을 Singapore 리전의 Free 웹 서비스로 실행합니다. React 전환 설정은 아니며, 공개 URL에는 앱 로그인 기능이 없습니다. Render 대시보드에서 **New → Blueprint**를 선택하고 이 저장소의 `main` 브랜치를 연결하면 서비스를 생성할 수 있습니다.
+
+Blueprint가 요청할 때 `OPENAI_API_KEY`와 `SUPABASE_SECRET_KEY`는 Render 대시보드에 직접 입력하세요. PI 생성을 쓰려면 6개의 `KEKOREA_USD_*` 은행정보도 Render Environment에 입력해야 합니다. 비밀키나 은행정보를 Git, 채팅, 로그에 입력하지 마세요. 첫 배포 성공 후에는 앱 URL에서 가상 자료로 파일 업로드·추출·검토·PDF/Excel 다운로드를 확인합니다.
+
+Render Free는 절전 후 재기동될 수 있고 영구 디스크가 없습니다. 앱의 세션 메모리와 `outputs` 파일은 재시작/재배포 시 보장되지 않으므로 이 설정은 테스트용입니다. 장기 운영에는 유료 인스턴스, 영속 파일 저장, 세션 복구 및 접근 인증을 별도로 설계해야 합니다. 현재 코드는 로그인 없이 공개되므로 URL을 아는 사용자가 앱에 접근하고 OpenAI 요청을 발생시킬 수 있습니다.
+
+**PyMuPDF 배포 전제:** PyMuPDF는 AGPL/상용 라이선스 선택이 필요한 듀얼 라이선스 패키지입니다. 사용자는 2026-11-05에 이 배포의 PyMuPDF 라이선스 확인을 완료했다고 답변했습니다. 상용 배포 전에 해당 라이선스의 증빙과 적용 범위를 팀에서 보관·확인하세요. LangChain은 PDF 파서가 아니므로 추가하지 않았습니다.
 
 배포 URL은 기존 안내에서 `https://ke-korea.streamlit.app/`로 기록되어 있습니다. 이번 문서 작업에서 실제 서비스에 접속하거나 Supabase 실계정·최근 배포 코드를 확인하지 않았으므로, 현재 가용성 및 최신 배포 상태는 별도 확인 대상입니다. 이전 기록의 라이브 확인도 그 기록 날짜 범위에서만 유효합니다.
 
