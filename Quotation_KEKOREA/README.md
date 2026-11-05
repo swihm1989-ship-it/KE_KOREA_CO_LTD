@@ -17,6 +17,7 @@
 | --- | --- | --- |
 | 회사 직인 저장 | `kekorea-private-seal` 비공개 Supabase 버킷에서 서버 전용 키로 읽고 PNG SHA-256을 검증한다. 다운로드는 15분간 캐시한다. 큰 Base64 Secret은 필요하지 않으며 선택적인 이전 방식의 대체 경로만 남아 있다. | `tests/test_branding.py`, 실제 배포 PDF의 직인 픽셀 대조 |
 | PDF 페이지 분할 | 상품 행은 실제 남은 공간이 부족할 때만 다음 페이지로 이동한다. 하단 영역 때문에 마지막 상품 하나를 강제로 옮기지 않는다. 합계·REMARK·계좌정보·회사 명판/직인 묶음이 들어가지 않으면 묶음 전체를 다음 페이지로 이동한다. | `tests/test_pdf_pagination.py`, 배포 앱의 20개 상품 PI PDF |
+| PDF 원문 추출 (로컬 구현) | PyMuPDF로 텍스트 PDF의 페이지별 텍스트를 추출해 원본 PDF와 함께 모델에 전달한다. 텍스트가 없는 스캔 페이지는 이미지로 렌더링해 시각 추출을 돕는다. LangChain은 PDF 파서가 아니므로 추가하지 않는다. PyMuPDF는 AGPL/상용 이중 라이선스이므로 상용 라이선스 확인 전 배포하지 않는다. | `tests/test_pdf_inputs.py`, `tests/test_extractor.py`; 배포 검증 전 |
 | 누락 정보 입력 | `Not provided`/`TO BE CONFIRMED` 등으로 남을 값은 검토 화면에서 입력한다. 필수 정보는 입력 전 PDF/Excel 생성을 막고, 선택 정보는 사용자가 `N/A`를 명시할 수 있다. | `tests/test_review_fields.py`, `tests/test_review_ui.py`, 배포 앱의 배송·결제조건 입력 후 PDF |
 | 입력값 유지와 새 파일 생성 | 메뉴를 이동해도 보완 입력값을 유지한다. 새 주문 추출 또는 명시적 JSON 정정 시 이전 입력을 초기화한다. 내용 수정 시 기존 다운로드를 무효화한다. | `tests/test_review_ui.py` |
 | 문서별 동시 작업 (로컬 구현) | PI/PO/CI/PL/CIPL의 주문 입력·첨부·초안·검토값·승인·다운로드를 메뉴별로 보관한다. 메뉴를 이동해도 실행 중 추출/생성은 계속되며 결과는 시작한 메뉴에 저장한다. | `tests/test_workflow_state.py`, `tests/test_workflow_ui.py`; 배포 검증 전 |
@@ -42,7 +43,7 @@
 저장소 루트에서 다음 명령을 실행한다. `--with streamlit`을 포함해야 화면 회귀 테스트가 건너뛰어지지 않는다.
 
 ```powershell
-uv run --with streamlit python -m unittest discover -s Quotation_KEKOREA/tests
+uv run --with streamlit --with pymupdf python -m unittest discover -s Quotation_KEKOREA/tests
 git diff --check
 ```
 

@@ -18,7 +18,7 @@
 1. 관련 코드, README, 기존 테스트를 먼저 읽고 오류를 재현한다. 화면의 `Cannot calculate`만 보고 원인을 단정하지 않는다.
 2. 변경할 동작을 검증하는 회귀 테스트를 먼저 추가한다. 기존 보호 테스트를 삭제·약화·skip 처리해 성공시키지 않는다.
 3. 기능 수정은 필요한 부분으로 한정한다. 페이지/서식, 가격 정책, 추출 규칙, 직인, 입력 상태를 서로 관계없는 변경에 함께 수정하지 않는다.
-4. 저장소 루트에서 `uv run --with streamlit python -m unittest discover -s Quotation_KEKOREA/tests`와 `git diff --check`를 실행한다. Streamlit AppTest가 생략된 결과를 전체 화면 테스트 성공으로 보고하지 않는다.
+4. 저장소 루트에서 `uv run --with streamlit --with pymupdf python -m unittest discover -s Quotation_KEKOREA/tests`와 `git diff --check`를 실행한다. Streamlit AppTest가 생략된 결과를 전체 화면 테스트 성공으로 보고하지 않는다.
 5. 검증을 통과한 변경사항, 사용자에게 보이는 동작, 실제 수행한 배포 검증 범위를 README에 갱신한다. 미확인 상태를 완료로 기록하지 않는다.
 6. 배포가 요청된 작업은 GitHub 반영만으로 끝내지 말고 실제 앱의 해당 경로를 확인한다. 가상 자료를 우선 사용한다. 원본 주문 자료의 외부 전송이 승인에서 거절되면 다른 경로로 전송하지 말고 허용된 로컬 검증을 마친 뒤 사용자 승인을 요청한다.
 

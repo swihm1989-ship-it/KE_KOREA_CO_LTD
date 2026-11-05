@@ -1,6 +1,7 @@
 """PDF and mixed image/PDF inputs use the existing document extraction path."""
 import base64
 import json
+import pymupdf
 import unittest
 from Quotation_KEKOREA.agent.attachments import prepare_uploads
 from Quotation_KEKOREA.agent.extractor import extract_trade_data
@@ -8,7 +9,20 @@ from Quotation_KEKOREA.agent.workflow_state import SavedUpload
 from Quotation_KEKOREA.tests.test_extractor import FakeResponse
 
 
-PDF = b'%PDF-1.7\n% synthetic two-page input: page 1 / page 2\n%%EOF'
+def _make_pdf(*texts):
+    document = pymupdf.open()
+    for text in texts:
+        page = document.new_page()
+        if text:
+            page.insert_text((72, 72), text)
+    data = document.tobytes()
+    document.close()
+    return data
+
+
+PDF = _make_pdf('Synthetic first page with readable source text.',
+                'Synthetic second page with additional readable source text.')
+SCANNED_PDF = _make_pdf('')
 
 
 class PdfInputsTests(unittest.TestCase):
@@ -37,9 +51,25 @@ class PdfInputsTests(unittest.TestCase):
                                   SavedUpload('invoice.pdf', 'application/octet-stream', PDF)])
         extract_trade_data('Extract', images=inputs, env={'OPENAI_API_KEY': 'test'}, opener=opener)
         parts = captured['input'][0]['content']
-        self.assertEqual([p['type'] for p in parts], ['input_text', 'input_image', 'input_file'])
+        self.assertEqual([p['type'] for p in parts],
+                         ['input_text', 'input_image', 'input_file', 'input_text'])
         self.assertEqual(base64.b64decode(parts[1]['image_url'].split(',', 1)[1]), b'png')
+        self.assertIn('Synthetic first page', parts[3]['text'])
         self.assertEqual(inputs[-1]['mime_type'], 'application/pdf')
+
+    def test_selectable_pdf_text_is_attached_as_reviewable_source_text(self):
+        from Quotation_KEKOREA.agent.attachments import input_blocks
+        blocks = input_blocks([{'name': 'order.pdf', 'mime_type': 'application/pdf', 'data': PDF}])
+        self.assertEqual([block['type'] for block in blocks], ['input_file', 'input_text'])
+        self.assertIn('page 1', blocks[1]['text'])
+        self.assertIn('Synthetic second page', blocks[1]['text'])
+
+    def test_scanned_pdf_pages_are_rendered_for_vision_extraction(self):
+        from Quotation_KEKOREA.agent.attachments import input_blocks
+        blocks = input_blocks([{'name': 'scan.pdf', 'mime_type': 'application/pdf', 'data': SCANNED_PDF}])
+        self.assertEqual([block['type'] for block in blocks], ['input_file', 'input_text', 'input_image'])
+        self.assertIn('Scanned page 1', blocks[1]['text'])
+        self.assertTrue(blocks[2]['image_url'].startswith('data:image/jpeg;base64,'))
 
     def test_invalid_files_and_existing_shared_limits_fail_before_network(self):
         cases = ([SavedUpload('empty.pdf', 'application/pdf', b'')],

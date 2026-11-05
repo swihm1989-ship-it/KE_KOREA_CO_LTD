@@ -1,6 +1,7 @@
 """OpenAI request shape and source-evidence guards; no live API request is made."""
 import importlib.util
 import json
+import pymupdf
 from pathlib import Path
 import urllib.error
 import unittest
@@ -9,6 +10,12 @@ ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location("trade_extractor", ROOT / "agent" / "extractor.py")
 extractor = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(extractor)
+
+_pdf = pymupdf.open()
+_pdf_page = _pdf.new_page()
+_pdf_page.insert_text((72, 72), "A valid synthetic PDF page for extraction tests.")
+TEST_PDF = _pdf.tobytes()
+_pdf.close()
 
 
 class FakeResponse:
@@ -57,7 +64,7 @@ class ExtractorTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "PDF was received.*Split the PDF"):
             extractor.extract_trade_data(
                 "Extract this invoice",
-                images=[{"name": "source.pdf", "mime_type": "application/pdf", "data": b"%PDF-1.7"}],
+                images=[{"name": "source.pdf", "mime_type": "application/pdf", "data": TEST_PDF}],
                 env={"OPENAI_API_KEY": "test"}, opener=lambda request, timeout: response)
 
     def test_pdf_api_error_includes_the_service_reason(self):
@@ -69,7 +76,7 @@ class ExtractorTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, r"attached PDF \(HTTP 400\).*could not be processed"):
             extractor.extract_trade_data(
                 "Extract this invoice",
-                images=[{"name": "source.pdf", "mime_type": "application/pdf", "data": b"%PDF-1.7"}],
+                images=[{"name": "source.pdf", "mime_type": "application/pdf", "data": TEST_PDF}],
                 env={"OPENAI_API_KEY": "test"}, opener=reject)
 
     def test_translation_rules_are_in_openai_instructions(self):
