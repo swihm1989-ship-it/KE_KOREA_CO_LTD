@@ -265,6 +265,8 @@ def apply_verified_eclado_prices(draft, seed=None):
         if not price_differs:
             item["product_id"] = product["id"]
             item["unit_price"] = str(price["unit_price"])
+            if not item.get("price_basis"):
+                item["price_basis"] = price.get("price_basis") or item.get("unit")
             item["price_source"] = "Verified ECLADO catalog; source workbook row " + str(price.get("source_row"))
             item["master_price"] = True
         elif item.get("price_override_confirmed"):

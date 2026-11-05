@@ -32,10 +32,11 @@ class SupabaseCatalogTests(unittest.TestCase):
             with self.subTest(supplier=name):
                 draft = {'document_type': 'PO', 'product_family': 'other', 'currency': None,
                          'seller': {'legal_name': name},
-                         'items': [{'product_name': 'Test Cream', 'capacity': '50 ml'}]}
+                         'items': [{'product_name': 'Test Cream', 'capacity': '50 ml', 'unit': 'PCS'}]}
                 pricing.apply_verified_eclado_prices(draft, catalog)
                 self.assertEqual(draft['currency'], 'KRW')
                 self.assertEqual(draft['items'][0].get('unit_price'), '1000')
+                self.assertEqual(draft['items'][0].get('price_basis'), 'PCS')
                 self.assertTrue(draft['items'][0]['master_price'])
                 self.assertEqual(draft['seller']['legal_name'], name)
                 self.assertEqual(draft.get('pending_confirmations'), [])
@@ -147,13 +148,14 @@ class SupabaseCatalogTests(unittest.TestCase):
                  'seller': {'legal_name': 'ECLADO'}, 'buyer': {'legal_name': 'KE KOREA CO. LTD'},
                  'items': [{'product_name': 'Test Cream', 'capacity': '50 ml', 'quantity': str(qty),
                             'paid_quantity': str(qty), 'shipped_quantity': str(qty), 'unit': 'PCS',
-                            'price_basis': 'PCS', 'discount_percent': '0'} for qty in (0, 5)]}
+                            'discount_percent': '0'} for qty in (0, 5)]}
         apply_verified_eclado_prices(draft, catalog)
         result = validate_and_calculate(draft)
         self.assertEqual(result['currency'], 'KRW')
         self.assertEqual(result['total'], '5000')
         self.assertEqual(result['items'][0]['line_total'], '0')
         self.assertTrue(all(item['master_price'] and item['unit_price'] == '1000' for item in result['items']))
+        self.assertTrue(all(item['price_basis'] == 'PCS' for item in result['items']))
         self.assertFalse(any('number required' in issue for issue in result['blocking_issues']))
         draft['currency'] = 'USD'
         for item in draft['items']:
