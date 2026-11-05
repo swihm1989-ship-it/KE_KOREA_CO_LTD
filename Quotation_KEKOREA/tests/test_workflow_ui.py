@@ -33,15 +33,16 @@ class WorkspaceUiTests(unittest.TestCase):
         self.at.radio[0].set_value(page)
         self.run_app()
 
-    def test_five_menus_keep_distinct_prompts_drafts_and_download_state(self):
+    def test_document_menus_keep_distinct_prompts_drafts_and_download_state(self):
         self.run_app()
-        for dtype in ('PI', 'PO', 'CI', 'PL', 'CIPL'):
+        self.assertNotIn('CIPL 만들기', self.at.radio[0].options)
+        for dtype in ('PI', 'PO', 'CI', 'PL'):
             page = dtype + ' 만들기'
             self.navigate(page)
             self.at.text_area[0].set_value('order ' + dtype)
             self.run_app()
             doc = complete_draft()
-            doc.update(document_type='CI' if dtype == 'CIPL' else dtype, product_family='other',
+            doc.update(document_type=dtype, product_family='other',
                        shipment_reference='TEST', country_of_origin='Korea')
             self.at.session_state['trade_draft'] = doc
             self.at.session_state['trade_draft_page'] = page
@@ -50,12 +51,17 @@ class WorkspaceUiTests(unittest.TestCase):
             self.at.session_state['download_format'] = 'pdf'
         self.navigate('계약서 만들기 · 준비 중')
         self.navigate('커미션 계약서 만들기 · 준비 중')
-        for dtype in ('PI', 'PO', 'CI', 'PL', 'CIPL'):
+        for dtype in ('PI', 'PO', 'CI', 'PL'):
             self.navigate(dtype + ' 만들기')
             self.assertEqual(self.at.text_area[0].value, 'order ' + dtype)
-            self.assertEqual(self.at.session_state['trade_draft']['document_type'],
-                             'CI' if dtype == 'CIPL' else dtype)
+            self.assertEqual(self.at.session_state['trade_draft']['document_type'], dtype)
             self.assertEqual(self.at.session_state['rendered_paths'], {'pdf': dtype + '.pdf'})
+
+    def test_removed_cipl_selection_falls_back_to_an_available_menu(self):
+        self.at.session_state['selected_document_page'] = 'CIPL 만들기'
+        self.run_app()
+        self.assertEqual(self.at.session_state['selected_document_page'], 'PI 만들기')
+        self.assertNotIn('CIPL 만들기', self.at.radio[0].options)
 
     def test_extract_continues_on_another_menu_and_commits_only_to_origin(self):
         started, release = Event(), Event()

@@ -5,7 +5,7 @@
 
 ## 1. 한눈에 보기
 
-Streamlit 앱에서 사용자가 PO(구매주문서), PI(견적/Proforma Invoice), CI(Commercial Invoice), PL(Packing List), CIPL을 선택하고 텍스트 또는 이미지/PDF를 입력하면, 추출된 거래 초안을 검토·수정한 뒤 PDF/Excel 파일로 다운로드합니다. CIPL은 동일 거래 정보로 CI와 PL 초안을 함께 만듭니다.
+Streamlit 앱에서 사용자가 PO(구매주문서), PI(견적/Proforma Invoice), CI(Commercial Invoice), PL(Packing List)을 각각 선택하고 텍스트 또는 이미지/PDF를 입력하면, 추출된 거래 초안을 검토·수정한 뒤 PDF/Excel 파일로 다운로드합니다. CI와 PL은 별도 메뉴와 별도 문서로 생성합니다.
 
 ```text
 사용자 입력·첨부 → 파일 검증/PDF 페이지 처리 → OpenAI 구조화 추출

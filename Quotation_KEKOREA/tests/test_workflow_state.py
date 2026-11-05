@@ -14,7 +14,7 @@ class WorkspaceTests(unittest.TestCase):
         self.state = {}
 
     def test_menu_roundtrip_preserves_drafts_widgets_files_and_unfinished_json(self):
-        for page in ('PI', 'PO', 'CI', 'PL', 'CIPL'):
+        for page in ('PI', 'PO', 'CI', 'PL'):
             name = page + ' 만들기'
             self.work.activate(self.state, name)
             self.state.update(trade_draft={'document_type': page}, trade_draft_page=name,
@@ -28,7 +28,7 @@ class WorkspaceTests(unittest.TestCase):
         for key in list(self.state):
             if key.startswith(('order_prompt_', 'advanced_json_', 'packing_', 'product_double_check_')):
                 del self.state[key]  # Streamlit removes widgets absent from a run.
-        for page in ('PI', 'PO', 'CI', 'PL', 'CIPL'):
+        for page in ('PI', 'PO', 'CI', 'PL'):
             name = page + ' 만들기'
             self.work.activate(self.state, name)
             self.assertEqual(self.state['trade_draft'], {'document_type': page})

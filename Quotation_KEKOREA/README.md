@@ -5,6 +5,8 @@
 
 상태: Streamlit 배포, Supabase 카탈로그 조회, 비공개 직인 다운로드 및 초안 PDF 생성·다운로드를 확인했다. 모든 출력은 사용자 검토용 초안이며 실제 발주·발송은 자동 수행하지 않는다. 아래 초기 설계 기록보다 다음 현재 동작 및 변경 보호 기준을 우선한다.
 
+2026-11-05 업데이트: 통합 CI+PL 메뉴와 생성 경로를 제거했다. Commercial Invoice(CI)와 Packing List(PL)는 사이드바의 개별 메뉴에서 따로 생성한다.
+
 ## 현재 동작 및 변경 보호 기준 — 2026-11-02
 
 배포 앱: https://ke-korea.streamlit.app/ (사용자가 2026-11-03 확인한 현재 주소). 이전 `kekoreacoltdgit-69eu27cywmml3jfwtdsappb.streamlit.app` 주소는 접속 확인 시 404였다.
@@ -20,13 +22,13 @@
 | PDF 원문 추출 (로컬 구현) | PyMuPDF로 텍스트 PDF의 페이지별 텍스트를 추출해 원본 PDF와 함께 모델에 전달한다. 텍스트가 없는 스캔 페이지는 이미지로 렌더링해 시각 추출을 돕는다. LangChain은 PDF 파서가 아니므로 추가하지 않는다. PyMuPDF는 AGPL/상용 이중 라이선스이므로 상용 라이선스 확인 전 배포하지 않는다. | `tests/test_pdf_inputs.py`, `tests/test_extractor.py`; 배포 검증 전 |
 | 누락 정보 입력 | `Not provided`/`TO BE CONFIRMED` 등으로 남을 값은 검토 화면에서 입력한다. 필수 정보는 입력 전 PDF/Excel 생성을 막고, 선택 정보는 사용자가 `N/A`를 명시할 수 있다. | `tests/test_review_fields.py`, `tests/test_review_ui.py`, 배포 앱의 배송·결제조건 입력 후 PDF |
 | 입력값 유지와 새 파일 생성 | 메뉴를 이동해도 보완 입력값을 유지한다. 새 주문 추출 또는 명시적 JSON 정정 시 이전 입력을 초기화한다. 내용 수정 시 기존 다운로드를 무효화한다. | `tests/test_review_ui.py` |
-| 문서별 동시 작업 (로컬 구현) | PI/PO/CI/PL/CIPL의 주문 입력·첨부·초안·검토값·승인·다운로드를 메뉴별로 보관한다. 메뉴를 이동해도 실행 중 추출/생성은 계속되며 결과는 시작한 메뉴에 저장한다. | `tests/test_workflow_state.py`, `tests/test_workflow_ui.py`; 배포 검증 전 |
+| 문서별 동시 작업 (로컬 구현) | PI/PO/CI/PL의 주문 입력·첨부·초안·검토값·승인·다운로드를 메뉴별로 보관한다. 메뉴를 이동해도 실행 중 추출/생성은 계속되며 결과는 시작한 메뉴에 저장한다. | `tests/test_workflow_state.py`, `tests/test_workflow_ui.py`; 배포 검증 전 |
 | 주문수량 0 | 숫자 `0`, 문자열 `"0"`, `"0.0"`을 정상 수량으로 인정한다. 행은 삭제하지 않으며 해당 행 금액은 0이다. 빈 값·음수·비숫자·NaN/Infinity는 계속 오류다. 단가의 양수 검증은 별도 유지한다. | `tests/test_trade_documents.py`, `tests/test_review_ui.py`, 배포 PO의 0+5 수량/금액 표시 |
 | 문서별 가격 구분 | ECLADO PO는 정확한 제품·용량의 검증된 KRW 매입가격을 사용한다. PI는 Dear Glow 판매가격을 사용한다. CI는 첨부 PI의 거래가격을 그대로 사용하며 PI가 없으면 카탈로그 가격으로 대체하지 않고 생성을 막는다. CI/PL은 ECLADO 제품명·용량 매칭만 수행하고, 가격 없는 PL에 카탈로그 가격을 적용하지 않는다. | `tests/test_supabase_catalog.py`, `tests/test_ci_pi_import.py`, `tests/test_product_matching.py` |
 | ECLADO 공급처 별칭 | `eclado`, `ECLADO CO. LTD`, `에끌라도`, `에끌라두`를 대소문자·공백·구두점 차이 없이 같은 공급처로 인식한다. 원래 법인명 필드는 그대로 보존한다. 화면에 인식 여부와 카탈로그 매입가격 적용 상품 수를 표시한다. | `tests/test_supabase_catalog.py`, `tests/test_review_ui.py` |
 | OCR 상품명 유사 매칭 및 직접 수정 (로컬 구현) | 정확한 상품명 일치가 없을 때만 문자열 유사도를 이용해 ECLADO 카탈로그 후보를 찾는다. 유사도 90% 이상이며 SKU·용량·제품 구분에 충돌이 없는 단일 후보는 카탈로그 가격을 불러오되 `Double-check this product` 확인 전에는 문서 생성을 막는다. 68% 이상 90% 미만은 가격을 자동 적용하지 않고 후보를 제시한다. 후보가 없거나 직접 수정한 상품명은 사용자가 입력한 그대로 견적에 표시하며 가격은 별도 입력/확인한다. 벡터 검색은 사용하지 않는다. | `tests/test_product_matching.py`, `tests/test_product_matching_ui.py`, `tests/test_workflow_state.py`; 배포 검증 전 |
 | 거래처 정보 DB (데이터 저장 완료, 자동 반영 코드는 로컬) | Supabase 비공개 `kekorea_counterparties`에 등록된 거래처의 법인명·주소·담당자·명시적 기본 배송지를 누락 필드에 적용한다. 주문에 명시한 값과 N/A가 우선한다. | `tests/test_counterparties.py`, `tests/test_counterparties_api.py`, `tests/test_counterparties_ui.py` |
-| PL/CIPL 합계 수정 승인 | 원본 합계와 항목별 계산 합계를 비교표로 보여준다. `합계를 수정할까요?`를 승인하면 원본은 보존하면서 계산된 합계를 PDF/Excel에 적용한다. PCS/KG 등 다른 단위는 따로 유지한다. 품목/원본 합계 변경 시 승인을 취소한다. 잘못된 행 값·단위 충돌·컨테이너 수는 승인으로 우회하지 못한다. | `tests/test_packing_approval.py`, `tests/test_review_ui.py` |
+| PL 합계 수정 승인 | 원본 합계와 항목별 계산 합계를 비교표로 보여준다. `합계를 수정할까요?`를 승인하면 원본은 보존하면서 계산된 합계를 PDF/Excel에 적용한다. PCS/KG 등 다른 단위는 따로 유지한다. 품목/원본 합계 변경 시 승인을 취소한다. 잘못된 행 값·단위 충돌·컨테이너 수는 승인으로 우회하지 못한다. | `tests/test_packing_approval.py`, `tests/test_review_ui.py` |
 | 통화와 반올림 | Decimal 계산을 유지한다. 화장품 KRW는 원 단위, USD는 소수점 두 자리로 단가를 반올림한 뒤 행 금액을 계산한다. 단위가 다른 수량은 별도로 표시한다. | `tests/test_trade_documents.py`, `tests/test_packing_workflow.py` |
 
 ### 최근 변경 이력
@@ -53,11 +55,11 @@ git diff --check
 
 원인: 기존 화면은 `trade_draft`와 생성 파일 상태 한 벌을 공유했다. 다른 문서의 추출 결과가 이를 덮어썼고, 메뉴를 떠날 때 Streamlit이 숨겨진 입력 위젯 상태를 정리했다. 긴 API 호출과 파일 생성도 화면 스크립트에서 실행되어 메뉴 이동에 따른 재실행과 충돌할 수 있었다.
 
-`agent/workflow_state.py`의 세션별 `DocumentWorkspaces`가 PI/PO/CI/PL/CIPL의 입력 문구, 첨부 이미지, 초안, 공급처 입력, 누락 정보 보완, 적용 전 JSON 편집, 포장 행, 확인/합계 승인, 생성 파일을 별도 보관한다. 준비 중 메뉴를 경유해도 기존 문서 작업은 유지한다. 업로더와 표 편집기의 읽기 전용 상태를 강제로 복원하지 않고, 첨부 바이트와 실제 편집 행을 따로 보존한다. 보관된 첨부는 미리보기로 확인하고 `첨부 이미지 모두 지우기`로 제거할 수 있다.
+`agent/workflow_state.py`의 세션별 `DocumentWorkspaces`가 PI/PO/CI/PL의 입력 문구, 첨부 이미지, 초안, 공급처 입력, 누락 정보 보완, 적용 전 JSON 편집, 포장 행, 확인/합계 승인, 생성 파일을 별도 보관한다. 준비 중 메뉴를 경유해도 기존 문서 작업은 유지한다. 업로더와 표 편집기의 읽기 전용 상태를 강제로 복원하지 않고, 첨부 바이트와 실제 편집 행을 따로 보존한다. 보관된 첨부는 미리보기로 확인하고 `첨부 이미지 모두 지우기`로 제거할 수 있다.
 
 자료 추출과 파일 생성은 세션당 최대 3개 작업 스레드로 실행한다. 같은 메뉴의 실행 중 작업은 중복 제출하지 않으며, 다른 메뉴에서는 새 작업을 시작할 수 있다. 작업자는 입력 복사본으로 실행하고 Streamlit 화면/세션 상태에는 접근하지 않는다. 결과는 화면 스레드가 시작한 메뉴에만 반영한다. 사이드바에 진행 중 작업과 보관 중 초안을 표시하고, 실행 중에는 1초 간격의 상태 확인으로 완료 결과를 갱신한다. 관련 Streamlit API: [fragment 공식 문서](https://docs.streamlit.io/1.41.0/develop/api-reference/execution-flow/st.fragment).
 
-각 생성 작업은 세션/작업별 고유 출력 폴더를 사용한다. 생성 중 문서 내용이 바뀌면 이전 내용으로 생성한 파일은 다운로드에 연결하지 않는다. 새 추출 성공/JSON 정정은 해당 메뉴의 이전 보완값과 포장 편집 상태를 초기화한다. 다른 메뉴의 자료는 건드리지 않는다. 기존 수량 0, 가격·통화, 프로모션, 합계 승인 취소, 직인, PDF 서식 및 CI+PL 생성 규칙은 유지한다.
+각 생성 작업은 세션/작업별 고유 출력 폴더를 사용한다. 생성 중 문서 내용이 바뀌면 이전 내용으로 생성한 파일은 다운로드에 연결하지 않는다. 새 추출 성공/JSON 정정은 해당 메뉴의 이전 보완값과 포장 편집 상태를 초기화한다. 다른 메뉴의 자료는 건드리지 않는다. 기존 수량 0, 가격·통화, 프로모션, 합계 승인 취소, 직인, PDF 서식 규칙은 유지한다. CI와 PL은 개별 메뉴와 파일로 생성한다.
 
 유지 범위는 **동일 브라우저 연결의 Streamlit 세션**이다. 브라우저 새로고침/새 세션, 서버 재시작에 대한 영구 저장은 구현하지 않았다. 외부 API 호출 시간제한과 오류는 기존대로 표시하며 자동 재요청하지 않는다. 실제 발주나 발송은 수행하지 않는다. 배포 앱 반영 및 실제 OpenAI 호출을 이용한 동시 작업 검증은 아직 수행하지 않았다.
 
@@ -105,11 +107,11 @@ git diff --check
 
 초기 테이블 생성은 `supabase/migrations/202611030001_counterparties.sql`을 사용자가 SQL Editor에서 실행했다. 이 대화의 Supabase SQL 도구는 노출되지 않았으므로 SQL 실행을 에이전트가 했다고 기록하지 않는다. 테이블에 RLS를 활성화하고 PUBLIC/anon/authenticated 접근을 회수했으며, 서버 역할에 SELECT/INSERT/UPDATE만 부여한다. 저장 명령은 `python Quotation_KEKOREA/scripts/save_company_profile.py --company-key DEAR_GLOW`다. 기존 회사 행의 미제공 필드는 유지하며 다른 회사 행은 수정하지 않는다. 저장 응답과 독립 GET으로 내용 일치를 검증했고, 공개 키의 조회는 HTTP 401로 거부됐다.
 
-`agent/counterparties.py`는 법인명/등록 별칭을 식별하여 PI/CI/PL/CIPL에서는 구매자, PO에서는 공급처 정보를 채운다. 대상 이름이 비어 있을 때만 명령문의 유일한 등록 거래처명을 보조 근거로 사용한다. 다른 거래처가 명시되거나 별칭이 중복되면 임의로 적용하지 않는다. 등록 주소를 배송지로 추측하지 않으며, 명시적으로 등록한 기본 배송지만 판매 문서에 사용한다. PO의 배송지는 공급처 배송지로 대체하지 않는다. 기존 KE KOREA 정보, 가격·통화·상품·수량·포장 검증은 유지한다.
+`agent/counterparties.py`는 법인명/등록 별칭을 식별하여 PI/CI/PL에서는 구매자, PO에서는 공급처 정보를 채운다. 대상 이름이 비어 있을 때만 명령문의 유일한 등록 거래처명을 보조 근거로 사용한다. 다른 거래처가 명시되거나 별칭이 중복되면 임의로 적용하지 않는다. 등록 주소를 배송지로 추측하지 않으며, 명시적으로 등록한 기본 배송지만 판매 문서에 사용한다. PO의 배송지는 공급처 배송지로 대체하지 않는다. 기존 KE KOREA 정보, 가격·통화·상품·수량·포장 검증은 유지한다.
 
 DB 데이터는 추출 후 서버에서 적용하며 저장된 연락처를 AI 프롬프트에 추가해 보내지 않는다. 주문에 명시된 주소/담당자/배송지와 N/A는 DB 기본값보다 우선한다. DB가 채운 필드는 출처를 추적하여 거래처 변경 시 다른 회사 자료가 남지 않게 한다. DB 조회 장애가 나더라도 이미 검토 중인 동일 거래처의 저장 정보와 사용자가 직접 입력한 법인명은 지우지 않는다. 회사 레코드는 60초 캐시한다. 테이블/연결 장애 시에는 경고하고 직접 입력 경로를 유지한다.
 
-검증: 가상 회사 정보만 사용하는 **134개 전체 테스트가 통과했다(화면 테스트 포함, 생략 없음)**. DB 저장/재조회, 별칭 명령 자동 입력, PI/PO/CIPL 검토 화면, 명시 값 우선, 거래처 변경/중복/미일치, 회사 주소와 배송지 분리, DB 장애 시 문서 보존, 기존 기능을 검증한다. 독립 검토에서 지적된 DB 장애 시 법인명 소실은 실패 테스트로 재현 후 수정했고, Windows SQLite 연결을 명시적으로 닫는 것도 검증했다. `git diff --check`를 함께 실행한다.
+검증: 당시 가상 회사 정보만 사용하는 **134개 전체 테스트가 통과했다(화면 테스트 포함, 생략 없음)**. DB 저장/재조회, 별칭 명령 자동 입력, PI/PO/CI 검토 화면, 명시 값 우선, 거래처 변경/중복/미일치, 회사 주소와 배송지 분리, DB 장애 시 문서 보존, 기존 기능을 검증한다. 독립 검토에서 지적된 DB 장애 시 법인명 소실은 실패 테스트로 재현 후 수정했고, Windows SQLite 연결을 명시적으로 닫는 것도 검증했다. `git diff --check`를 함께 실행한다.
 
 배포 상태: 거래처 **데이터는 실제 Supabase에 저장 완료**했지만 자동 입력 코드의 커밋/배포 및 실제 배포 앱 자동 입력 검증은 아직 하지 않았다. DB의 비공개 권한과 앱 화면의 접근 제어는 별개다. 현재 앱은 로그인 없이 접속되므로, 연락처/배송지 자동 조회 기능을 배포할 때에는 앱 이용 대상과 접근 제한을 먼저 확인해야 한다. 저장 성공만으로 배포 앱의 자동 입력이 동작한다고 안내하지 않는다.
 
@@ -126,7 +128,7 @@ DB 데이터는 추출 후 서버에서 적용하며 저장된 연락처를 AI �
 
 ## 1. 이해한 목표
 
-KE KOREA CO. LTD의 실제 거래 정보를 받아 제품군에 맞는 Purchase Order(PO), Proforma Invoice(PI), Commercial Invoice(CI), Packing List(PL)를 생성한다. CI와 PL은 개별 파일 또는 하나의 CIPL PDF로 제공한다.
+KE KOREA CO. LTD의 실제 거래 정보를 받아 제품군에 맞는 Purchase Order(PO), Proforma Invoice(PI), Commercial Invoice(CI), Packing List(PL)를 각각 별도 파일로 생성한다.
 
 - PO: KE KOREA가 구매자로서 공급처에 보내는 발주서.
 - PI: KE KOREA가 판매자로서 구매처에 보내는 거래 조건·대금 안내 문서.
@@ -382,7 +384,7 @@ API 기반 판독을 선택하면 어떤 자료가 외부로 전송되는지 표
 - `app.py`: Streamlit screen for typed transaction details and buyer order-image uploads. Users review extracted JSON, resolve blocking issues, and download PDF/XLSX/HTML drafts.
 - `agent/extractor.py`: OpenAI Responses API structured extraction from transaction text and attached order screenshots. Prompt and images are sent only after the user clicks Extract.
 - 입력 언어: 중국어·인도네시아어·한국어를 GPT가 해석해 영문 필드로 정리한다. 중국어 회사명·주소는 중국어 원문 뒤에 영문 번역을 괄호로 병기하고, 나머지 중국어는 영문만 남긴다. PDF는 중국어 글리프용 CID 폰트 인코딩으로 병기 이름·주소를 보존한다.
-- KE Korea default profile for all PI, PO, CI, PL, and CIPL documents: `KE Korea Co. LTD`, `#1510, 157 Yangpyung Ro, Yungdeungpo Gu, Seoul, South Korea`, `Representative: DAVID, SEOKWON IHM`, phone `+82 10 9823 0029`, and email `david.ihm@ke-korea.com`. The profile is seller by default and buyer on PO; transaction-specific company details take priority. Documents use `assets/company_logo.png` in the header and the complete private seal image from `assets/image.png` in the signature area.
+- KE Korea default profile for PI, PO, CI, and PL documents: `KE Korea Co. LTD`, `#1510, 157 Yangpyung Ro, Yungdeungpo Gu, Seoul, South Korea`, `Representative: DAVID, SEOKWON IHM`, phone `+82 10 9823 0029`, and email `david.ihm@ke-korea.com`. The profile is seller by default and buyer on PO; transaction-specific company details take priority. Documents use `assets/company_logo.png` in the header and the complete private seal image from `assets/image.png` in the signature area.
 - `agent/pricing.py`: Supabase REST API에서 최신 `kekorea_catalog_imports` ID, ECLADO 제품, 해당 import의 매입가·판매가를 서버에서 조회한다. ECLADO 공급 PO에는 매입가만, Dear Glow 판매 PI/CI에는 해당 구매처 판매가만 exact match로 적용한다. 구매처·공급처/통화가 다르면 해당 가격을 쓰지 않는다.
 - Supabase 신형 `SUPABASE_SECRET_KEY`는 HTTPS REST 요청의 `apikey` 헤더로만 전달한다. 브라우저 코드, URL, 로그에 키를 노출하지 않는다. Secret key는 전체 DB 접근 권한이 있으므로 Streamlit 앱 공개 범위를 반드시 비공개로 설정한다.
 - Supabase 연결 설정이 없으면 개발용 로컬 seed를 사용할 수 있으나, Cloud에서는 seed를 Git에서 제외하므로 Supabase 비밀 키가 필요하다. Supabase 조회 실패 시 오래된 로컬 가격으로 조용히 대체하지 않는다.
@@ -391,13 +393,13 @@ API 기반 판독을 선택하면 어떤 자료가 외부로 전송되는지 표
 
 ### Supplier packing-list images
 
-PL/CIPL 검토·승인 로직은 `agent/packing_review.py`, 기존 합계 계산은 `agent/packing.py`로 분리한다. 검토 화면은 명시적 숫자 뒤의 단위(`100 PCS`, `10 kg`, `0.1 CBM`)와 `수량 x 규격FT Containers` 형식을 분리해 읽는다. 컨테이너 개수와 규격을 곱하거나 팔레트 수에서 컨테이너 수를 추측하지 않는다. 단위가 서로 충돌하면 수정을 요청한다.
+PL 검토·승인 로직은 `agent/packing_review.py`, 기존 합계 계산은 `agent/packing.py`로 분리한다. 검토 화면은 명시적 숫자 뒤의 단위(`100 PCS`, `10 kg`, `0.1 CBM`)와 `수량 x 규격FT Containers` 형식을 분리해 읽는다. 컨테이너 개수와 규격을 곱하거나 팔레트 수에서 컨테이너 수를 추측하지 않는다. 단위가 서로 충돌하면 수정을 요청한다.
 
 합계가 다르거나 원본 합계가 비어 있고 행별 합계를 계산할 수 있으면 비교표와 `합계를 수정할까요?` 승인란을 표시한다. 승인은 계산된 합계에만 적용하며 원본 값을 `_packing_original_totals`에 보존한다. 다른 단위의 수량은 `_packing_approved_quantities`에 별도로 보존한다. 단가·상업송장 품목 수량·포장 행 자체는 변경하지 않는다. 승인 후 PDF 생성에는 나머지 필수 정보와 행 검증도 통과해야 한다. 원본 합계나 품목을 다시 수정하면 이전 승인과 이전 다운로드를 무효화한다.
 
 2026-11-02 실제 배포 검증: 가상 PL 두 행에서 승인 전 PDF 생성 차단, 승인 후 계산된 CBM과 단위별 수량·컨테이너 수가 반영된 PDF 다운로드, 원본 합계 수정 시 승인 취소 및 기존 다운로드 제거를 확인했다. 다운로드 PDF를 이미지로 렌더링하여 표·합계·직인 배치도 확인했다.
 
-The PL and CIPL workflows accept up to five supplier document images and extract each product's quantity and unit, package type and count, net and gross weight, and CBM. Printed totals and the explicit container count are stored separately from calculated row sums; containers are never inferred from pallet counts or volume. The review table and printed-total fields are editable. Quantities and package types are not added across incompatible units, and fractional pallet allocations are allowed. When complete row values differ from printed totals, documents use the calculated row totals, preserve the source values for review, and require the user to confirm the extracted values before download. Invalid values and inconsistent package types still block download. Missing values remain unconfirmed. PL output does not require a price or currency. PDF, Excel, and HTML include the packing fields; CIPL includes both CI and PL outputs.
+The standalone PL workflow accepts up to five supplier document images and extracts each product's quantity and unit, package type and count, net and gross weight, and CBM. Printed totals and the explicit container count are stored separately from calculated row sums; containers are never inferred from pallet counts or volume. The review table and printed-total fields are editable. Quantities and package types are not added across incompatible units, and fractional pallet allocations are allowed. When complete row values differ from printed totals, the PL draft uses the calculated row totals, preserves the source values for review, and requires the user to confirm the extracted values before download. Invalid values and inconsistent package types still block download. Missing values remain unconfirmed. PL output does not require a price or currency. PDF, Excel, and HTML include the packing fields.
 
 For a cosmetics PO with no seller name, each exact catalog match can supply a verified ECLADO purchase-price candidate independently. An unresolved row must not suppress prices for other matched rows. The user must confirm that price source; the supplier's legal name and address remain separate fields. A different specified supplier does not receive ECLADO catalog prices. Explicit transaction currencies remain unchanged.
 
@@ -470,9 +472,9 @@ The uploader uses local credentials, creates a private bucket if necessary, and 
 
 ## Shared document handling and document names
 
-PI, PO, CI, PL, and CIPL use the same extraction, quantity synchronization, Decimal calculation, English translation checks, explicit REMARK handling (`N/A` when omitted), and branded PDF/XLSX renderer. Product matching can use ECLADO names and capacities across PO, CI, and PL; uncertain matches require review. PO uses verified ECLADO KRW purchase prices. PI may use the Dear Glow sale price list. CI must preserve transaction prices from its attached PI and is blocked without that source; it is never repriced from the ECLADO purchase catalog. PL remains price-free and uses product matching only.
+PI, PO, CI, and PL use the same extraction, quantity synchronization, Decimal calculation, English translation checks, explicit REMARK handling (`N/A` when omitted), and branded PDF/XLSX renderer. Product matching can use ECLADO names and capacities across PO, CI, and PL; uncertain matches require review. PO uses verified ECLADO KRW purchase prices. PI may use the Dear Glow sale price list. CI must preserve transaction prices from its attached PI and is blocked without that source; it is never repriced from the ECLADO purchase catalog. PL remains price-free and uses product matching only.
 
-The Streamlit sidebar offers separate PI, PO, CI, PL, and CIPL workflows. CI creates a Commercial Invoice only; PL creates a Packing List only; CIPL creates both CI and PL using the same transaction data. PI alone includes KE KOREA's USD bank details. CIPL is recognized as a paired document request; PI/Proforma Invoice, PO/Purchase Order, CI/Commercial Invoice, and PL/Packing List aliases are accepted when the prompt explicitly requests creation. If the named document conflicts with the selected menu, extraction stops and tells the user which menu to choose.
+The Streamlit sidebar offers separate PI, PO, CI, and PL workflows. CI creates a Commercial Invoice only; PL creates a Packing List only. Generate each document from its own menu. PI alone includes KE KOREA's USD bank details. PI/Proforma Invoice, PO/Purchase Order, CI/Commercial Invoice, and PL/Packing List aliases are accepted when the prompt explicitly requests creation. If the named document conflicts with the selected menu, extraction stops and tells the user which menu to choose.
 
 Field extraction accepts common equivalent labels instead of requiring exact schema wording: Qty/Q'ty/ordered units/Volume for quantities; Item/Product/Goods/Description for product names; Unit Price/Rate/Price per unit for prices; Shipping Terms/Terms of Shipping/Ship Conditions/Delivery Terms for Incoterms; and Payment Conditions/Terms of Payment/Settlement Terms for payment. SET, BOX, CARTON, CTN, PALLET, and similar terms are retained as units or package descriptors based on context, never converted to another unit. If a quantity uses ambiguous `Volume` or a bare package-count label such as `Box: 10`, the review screen asks the user to confirm the interpretation before enabling PDF/XLSX downloads. Cubic/package volume and delivery dates are kept distinct from ordered quantity and Incoterms.
 
@@ -480,7 +482,7 @@ The shared PDF renderer preserves the source quantity unit on PI, PO, and CI lin
 
 ### Automatic document fields
 
-- The issue date is always generated from the current date in `Asia/Seoul` and displayed in English (for example, `30 October 2026`). Dates copied from an order or email are not used as the issue date. This rule applies to PI, PO, CI, PL, CIPL, PDF, Excel, and HTML outputs.
+- The issue date is always generated from the current date in `Asia/Seoul` and displayed in English (for example, `30 October 2026`). Dates copied from an order or email are not used as the issue date. This rule applies to PI, PO, CI, PL, PDF, Excel, and HTML outputs.
 - The PDF title badge shows the document identifier without a `DRAFT | NO.` prefix: PI and CI use `INVOICE #`, PO uses `PO #`, and PL uses `PACKING LIST #`. Draft status remains visible in the footer.
 - `SHIP TO` contains only a specifically stated delivery destination, recognized from labels such as `Ship To`, `Delivered To`, `Delivery To`, `Delivery Address`, `Destination`, or equivalent supported-language labels. The buyer address, seller address, origin country, and EXW/FOB named place are not used as a destination. If no specific destination is provided, the document displays `N/A`.
 
@@ -515,7 +517,7 @@ PI 요청에 `샘플` 또는 대소문자 구분 없는 `sample`이 있으면 **
 
 ### PDF 공통 입력 및 첨부 PI → CI 가져오기 (2026-11-03)
 
-PO·PI·CI·PL·CIPL의 공통 업로드 영역에서 PNG/JPG/JPEG/WEBP와 PDF를 지원합니다. 이미지와 PDF를 섞어서 최대 5개, 파일당 10 MB, 합계 20 MB까지 올릴 수 있습니다. PDF는 첫 페이지만 잘라 보내지 않고 원본 전체를 추출 요청에 포함합니다. 텍스트 PDF와 스캔된 페이지를 같은 문서 입력 경로로 전달하며, 실제 인식 정확도는 원본 품질과 모델 결과에 따라 검토해야 합니다. PDF 파일은 이름으로 표시하고 이미지 미리보기에 넣지 않습니다. 원본 첨부와 진행 중 추출은 기존 메뉴별 작업 보관·비동기 실행 경로를 사용합니다. CIPL/PL의 포장 합계 비교 및 승인도 그대로 적용합니다.
+PO·PI·CI·PL의 공통 업로드 영역에서 PNG/JPG/JPEG/WEBP와 PDF를 지원합니다. 이미지와 PDF를 섞어서 최대 5개, 파일당 10 MB, 합계 20 MB까지 올릴 수 있습니다. PDF는 첫 페이지만 잘라 보내지 않고 원본 전체를 추출 요청에 포함합니다. 텍스트 PDF와 스캔된 페이지를 같은 문서 입력 경로로 전달하며, 실제 인식 정확도는 원본 품질과 모델 결과에 따라 검토해야 합니다. PDF 파일은 이름으로 표시하고 이미지 미리보기에 넣지 않습니다. 원본 첨부와 진행 중 추출은 기존 메뉴별 작업 보관·비동기 실행 경로를 사용합니다. PL 메뉴에서 포장 합계 비교 및 승인을 처리합니다.
 
 PDF 전송은 [OpenAI 공식 파일 입력 형식](https://developers.openai.com/api/docs/guides/file-inputs)의 `input_file`과 원본 Base64를 사용합니다. 기존 이미지의 `input_image` 경로는 유지하며 별도의 PDF 변환 패키지나 SQL 테이블을 추가하지 않았습니다. 비어 있는 파일, PDF 헤더가 아닌 파일, 미지원 형식과 용량 초과는 API 호출 전에 거부합니다. 문서 내용은 추출 근거이며 실행 지시로 취급하지 않습니다.
 

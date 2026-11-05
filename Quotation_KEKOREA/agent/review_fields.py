@@ -30,7 +30,7 @@ def field_value(data, field):
     return value
 
 
-def missing_review_fields(data, *, packing=False):
+def missing_review_fields(data):
     dtype = data.get("document_type")
     fields = [ReviewField(("document_number",), "Document number (or DRAFT)"),
               ReviewField(("incoterms",), "Delivery terms / Incoterms and named place"),
@@ -52,7 +52,7 @@ def missing_review_fields(data, *, packing=False):
         if dtype != "PL":
             fields.extend([ReviewField(("items", i, "unit_price"), f"Item {i + 1}: unit price"),
                            ReviewField(("items", i, "discount_percent"), f"Item {i + 1}: discount % (0 if none)")])
-    if dtype == "PL" or packing:
+    if dtype == "PL":
         fields.append(ReviewField(("container_count",), "Containers (0 if not containerized)"))
     return [field for field in fields if _missing(field_value(data, field), field.required)]
 

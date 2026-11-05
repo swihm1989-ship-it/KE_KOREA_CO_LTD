@@ -10,7 +10,7 @@ from Quotation_KEKOREA.tests.test_review_fields import complete_draft
 
 @unittest.skipUnless(importlib.util.find_spec('streamlit'), 'Streamlit is not installed')
 class CounterpartyUiTests(unittest.TestCase):
-    def test_database_defaults_reach_pi_po_and_cipl_without_overwriting_ship_to(self):
+    def test_database_defaults_reach_pi_po_and_ci_without_overwriting_ship_to(self):
         from streamlit.testing.v1 import AppTest
         path = Path(__file__).resolve().parents[1] / 'app.py'
         env = dict(OPENAI_API_KEY='test', SUPABASE_URL='https://company-test.supabase.co', SUPABASE_SECRET_KEY='test')
@@ -19,7 +19,7 @@ class CounterpartyUiTests(unittest.TestCase):
              patch('Quotation_KEKOREA.agent.counterparties.load_company_profiles', return_value=[PROFILE]), \
              patch('Quotation_KEKOREA.agent.branding.resolve_company_seal', return_value=(path, None, None)):
             for page, dtype, role in [('PI 만들기', 'PI', 'buyer'), ('PO 만들기', 'PO', 'seller'),
-                                      ('CIPL 만들기', 'CI', 'buyer')]:
+                                      ('CI 만들기', 'CI', 'buyer')]:
                 with self.subTest(page=page):
                     doc = complete_draft()
                     doc.update(document_type=dtype, product_family='other', ship_to=None)

@@ -243,7 +243,6 @@ def _requested_document_type(prompt):
     """Recognize document aliases only when used as an explicit create request."""
     text = prompt or ""
     names = {
-        "CIPL": r"(?:\bC\s*I\s*[+&/]\s*P\s*L\b|\bCIPL\b|commercial\s+invoice\s*(?:and|\+|&)\s*packing\s+list|packing\s+list\s*(?:and|\+|&)\s*commercial\s+invoice|상업송장\s*(?:및|\+)\s*(?:포장명세서|패킹리스트))",
         "PI": r"(?:\bPI\b|pro\s*-?\s*forma\s+invoice|프로포마\s*인보이스|견적서)",
         "PO": r"(?:\bPO\b|purchase\s+order|구매주문서|발주서)",
         "CI": r"(?:\bCI\b|commercial\s+invoice|상업송장)",
@@ -269,10 +268,10 @@ def _keep_delivery_note_in_terms(draft, auto_remark):
         draft["incoterms"] = f"{terms}; {note}" if terms else note
 
 
-def _extract_draft(prompt, title, expected_type, create_cipl_bundle, image_inputs, runtime_env, catalog, company_profiles=()):
+def _extract_draft(prompt, title, expected_type, image_inputs, runtime_env, catalog, company_profiles=()):
     """Run the existing extraction/verification pipeline on a worker-owned snapshot."""
     draft = extract_trade_data(prompt or f"Use the attached source documents for a {title}.", images=image_inputs, env=runtime_env,
-                               requested_document_type=expected_type, packing_source=expected_type == "PL" or create_cipl_bundle)
+                               requested_document_type=expected_type, packing_source=expected_type == "PL")
     prepare_ci_import(draft, requested_type=expected_type, has_attachments=bool(image_inputs))
     draft = _normalize_quantity_aliases(draft, prompt)
     draft = _normalize_currency_alias(draft, prompt)
@@ -323,7 +322,7 @@ def _extract_draft(prompt, title, expected_type, create_cipl_bundle, image_input
     return draft
 
 
-def _render_draft(result, output_root, bank_details, logo_path, local_seal_path, seal_bytes, create_cipl_bundle):
+def _render_draft(result, output_root, bank_details, logo_path, local_seal_path, seal_bytes):
     """Keep existing render rules; each background job owns its output directory."""
     result = ci_render_data(result)
     output_dir = Path(output_root) / uuid4().hex
@@ -335,19 +334,9 @@ def _render_draft(result, output_root, bank_details, logo_path, local_seal_path,
             seal_path.write_bytes(seal_bytes)
             outputs = render_files(result, output_dir, bank_details=bank_details,
                                    logo_path=logo_path, seal_path=seal_path)
-            if create_cipl_bundle:
-                packing_result = validate_and_calculate({**result, "document_type": "PL"})
-                outputs.update({f"packing_{k}": v for k, v in render_files(
-                    packing_result, output_dir, bank_details=bank_details,
-                    logo_path=logo_path, seal_path=seal_path).items()})
     else:
         outputs = render_files(result, output_dir, bank_details=bank_details,
                                logo_path=logo_path, seal_path=seal_path)
-        if create_cipl_bundle:
-            packing_result = validate_and_calculate({**result, "document_type": "PL"})
-            outputs.update({f"packing_{k}": v for k, v in render_files(
-                packing_result, output_dir, bank_details=bank_details,
-                logo_path=logo_path, seal_path=seal_path).items()})
     return outputs
 
 
@@ -379,7 +368,9 @@ with st.sidebar:
     st.markdown("### CONTRACT TEMPLATE MAKER")
     st.caption("KE KOREA CO. LTD · TRADE DOCUMENTS")
     st.markdown("---")
-    pages = ["PI 만들기", "PO 만들기", "CI 만들기", "PL 만들기", "CIPL 만들기", "계약서 만들기 · 준비 중", "커미션 계약서 만들기 · 준비 중"]
+    pages = ["PI 만들기", "PO 만들기", "CI 만들기", "PL 만들기", "계약서 만들기 · 준비 중", "커미션 계약서 만들기 · 준비 중"]
+    if "selected_document_page" in st.session_state and st.session_state["selected_document_page"] not in pages:
+        st.session_state["selected_document_page"] = pages[0]
     page = st.radio("문서 종류", pages, label_visibility="collapsed", key="selected_document_page")
     st.markdown("---")
     st.caption("초안은 검토 후 사용하세요. 자동 발행이나 전송은 하지 않습니다.")
@@ -412,14 +403,12 @@ page_config = {
     "PO 만들기": ("PO", "Purchase Order", "KE KOREA가 공급처에 발행할 Purchase Order 초안을 만듭니다."),
     "CI 만들기": ("CI", "Commercial Invoice", "통관 제출용 Commercial Invoice 초안을 만듭니다."),
     "PL 만들기": ("PL", "Packing List", "선적 포장 수량과 중량을 표시하는 Packing List 초안을 만듭니다."),
-    "CIPL 만들기": ("CI", "Commercial Invoice & Packing List", "선적 정보를 입력하면 Commercial Invoice와 Packing List를 함께 만듭니다."),
 }
 if page not in page_config:
-    st.markdown('<div class="ke-header"><div class="ke-eyebrow">Coming soon</div><h1>' + page.split(" ·")[0] + '</h1><p>이 메뉴는 준비 중입니다. 현재는 PI, PO, CI, PL, CIPL 생성을 사용할 수 있습니다.</p></div>', unsafe_allow_html=True)
+    st.markdown('<div class="ke-header"><div class="ke-eyebrow">Coming soon</div><h1>' + page.split(" ·")[0] + '</h1><p>이 메뉴는 준비 중입니다. 현재는 PI, PO, CI, PL 생성을 사용할 수 있습니다.</p></div>', unsafe_allow_html=True)
     st.stop()
 
 expected_type, title, description = page_config[page]
-create_cipl_bundle = page == "CIPL 만들기"
 st.markdown(f'<div class="ke-header"><div class="ke-eyebrow">KE KOREA · CONTRACT TEMPLATE MAKER</div><h1>{title}</h1><p>{description}</p></div>', unsafe_allow_html=True)
 
 st.warning("생성된 파일은 검토용 초안입니다. 발행·주문 전 정보와 금액을 확인하세요.")
@@ -480,10 +469,7 @@ else:
         st.error("Supabase catalog credentials are missing. Set SUPABASE_URL and SUPABASE_SECRET_KEY in Streamlit Cloud Settings > Secrets.")
 
 with st.expander("What this menu creates"):
-    if create_cipl_bundle:
-        st.write("CIPL creates two review files: a Commercial Invoice (CI) and a Packing List (PL). Provide actual shipment, package, and weight information; unknown details remain flagged for review.")
-    else:
-        st.write(f"{title} uses the KE KOREA branded PDF template. ECLADO prices are matched against the verified catalog when available. PI includes KE KOREA USD bank details; PO, CI, and PL do not.")
+    st.write(f"{title} uses the KE KOREA branded PDF template. ECLADO prices are matched against the verified catalog when available. PI includes KE KOREA USD bank details; PO, CI, and PL do not.")
     st.write("Source documents may be PNG, JPG, JPEG, WEBP, or PDF. Extracted information needs human review.")
 
 st.markdown('<div class="ke-section">1 · 주문 정보</div>', unsafe_allow_html=True)
@@ -493,7 +479,7 @@ def _remember_order_uploads():
     work.remember_uploads(page, st.session_state.get(f"order_upload_{page}") or [])
 
 
-current_uploads = st.file_uploader("공급처 패킹리스트 이미지/PDF 첨부" if expected_type == "PL" or create_cipl_bundle else "주문·PI 이미지/PDF 첨부", type=["png", "jpg", "jpeg", "webp", "pdf"], accept_multiple_files=True,
+current_uploads = st.file_uploader("공급처 패킹리스트 이미지/PDF 첨부" if expected_type == "PL" else "주문·PI 이미지/PDF 첨부", type=["png", "jpg", "jpeg", "webp", "pdf"], accept_multiple_files=True,
     key=f"order_upload_{page}", on_change=_remember_order_uploads,
     help="이미지/PDF를 섞어서 최대 5개, 파일당 10 MB, 총 20 MB까지 첨부할 수 있습니다. PDF의 모든 페이지를 추출 대상으로 전달합니다.")
 if current_uploads:
@@ -520,7 +506,7 @@ if extract_clicked:
     try:
         requested_type = ('CI' if expected_type == 'CI' and uploaded_images and is_ci_conversion_request(prompt)
                           else _requested_document_type(prompt))
-        selected_type = "CIPL" if create_cipl_bundle else expected_type
+        selected_type = expected_type
         if requested_type and requested_type != selected_type:
             raise ValueError(
                 f"Your prompt requests {requested_type}, but the sidebar is set to {selected_type}. "
@@ -528,7 +514,7 @@ if extract_clicked:
             )
         image_inputs = prepare_uploads(uploaded_images)
         work.start(page, "extract", _extract_draft, prompt, title, expected_type,
-                   create_cipl_bundle, image_inputs, runtime_env, active_catalog, active_company_profiles)
+                   image_inputs, runtime_env, active_catalog, active_company_profiles)
         st.rerun()
     except Exception as exc:
         st.error(str(exc))
@@ -545,7 +531,7 @@ if raw:
             st.caption("PO supplier details (fill in the supplier's legal name and address when known).")
             seller["legal_name"] = st.text_input("Supplier legal name", value=seller.get("legal_name") or "", key=f"po_seller_name_{page}") or None
             seller["address"] = st.text_input("Supplier address", value=seller.get("address") or "", key=f"po_seller_address_{page}") or None
-        if expected_type == "PL" or create_cipl_bundle:
+        if expected_type == "PL":
             buyer = data.get("buyer") or {}
             data["buyer"] = buyer
             party_columns = st.columns(2)
@@ -568,15 +554,12 @@ if raw:
                 row = {"Row": str(index)}
                 for field, label in packing_fields:
                     value = item.get(field)
-                    if field == "quantity" and create_cipl_bundle:
-                        value = next((item.get(key) for key in ("shipped_quantity", "quantity")
-                                      if item.get(key) not in (None, "")), None)
                     row[label] = "" if value is None else str(value)
                 packing_rows.append(row)
             if not packing_rows and expected_type == "PL":
                 packing_rows = [{"Row": "", **{label: "" for _, label in packing_fields}}]
             packing_rows = work.editor_input(page, packing_rows)
-            edited_rows = st.data_editor(packing_rows, hide_index=True, num_rows="fixed" if create_cipl_bundle else "dynamic",
+            edited_rows = st.data_editor(packing_rows, hide_index=True, num_rows="dynamic",
                                          disabled=["Row"], use_container_width=True, key=f"packing_{page}_rows")
             work.editor_rows[page] = json.loads(json.dumps(edited_rows))
             updated_items = []
@@ -584,9 +567,6 @@ if raw:
                 row_id = str(row.get("Row") or "")
                 item = dict(original_items[int(row_id) - 1]) if row_id.isdigit() and 1 <= int(row_id) <= len(original_items) else {}
                 for field, label in packing_fields:
-                    if field == "quantity" and create_cipl_bundle:
-                        item["shipped_quantity"] = str(row.get(label) or "").strip() or None
-                        continue
                     item[field] = str(row.get(label) or "").strip() or None
                 if expected_type == "PL":
                     item["paid_quantity"] = item.get("quantity")
@@ -632,14 +612,14 @@ if raw:
                     key=f"product_double_check_{page}_{index}")
             apply_verified_eclado_prices(data, active_catalog)
         sample_review_paths = edit_sample_rows(data, page)
-        review_fields = missing_review_fields(data, packing=create_cipl_bundle)
+        review_fields = missing_review_fields(data)
         if expected_type == "CI" and not is_pi_import(data):
             review_fields = [field for field in review_fields if not (
                 field.path[0] == "items" and field.path[-1] in {"unit_price", "discount_percent"})]
         existing_review_paths = set(sample_review_paths)
         if expected_type == "PO":
             existing_review_paths.update({("seller", "legal_name"), ("seller", "address")})
-        if expected_type == "PL" or create_cipl_bundle:
+        if expected_type == "PL":
             existing_review_paths.update({("buyer", "legal_name"), ("buyer", "address"), ("ship_to",),
                                           ("shipment_reference",), ("country_of_origin",), ("container_count",)})
         if review_fields:
@@ -659,17 +639,14 @@ if raw:
             apply_company_profiles(data, active_company_profiles)
             apply_verified_eclado_prices(data, active_catalog)
         data = recalculate_order_promotions(data)
-        pending_review_fields = missing_review_fields(data, packing=create_cipl_bundle)
+        pending_review_fields = missing_review_fields(data)
         if expected_type == "PO":
             verified_count = sum(item.get("master_price") is True for item in data.get("items", []))
             st.caption(f"PO는 ECLADO KRW 매입 카탈로그 기준 · 확인된 가격 적용: {verified_count}/{len(data.get('items', []))}개 상품")
         if pending_review_fields:
             st.warning("PDF/Excel 생성 전에 다음 항목을 입력해 주세요: " + "; ".join(field.label for field in pending_review_fields))
         result = validate_and_calculate(data)
-        packing_check = reconcile_packing(data) if expected_type == "PL" or create_cipl_bundle else None
-        if create_cipl_bundle:
-            packing_check["issues"].extend(issue for issue in result["blocking_issues"]
-                                           if issue.startswith("Shipped quantity must equal paid plus free quantity"))
+        packing_check = reconcile_packing(data) if expected_type == "PL" else None
         if packing_check and packing_check["issues"]:
             st.error("포장 항목에서 확인 또는 수정이 필요한 값이 있습니다:")
             for issue in packing_check["issues"]:
@@ -928,7 +905,7 @@ if raw:
             work.start(page, "render", _render_draft, result,
                        ROOT / "outputs" / work.session_id, bank_details,
                        ROOT / "assets" / "company_logo.png", local_seal_path,
-                       seal_bytes, create_cipl_bundle, context=render_context,
+                       seal_bytes, context=render_context,
                        file_format="pdf" if make_pdf else "xlsx")
             st.rerun()
 

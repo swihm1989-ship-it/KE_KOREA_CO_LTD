@@ -60,11 +60,3 @@ class PackingApprovalTests(unittest.TestCase):
         self.assertTrue(reconcile_packing(normalized)['issues'])
         with self.assertRaises(ValueError):
             apply_approved_packing_totals(normalized)
-
-    def test_cipl_approval_never_changes_commercial_items_or_amounts(self):
-        source = packing_example()
-        source.update(document_type='CI', currency='USD', total='123')
-        before = copy.deepcopy(source['items'])
-        approved = apply_approved_packing_totals(source)
-        self.assertEqual(approved['items'], before)
-        self.assertEqual(approved['total'], '123')
