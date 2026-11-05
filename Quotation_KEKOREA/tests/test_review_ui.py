@@ -31,7 +31,7 @@ class ReviewUiTests(unittest.TestCase):
             self.assertTrue(next(button for button in at.button if button.label == 'Create PDF').disabled)
             effective = __import__('json').loads(at.session_state['rendered_json'])['document']
             self.assertEqual(effective['currency'], 'KRW')
-            self.assertTrue(effective['pending_confirmations'])
+            self.assertFalse(effective['pending_confirmations'])
 
     def test_pl_totals_approval_enables_pdf_and_resets_when_source_changes(self):
         from streamlit.testing.v1 import AppTest
@@ -106,7 +106,7 @@ class ReviewUiTests(unittest.TestCase):
                     self.assertEqual(metrics['Total quantity'], '5 PCS')
                     self.assertEqual(metrics['Total amount'], 'KRW 5,000')
                     self.assertFalse(any('unit price' in entry.label for entry in at.text_input))
-                    self.assertTrue(any('ECLADO 공급처로 인식됨' in entry.value for entry in at.caption))
+                    self.assertTrue(any('PO는 ECLADO KRW 매입 카탈로그 기준' in entry.value for entry in at.caption))
 
     def test_zero_quantity_calculates_but_missing_and_negative_quantities_block_exports(self):
         from streamlit.testing.v1 import AppTest

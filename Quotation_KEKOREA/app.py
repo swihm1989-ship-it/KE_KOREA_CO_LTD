@@ -658,9 +658,9 @@ if raw:
                 apply_verified_eclado_prices(data, active_catalog)
         data = recalculate_order_promotions(data)
         pending_review_fields = missing_review_fields(data, packing=create_cipl_bundle)
-        if expected_type == "PO" and is_eclado_supplier((data.get("seller") or {}).get("legal_name")):
+        if expected_type == "PO":
             verified_count = sum(item.get("master_price") is True for item in data.get("items", []))
-            st.caption(f"ECLADO 공급처로 인식됨 · 카탈로그 매입가격 적용: {verified_count}/{len(data.get('items', []))}개 상품")
+            st.caption(f"PO는 ECLADO KRW 매입 카탈로그 기준 · 확인된 가격 적용: {verified_count}/{len(data.get('items', []))}개 상품")
         if pending_review_fields:
             st.warning("PDF/Excel 생성 전에 다음 항목을 입력해 주세요: " + "; ".join(field.label for field in pending_review_fields))
         result = validate_and_calculate(data)

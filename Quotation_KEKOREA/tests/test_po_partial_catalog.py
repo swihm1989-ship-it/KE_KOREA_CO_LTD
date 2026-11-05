@@ -33,7 +33,7 @@ class PartialPoCatalogTests(unittest.TestCase):
         self.assertEqual([row.get('unit_price') for row in draft['items'][:24]], ['1000'] * 24)
         self.assertTrue(all(row['master_price'] for row in draft['items'][:24]))
         self.assertIsNone(draft['seller']['legal_name'])
-        self.assertEqual(len(draft['pending_confirmations']), 1)
+        self.assertEqual(draft['pending_confirmations'], [])
         toner = draft['items'][-1]
         self.assertIsNone(toner['unit_price'])
         self.assertIsNone(toner['quantity'])
@@ -43,23 +43,28 @@ class PartialPoCatalogTests(unittest.TestCase):
         self.assertEqual([(r['product_name'], r['capacity'], r['quantity']) for r in draft['items']],
                          [(r['product_name'], r['capacity'], r['quantity']) for r in original_items])
         apply_verified_eclado_prices(draft, catalog)
-        self.assertEqual(len(draft['pending_confirmations']), 1)
+        self.assertEqual(draft['pending_confirmations'], [])
 
-    def test_partial_candidates_never_override_an_explicit_other_supplier_or_currency(self):
+    def test_po_uses_eclado_purchase_prices_regardless_of_source_seller_or_currency(self):
         for supplier, currency in (('Other supplier', None), ('다른 공급처', None), (None, 'USD')):
             with self.subTest(supplier=supplier, currency=currency):
                 draft, catalog = partial_order()
                 draft['seller']['legal_name'] = supplier
                 draft['currency'] = currency
                 apply_verified_eclado_prices(draft, catalog)
-                self.assertEqual(draft['currency'], currency)
-                self.assertTrue(all(row['unit_price'] is None for row in draft['items']))
+                self.assertEqual(draft['currency'], 'KRW')
+                self.assertEqual([row['unit_price'] for row in draft['items'][:24]], ['1000'] * 24)
+                self.assertIsNone(draft['items'][-1]['unit_price'])
 
-    def test_no_exact_matches_do_not_infer_supplier_or_currency(self):
+    def test_no_exact_matches_do_not_infer_price_but_po_currency_stays_krw(self):
         draft, catalog = partial_order()
-        draft['items'] = draft['items'][-1:]
+        draft['product_family'] = 'other'
+        draft['items'] = [dict(product_name='Unrelated product', capacity='10ml',
+                               quantity='1', unit_price='5', source='USD 5 each')]
         apply_verified_eclado_prices(draft, catalog)
-        self.assertIsNone(draft['currency'])
+        self.assertEqual(draft['currency'], 'KRW')
         self.assertEqual(draft['pending_confirmations'], [])
+        self.assertEqual(draft['product_family'], 'cosmetics')
         self.assertIsNone(draft['items'][0]['unit_price'])
-
+        self.assertTrue(any('Exact ECLADO product match for Unrelated product' in issue
+                            for issue in draft['missing_fields']))

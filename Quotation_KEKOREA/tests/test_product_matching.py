@@ -211,7 +211,8 @@ class ProductMatchingTests(unittest.TestCase):
         draft = dict(document_type='PO', product_family='cosmetics', currency='KRW',
                      seller={'legal_name': 'ECLADO'}, items=[dict(
                          product_name='Cell Memery Crim', capacity='50g',
-                         quantity='10', unit_price='42')])
+                         quantity='10', unit_price='42',
+                         price_source='User-entered value in document review')])
         catalog = dict(products=PRODUCTS, purchase_prices=[dict(product_id='cream50',
                        supplier_key='ECLADO', currency='KRW', unit_price='1000')])
         apply_verified_eclado_prices(draft, catalog)

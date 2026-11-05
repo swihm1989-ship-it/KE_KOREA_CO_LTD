@@ -40,7 +40,7 @@ class OrderPromotionsUiTests(unittest.TestCase):
                         self.assertEqual(result['items'][0].get('promotion'), rule)
                         self.assertEqual(result['items'][0]['free_quantity'], free)
                         self.assertEqual(result['items'][0]['shipped_quantity'], shipped)
-                        self.assertEqual(result['total'], '20.00')
+                        self.assertEqual(result['total'], '20.00' if dtype == 'PI' else '20')
                         self.assertFalse(next(b for b in at.button if b.label == 'Create PDF').disabled)
 
     def test_late_quantity_input_updates_advanced_details_and_event_quantities(self):

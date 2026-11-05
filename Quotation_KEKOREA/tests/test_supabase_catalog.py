@@ -55,16 +55,21 @@ class SupabaseCatalogTests(unittest.TestCase):
         self.assertIsNone(draft['items'][1].get('unit_price'))
         self.assertTrue(any('Unconfirmed Product' in entry for entry in draft['missing_fields']))
 
-    def test_other_korean_supplier_is_not_treated_as_an_omitted_eclado_supplier(self):
+    def test_po_uses_eclado_purchase_price_even_when_source_pi_names_ke_korea_as_seller(self):
         catalog = {'products': [{'id': 'p1', 'brand': 'ECLADO', 'item_name': 'Test Cream', 'capacity': '50 ml'}],
                    'purchase_prices': [{'product_id': 'p1', 'supplier_key': 'ECLADO', 'currency': 'KRW',
                                         'unit_price': '1000', 'source_row': 1}]}
-        draft = {'document_type': 'PO', 'product_family': 'cosmetics', 'currency': None,
-                 'seller': {'legal_name': '다른 공급처'},
-                 'items': [{'product_name': 'Test Cream', 'capacity': '50 ml'}]}
+        draft = {'document_type': 'PO', 'product_family': 'cosmetics', 'currency': 'USD',
+                 'seller': {'legal_name': 'KE KOREA CO. LTD'},
+                 'items': [{'product_name': 'Test Cream', 'capacity': '50 ml',
+                            'unit_price': '10.25', 'source': 'USD 10.25 per PCS'}]}
         pricing.apply_verified_eclado_prices(draft, catalog)
-        self.assertIsNone(draft['items'][0].get('unit_price'))
-        self.assertFalse(draft['items'][0]['master_price'])
+        self.assertEqual(draft['currency'], 'KRW')
+        self.assertEqual(draft['items'][0].get('unit_price'), '1000')
+        self.assertEqual(draft['items'][0].get('price_source'),
+                         'Verified ECLADO catalog; source workbook row 1')
+        self.assertTrue(draft['items'][0]['master_price'])
+        self.assertFalse(draft['conflicts'])
         self.assertEqual(draft.get('pending_confirmations'), [])
 
     def test_loads_one_consistent_catalog_snapshot_using_server_secret_apikey(self):
@@ -152,11 +157,12 @@ class SupabaseCatalogTests(unittest.TestCase):
         self.assertFalse(any('number required' in issue for issue in result['blocking_issues']))
         draft['currency'] = 'USD'
         for item in draft['items']:
-            item['unit_price'] = None
+            item['unit_price'] = '10'
+            item['source'] = 'USD 10 per PCS'
         apply_verified_eclado_prices(draft, catalog)
-        self.assertEqual(draft['currency'], 'USD')
-        self.assertTrue(all(item['unit_price'] is None for item in draft['items']))
-        self.assertTrue(any('Verified USD catalog price' in issue for issue in draft['missing_fields']))
+        self.assertEqual(draft['currency'], 'KRW')
+        self.assertTrue(all(item['unit_price'] == '1000' for item in draft['items']))
+        self.assertFalse(any('Verified USD catalog price' in issue for issue in draft['missing_fields']))
 
 
 if __name__ == "__main__":

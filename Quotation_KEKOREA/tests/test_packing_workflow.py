@@ -85,7 +85,7 @@ class PackingWorkflowTests(unittest.TestCase):
         self.assertTrue(any("gross weight is invalid" in issue for issue in issues))
         self.assertTrue(any("different package types" in issue for issue in issues))
 
-    def test_missing_po_seller_uses_catalog_candidate_with_confirmation(self):
+    def test_missing_or_mismatched_po_seller_does_not_block_eclado_catalog_price(self):
         seed = {"products": [{"id": "p1", "brand": "ECLADO", "item_name": "Toner", "capacity": "150ml"}],
                 "purchase_prices": [{"product_id": "p1", "supplier_key": "ECLADO", "currency": "KRW", "unit_price": "7920", "source_row": 31}],
                 "buyer_prices": []}
@@ -94,12 +94,12 @@ class PackingWorkflowTests(unittest.TestCase):
         apply_verified_eclado_prices(draft, seed)
         self.assertEqual(draft["currency"], "KRW")
         self.assertEqual(draft["items"][0]["unit_price"], "7920")
-        self.assertTrue(draft["pending_confirmations"])
+        self.assertFalse(draft["pending_confirmations"])
         self.assertFalse(draft["seller"].get("legal_name"))
         draft["seller"] = {"legal_name": "Different Supplier"}
         apply_verified_eclado_prices(draft, seed)
-        self.assertIsNone(draft["items"][0]["unit_price"])
-        self.assertIsNone(draft["currency"])
+        self.assertEqual(draft["items"][0]["unit_price"], "7920")
+        self.assertEqual(draft["currency"], "KRW")
         self.assertFalse(draft["pending_confirmations"])
 
 

@@ -122,11 +122,21 @@ def is_eclado_supplier(name):
 def apply_verified_eclado_prices(draft, seed=None):
     """Replace ECLADO candidate price with exact catalog price or mark the uncertainty."""
     from Quotation_KEKOREA.agent.samples import is_manual_sample
+    is_purchase_order = draft.get("document_type") == "PO"
     # Recompute catalog-owned warnings after the user completes buyer/product/currency fields.
     draft["missing_fields"] = [entry for entry in draft.get("missing_fields", []) if not (
         (str(entry).startswith("Exact ECLADO product match for ") and str(entry).endswith("; capacity/SKU may be needed"))
         or (str(entry).startswith("Confirm a transaction-specific price for ") and "; local catalog price is only for " in str(entry))
-        or re.fullmatch(r"Verified \S+ catalog price for .+", str(entry)))]
+        or re.fullmatch(r"Verified \S+ catalog price for .+", str(entry))
+        or (is_purchase_order and "currency" in str(entry).casefold()))]
+    if is_purchase_order:
+        # A PO is always placed with ECLADO in KRW; source PI currency and prices
+        # are customer-sale data, not the supplier purchase-price basis.
+        draft["currency"] = "KRW"
+        draft.pop("_catalog_currency_inferred", None)
+        draft["conflicts"] = [entry for entry in draft.get("conflicts", [])
+                              if "currency" not in str(entry).casefold()
+                              and "stated price differs from the verified catalog" not in str(entry)]
     seed = seed if seed is not None else load_local_seed()
     products = seed.get("products", [])
     items = draft.get("items", [])
@@ -146,29 +156,21 @@ def apply_verified_eclado_prices(draft, seed=None):
                           counterparty_name.upper())
     counterparty = "".join(re.findall(r"[A-Z0-9]+", counterparty))
     expected_party = "ECLADO" if draft.get("document_type") == "PO" else "DEAR GLOW"
-    party_matches = (is_eclado_supplier(counterparty_name) if draft.get("document_type") == "PO"
-                     else "DEARGLOW" in counterparty)
-    if regular_matches and draft.get("product_family") != "cosmetics":
+    party_matches = (is_purchase_order or "DEARGLOW" in counterparty)
+    if is_purchase_order and items:
+        draft["product_family"] = "cosmetics"
+    elif regular_matches and draft.get("product_family") != "cosmetics":
         all_matched = all(match["status"] == "matched" for match in regular_matches)
         recognized_order = (draft.get("document_type") in {"PO", "PI", "CI"} and party_matches
                             and draft.get("product_family") in (None, "", "other")
                             and any(match["status"] in {"matched", "suggested"} for match in regular_matches))
         if all_matched or recognized_order:
             draft["product_family"] = "cosmetics"
-    supplier_confirmation = "The seller was not supplied. Use the ECLADO purchase price catalog for this PO? Confirm the supplier and legal details."
     pending = draft.setdefault("pending_confirmations", [])
     pending[:] = [entry for entry in pending if not str(entry).startswith(
         ("Confirm product annotation for ", "Double-check this product:"))]
-    if draft.get("document_type") == "PO" and not counterparty_name and items:
-        # A separate unresolved promotion must not disable verified prices for
-        # every other row. These remain candidates requiring supplier confirmation;
-        # the per-item exact match below still rejects ambiguous products/sizes.
-        party_matches = any(resolve_price(m["product"]["id"], seed, "purchase", "KRW", "ECLADO")
-                            for m in exact_matches if m["status"] == "matched")
-        if party_matches and supplier_confirmation not in pending:
-            pending.append(supplier_confirmation)
-    elif supplier_confirmation in pending:
-        pending.remove(supplier_confirmation)
+    pending[:] = [entry for entry in pending if not str(entry).startswith(
+        "The seller was not supplied. Use the ECLADO purchase price catalog")]
     if not party_matches and draft.get("_catalog_currency_inferred"):
         draft["currency"] = None
         draft.pop("_catalog_currency_inferred", None)
@@ -176,13 +178,19 @@ def apply_verified_eclado_prices(draft, seed=None):
         if is_manual_sample(draft, item):
             item['master_price'] = False
             continue
+        user_entered_price = str(item.get("price_source") or "").casefold().startswith(
+            ("user-entered", "user supplied", "user-provided"))
+        if is_purchase_order and not item.get("price_override_confirmed") and not user_entered_price:
+            item["unit_price"] = None
+            item["price_source"] = None
         if draft.get("product_family") != "cosmetics":
             item["master_price"] = False
             continue
         if match["status"] != "matched":
-            if item.get("master_price") is True:
+            if (is_purchase_order and not user_entered_price) or item.get("master_price") is True:
                 item["unit_price"] = None
                 item["price_source"] = None
+                item.pop("price_override_confirmed", None)
                 item.pop("product_id", None)
             item["master_price"] = False
             if match["status"] == "suggested":
@@ -221,6 +229,10 @@ def apply_verified_eclado_prices(draft, seed=None):
         price = resolve_price(product["id"], seed, "purchase" if draft.get("document_type") == "PO" else "sale", currency,
                               "ECLADO" if draft.get("document_type") == "PO" else "DEAR_GLOW")
         if not price:
+            if is_purchase_order and not user_entered_price:
+                item["unit_price"] = None
+                item["price_source"] = None
+                item.pop("price_override_confirmed", None)
             item["master_price"] = False
             draft.setdefault("missing_fields", []).append(
                 f"Verified {currency or 'currency'} catalog price for {product.get('item_name')}")
@@ -240,6 +252,8 @@ def apply_verified_eclado_prices(draft, seed=None):
                     provided_amount = candidate_amount
         except (InvalidOperation, TypeError, ValueError):
             pass
+        if is_purchase_order and not item.get("price_override_confirmed"):
+            provided_amount = None
         price_differs = (provided_amount is not None and
                          provided_amount != Decimal(str(price["unit_price"])))
         if item.get("price_override_confirmed"):
