@@ -44,6 +44,25 @@ def _has_discount_evidence(item):
     return bool(re.search(r'\b(?:discount|discounted|disc)\b|%|할인', source, re.I))
 
 
+def _resolved_import_notice(entry, draft):
+    notice = str(entry).casefold()
+    buyer = draft.get('buyer') or {}
+    seller = draft.get('seller') or {}
+    if ('buyer' in notice and 'legal name' in notice and 'address' in notice
+            and buyer.get('legal_name') and buyer.get('address')):
+        return True
+    if ('seller' in notice and 'legal name' in notice and 'address' in notice
+            and seller.get('legal_name') and seller.get('address')):
+        return True
+    if any(label in notice for label in ('commercial invoice number', 'invoice number', 'document number')):
+        return bool(draft.get('document_number'))
+    if 'shipment reference' in notice:
+        return bool(draft.get('shipment_reference'))
+    if 'country of origin' in notice:
+        return bool(draft.get('country_of_origin'))
+    return False
+
+
 def _sanitize_import(draft):
     draft['payment_terms'] = 'N/A'
     for key in ('bank_details', 'bank_information', 'payment_details', 'payment_information', 'bank_account', 'swift', 'account_number'):
@@ -78,6 +97,8 @@ def _sanitize_import(draft):
         if item.get('discount_percent') in (None, '') and item.get('source') and not _has_discount_evidence(item):
             item['discount_percent'] = '0'
     draft['missing_fields'] = notices(draft.get('missing_fields', []))
+    draft['missing_fields'] = [entry for entry in draft['missing_fields']
+                               if not _resolved_import_notice(entry, draft)]
     draft['conflicts'] = notices(draft.get('conflicts', []))
     for item in draft.get('items', []):
         amount = _amount(item.get('unit_price'))

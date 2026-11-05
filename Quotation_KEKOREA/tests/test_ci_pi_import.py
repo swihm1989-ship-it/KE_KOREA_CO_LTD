@@ -59,6 +59,31 @@ class CiPiImportTests(unittest.TestCase):
         self.assertFalse(any('discount' in issue.lower() for issue in result['blocking_issues']))
         self.assertEqual(ci_import_issues(result), [])
 
+    def test_import_clears_only_missing_notices_for_fields_filled_during_review(self):
+        doc = pi_source()
+        doc.update(document_number='CI-TEST', shipment_reference='SHIP-TEST',
+                   country_of_origin='South Korea')
+        doc['buyer'].update(legal_name='Test Buyer', address='Test Buyer Address')
+        doc['missing_fields'] = [
+            'Buyer legal name and address: the source identifies the consignee, not explicitly as buyer.',
+            'Commercial invoice number',
+            'Shipment reference',
+            'Country of origin',
+            'HS codes',
+        ]
+        prepare_ci_import(doc, requested_type='CI', has_attachments=True)
+        self.assertEqual(doc['missing_fields'], ['HS codes'])
+
+    def test_import_keeps_missing_party_and_document_notices_until_fields_are_filled(self):
+        doc = pi_source()
+        doc['document_number'] = None
+        doc['buyer'].update(legal_name=None, address=None)
+        doc['missing_fields'] = ['Buyer legal name and address: buyer not explicit.',
+                                 'Commercial invoice number']
+        prepare_ci_import(doc, requested_type='CI', has_attachments=True)
+        self.assertEqual(doc['missing_fields'], ['Buyer legal name and address: buyer not explicit.',
+                                                 'Commercial invoice number'])
+
     def test_import_keeps_discount_review_when_source_mentions_discount_but_rate_is_missing(self):
         doc = pi_source()
         doc['items'][0].update(discount_percent=None,
