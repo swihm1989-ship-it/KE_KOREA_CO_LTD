@@ -110,9 +110,11 @@ Blueprint가 요청할 때 `OPENAI_API_KEY`와 `SUPABASE_SECRET_KEY`는 Render �
 
 Render Free는 절전 후 재기동될 수 있고 영구 디스크가 없습니다. 앱의 세션 메모리와 `outputs` 파일은 재시작/재배포 시 보장되지 않으므로 이 설정은 테스트용입니다. 장기 운영에는 유료 인스턴스, 영속 파일 저장, 세션 복구 및 접근 인증을 별도로 설계해야 합니다. 현재 코드는 로그인 없이 공개되므로 URL을 아는 사용자가 앱에 접근하고 OpenAI 요청을 발생시킬 수 있습니다.
 
+2026-11-05 Render에 배포해 `COMPANY AUTOMATION_Project`의 `Production` 환경으로 이동했습니다. [Render 앱](https://ke-korea-quotation.onrender.com/)은 HTTP 200을 반환했고 UI에서 ECLADO 카탈로그 157개 상품 연결을 확인했습니다. 실제 주문 추출 및 PDF/Excel 생성은 이 배포 확인에서 실행하지 않았습니다. Render GitHub 저장소 연결 목록에 이 저장소가 없어 공개 Git 저장소 URL로 초기 배포했으며, Render가 자동 배포 미지원 상태라고 안내했습니다. 새 커밋 반영 시 Blueprint 수동 동기화/서비스 수동 배포가 필요합니다. 자동 배포를 원하면 Render의 GitHub 계정 설정에서 이 저장소 접근을 연결한 뒤 확인하세요.
+
 **PyMuPDF 배포 전제:** PyMuPDF는 AGPL/상용 라이선스 선택이 필요한 듀얼 라이선스 패키지입니다. 사용자는 2026-11-05에 이 배포의 PyMuPDF 라이선스 확인을 완료했다고 답변했습니다. 상용 배포 전에 해당 라이선스의 증빙과 적용 범위를 팀에서 보관·확인하세요. LangChain은 PDF 파서가 아니므로 추가하지 않았습니다.
 
-배포 URL은 기존 안내에서 `https://ke-korea.streamlit.app/`로 기록되어 있습니다. 이번 문서 작업에서 실제 서비스에 접속하거나 Supabase 실계정·최근 배포 코드를 확인하지 않았으므로, 현재 가용성 및 최신 배포 상태는 별도 확인 대상입니다. 이전 기록의 라이브 확인도 그 기록 날짜 범위에서만 유효합니다.
+기존 Streamlit 앱 주소는 `https://ke-korea.streamlit.app/`입니다. Render와 Streamlit은 서로 별도로 배포되며, 한쪽 변경이 다른 쪽에 자동 반영되지 않습니다. Render 배포 시 Supabase의 현재 가격 스냅샷이 보이는 것은 확인했지만, 실제 DB 데이터의 계약상 최신성이나 양쪽 서비스의 향후 동기화는 별도 확인 대상입니다.
 
 ## 7. 관련 문서
 
