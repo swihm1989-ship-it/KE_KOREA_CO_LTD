@@ -119,6 +119,24 @@ class ProductMatchingTests(unittest.TestCase):
         self.assertNotEqual(self.match('Cell Memory Cream', '50g', product_code='E166-1')['status'], 'matched')
         self.assertNotEqual(self.match('Respiration Toner', '150ml', product_code='E165')['status'], 'matched')
 
+    def test_high_similarity_ocr_typo_resolves_catalog_candidate_but_requires_double_check(self):
+        result = self.match('Cell Mem0ry Cream', '50g')
+        self.assertEqual(result['status'], 'matched')
+        self.assertEqual(result['match_method'], 'fuzzy')
+        self.assertEqual(result['product']['id'], 'cream50')
+        self.assertGreaterEqual(result['similarity'], 0.90)
+        self.assertIn('Double-check this product', result['confirmation'])
+        self.assertEqual(self.match('Cell Mem0ry Cream', '50g', product_code='E165')['product']['id'], 'cream50')
+        self.assertEqual(self.match('Cell Mem0ry Cream', '50ml')['status'], 'not_found')
+        self.assertEqual(self.match('Cell Mem0ry Cream', '50g', product_code='UNKNOWN')['status'], 'not_found')
+        self.assertEqual(self.match('Cell Mem0ry Cream', '50g', product_code='E166-1')['status'], 'not_found')
+
+    def test_lower_similarity_returns_review_suggestions_without_auto_match(self):
+        result = self.match('Cell Memery Crim', '50g')
+        self.assertEqual(result['status'], 'suggested')
+        self.assertEqual(result['suggestions'][0]['product']['id'], 'cream50')
+        self.assertLess(result['suggestions'][0]['similarity'], 0.90)
+
     def test_longer_sku_is_not_mistaken_for_its_prefix(self):
         products = PRODUCTS + [dict(id='collagen', brand='ECLADO', source_code='E-20-8',
                                     item_name='COLLAGEN 5000 SERUM', capacity='100ml')]
@@ -174,3 +192,35 @@ class ProductMatchingTests(unittest.TestCase):
         apply_verified_eclado_prices(draft, catalog)
         self.assertIsNone(draft['items'][0].get('unit_price'))
         self.assertIsNone(draft['items'][0].get('product_id'))
+
+    def test_high_similarity_imports_price_but_keeps_source_name_and_requires_confirmation(self):
+        draft = dict(document_type='PO', product_family='cosmetics', currency='KRW',
+                     seller={'legal_name': 'ECLADO'}, items=[dict(
+                         product_name='Cell Mem0ry Cream', capacity='50g',
+                         quantity='10', unit_price=None)])
+        catalog = dict(products=PRODUCTS, purchase_prices=[dict(product_id='cream50',
+                       supplier_key='ECLADO', currency='KRW', unit_price='1000')])
+        apply_verified_eclado_prices(draft, catalog)
+        self.assertEqual(draft['items'][0]['unit_price'], '1000')
+        self.assertEqual(draft['items'][0]['product_name'], 'Cell Mem0ry Cream')
+        self.assertTrue(draft['items'][0]['master_price'])
+        self.assertTrue(any(message.startswith('Double-check this product:')
+                            for message in draft['pending_confirmations']))
+
+    def test_lower_similarity_does_not_import_price_and_preserves_user_entered_name_and_price(self):
+        draft = dict(document_type='PO', product_family='cosmetics', currency='KRW',
+                     seller={'legal_name': 'ECLADO'}, items=[dict(
+                         product_name='Cell Memery Crim', capacity='50g',
+                         quantity='10', unit_price='42')])
+        catalog = dict(products=PRODUCTS, purchase_prices=[dict(product_id='cream50',
+                       supplier_key='ECLADO', currency='KRW', unit_price='1000')])
+        apply_verified_eclado_prices(draft, catalog)
+        self.assertIsNone(draft['items'][0].get('product_id'))
+        self.assertFalse(draft['items'][0]['master_price'])
+        self.assertEqual(draft['items'][0]['unit_price'], '42')
+        self.assertTrue(any(message.startswith('Double-check this product:')
+                            for message in draft['pending_confirmations']))
+        draft['items'][0]['product_name'] = 'Customer-entered product name'
+        apply_verified_eclado_prices(draft, catalog)
+        self.assertEqual(draft['items'][0]['product_name'], 'Customer-entered product name')
+        self.assertEqual(draft['items'][0]['unit_price'], '42')

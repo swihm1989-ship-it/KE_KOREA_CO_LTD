@@ -152,12 +152,13 @@ def apply_verified_eclado_prices(draft, seed=None):
         all_matched = all(match["status"] == "matched" for match in regular_matches)
         recognized_order = (draft.get("document_type") in {"PO", "PI", "CI"} and party_matches
                             and draft.get("product_family") in (None, "", "other")
-                            and any(match["status"] == "matched" for match in regular_matches))
+                            and any(match["status"] in {"matched", "suggested"} for match in regular_matches))
         if all_matched or recognized_order:
             draft["product_family"] = "cosmetics"
     supplier_confirmation = "The seller was not supplied. Use the ECLADO purchase price catalog for this PO? Confirm the supplier and legal details."
     pending = draft.setdefault("pending_confirmations", [])
-    pending[:] = [entry for entry in pending if not str(entry).startswith("Confirm product annotation for ")]
+    pending[:] = [entry for entry in pending if not str(entry).startswith(
+        ("Confirm product annotation for ", "Double-check this product:"))]
     if draft.get("document_type") == "PO" and not counterparty_name and items:
         # A separate unresolved promotion must not disable verified prices for
         # every other row. These remain candidates requiring supplier confirmation;
@@ -184,6 +185,19 @@ def apply_verified_eclado_prices(draft, seed=None):
                 item["price_source"] = None
                 item.pop("product_id", None)
             item["master_price"] = False
+            if match["status"] == "suggested":
+                suggestions = match.get("suggestions", [])
+                if suggestions:
+                    candidate = suggestions[0]
+                    message = (
+                        f"Double-check this product: {item.get('product_name') or 'item'} may be "
+                        f"{candidate['product']['item_name']} ({candidate['similarity']:.0%} similarity). "
+                        "Correct the product name or confirm the source before quoting."
+                    )
+                else:
+                    message = f"Double-check this product: {item.get('product_name') or 'item'}."
+                if message not in pending:
+                    pending.append(message)
             draft.setdefault("missing_fields", []).append(
                 f"Exact ECLADO product match for {item.get('product_name') or 'item'}; capacity/SKU may be needed")
             continue

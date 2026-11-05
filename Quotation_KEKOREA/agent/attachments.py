@@ -20,7 +20,7 @@ def validate_attachment(item):
         raise ValueError(f'Uploaded attachment is empty: {name}')
     if len(data) > 10 * 1024 * 1024:
         raise ValueError(f'{name} exceeds the 10 MB per-file limit')
-    if mime == 'application/pdf' and not data[:1024].lstrip().startswith(b'%PDF-'):
+    if mime == 'application/pdf' and b'%PDF-' not in data[:1024]:
         raise ValueError(f'{name} is not a valid PDF file')
     return {'name': name, 'mime_type': mime, 'data': data}
 

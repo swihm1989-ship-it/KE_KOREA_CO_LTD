@@ -1,5 +1,6 @@
 """Recognize complete catalog names inside annotations without fuzzy SKU guesses."""
 from decimal import Decimal
+from difflib import SequenceMatcher
 from functools import lru_cache
 import re
 import unicodedata
@@ -96,6 +97,65 @@ def _ratings(value):
             tuple(m[1].count('+') for m in re.finditer(r'(?<![a-z])pa(?![a-z])\s*((?:\+\s*)*)', text)))
 
 
+def _fuzzy_match(name, capacity, residue, products):
+    if _VARIANT.search(residue):
+        return {'status': 'not_found', 'matches': []}
+    observed = _unit_text(residue)
+    observed = _MEASURE.sub(' ', observed)
+    observed = _ORDER_QUANTITY.sub(' ', observed)
+    observed = _LABELS.sub(' ', observed)
+    for product in products:
+        code = _compact(product.get('source_code'))
+        if code:
+            observed = _pattern(code).sub(' ', observed)
+    observed = _compact(observed)
+    if not observed:
+        return {'status': 'not_found', 'matches': []}
+
+    scored = []
+    for product in products:
+        item_name = _compact(product.get('item_name'))
+        if not item_name or _ratings(name) != _ratings(product.get('item_name')):
+            continue
+        if capacity not in (None, '') and _capacity(product.get('capacity')) != _capacity(capacity):
+            continue
+        if not _inline_size_agrees(residue, product.get('capacity')):
+            continue
+        canonical_tokens = set(re.findall(r'[^\W_]+', _text(product.get('item_name'))))
+        observed_tokens = set(re.findall(r'[^\W_]+', _text(residue)))
+        token_score = (2 * len(canonical_tokens & observed_tokens) /
+                       (len(canonical_tokens) + len(observed_tokens))) if canonical_tokens or observed_tokens else 0
+        score = 0.9 * SequenceMatcher(None, observed, item_name).ratio() + 0.1 * token_score
+        scored.append((score, product))
+    if not scored:
+        return {'status': 'not_found', 'matches': []}
+
+    scored.sort(key=lambda result: result[0], reverse=True)
+    best_score = scored[0][0]
+    close = [(score, product) for score, product in scored if best_score - score < 0.04]
+    suggestions = [{'product': product, 'similarity': round(score, 3)}
+                   for score, product in scored[:3] if best_score - score < 0.18]
+    if best_score >= 0.90 and len(close) == 1:
+        product = scored[0][1]
+        return {
+            'status': 'matched',
+            'product': product,
+            'match_method': 'fuzzy',
+            'similarity': round(best_score, 3),
+            'confirmation': (
+                f'Double-check this product: source text "{name}" is similar to '
+                f'{product["item_name"]} ({best_score:.0%}). Confirm before using its catalog price.'
+            ),
+        }
+    if best_score >= 0.68:
+        return {
+            'status': 'suggested',
+            'matches': [product for _, product in close],
+            'suggestions': suggestions,
+        }
+    return {'status': 'not_found', 'matches': []}
+
+
 def match_product(name, capacity, products, product_code=None):
     products = [p for p in products if p.get('brand') == 'ECLADO']
     text = _text(name)
@@ -157,11 +217,15 @@ def match_product(name, capacity, products, product_code=None):
 
     if not found:
         # Code-only rows can resolve a unique SKU, but a code cannot override a
-        # different or misspelled product name supplied alongside it.
+        # different product name supplied alongside it. A matching SKU can
+        # narrow a typo candidate, but the name must still be sufficiently similar.
         if mentioned and not re.search(r'\w', _LABELS.sub('', residue)):
             found = [(p, (0, 0)) for p in products]
         else:
-            return {'status': 'not_found', 'matches': []}
+            if mentioned:
+                code_products = [p for p in products if _compact(p.get('source_code')) in mentioned]
+                return _fuzzy_match(name, capacity, residue, code_products)
+            return _fuzzy_match(name, capacity, residue, products)
     if _VARIANT.search(residue):
         return {'status': 'not_found', 'matches': []}
     candidates = []
@@ -178,7 +242,7 @@ def match_product(name, capacity, products, product_code=None):
             candidates.append(product)
     if len(candidates) != 1:
         return {'status': 'ambiguous' if candidates else 'not_found', 'matches': candidates}
-    result = {'status': 'matched', 'product': candidates[0]}
+    result = {'status': 'matched', 'product': candidates[0], 'match_method': 'exact'}
     annotation = _LABELS.sub('', _MEASURE.sub(' ', _unit_text(residue)))
     if re.search(r'\w', annotation):
         result['confirmation'] = f'Confirm product annotation for {name}; catalog product is {candidates[0]["item_name"]}'

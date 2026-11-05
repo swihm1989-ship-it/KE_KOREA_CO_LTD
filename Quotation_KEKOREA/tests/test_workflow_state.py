@@ -23,9 +23,10 @@ class WorkspaceTests(unittest.TestCase):
             self.state[f'order_prompt_{name}'] = 'prompt ' + page
             self.state[f'advanced_json_{name}'] = 'unfinished edit ' + page
             self.state[f'packing_{name}_confirmed_abc'] = True
+            self.state[f'product_double_check_{name}_0'] = 'corrected product ' + page
         self.work.activate(self.state, '계약서 만들기 · 준비 중')
         for key in list(self.state):
-            if key.startswith(('order_prompt_', 'advanced_json_', 'packing_')):
+            if key.startswith(('order_prompt_', 'advanced_json_', 'packing_', 'product_double_check_')):
                 del self.state[key]  # Streamlit removes widgets absent from a run.
         for page in ('PI', 'PO', 'CI', 'PL', 'CIPL'):
             name = page + ' 만들기'
@@ -35,6 +36,16 @@ class WorkspaceTests(unittest.TestCase):
             self.assertEqual(self.state[f'order_prompt_{name}'], 'prompt ' + page)
             self.assertEqual(self.state[f'advanced_json_{name}'], 'unfinished edit ' + page)
             self.assertTrue(self.state[f'packing_{name}_confirmed_abc'])
+            self.assertEqual(self.state[f'product_double_check_{name}_0'], 'corrected product ' + page)
+
+    def test_new_extraction_resets_product_double_check_widget_values(self):
+        self.work.activate(self.state, 'PO 만들기')
+        self.state['product_double_check_PO 만들기_0'] = 'old corrected product'
+        self.work.save(self.state)
+        job = self.work.start('PO 만들기', 'extract', lambda: {'document_type': 'PO', 'items': []})
+        job.future.result(timeout=2)
+        self.work.collect(self.state)
+        self.assertNotIn('product_double_check_PO 만들기_0', self.state)
 
     def test_background_extraction_survives_navigation_and_another_job(self):
         started, release = Event(), Event()

@@ -13,6 +13,7 @@ def review_key(key, page):
     return str(key).startswith((f'confirm_source_alias_{page}_', f'packing_{page}_',
                                f'po_seller_name_{page}', f'po_seller_address_{page}',
                                f'review_missing_{page}_', f'review_values_{page}',
+                               f'product_double_check_{page}_',
                                f'advanced_json_{page}', f'advanced_source_{page}'))
 
 

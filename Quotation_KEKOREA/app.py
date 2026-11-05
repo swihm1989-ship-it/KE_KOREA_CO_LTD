@@ -21,7 +21,8 @@ from Quotation_KEKOREA.agent.attachments import prepare_uploads
 from Quotation_KEKOREA.agent.extractor import extract_trade_data, load_env, verify_item_quotes
 from Quotation_KEKOREA.agent.branding import resolve_company_seal
 from Quotation_KEKOREA.agent.seal_storage import download_company_seal
-from Quotation_KEKOREA.agent.pricing import is_eclado_supplier, load_local_seed, load_supabase_catalog
+from Quotation_KEKOREA.agent.pricing import (is_eclado_supplier, load_local_seed, load_supabase_catalog,
+                                             match_eclado_product)
 from Quotation_KEKOREA.agent.ci_import import (prepare_ci_import, is_pi_import, ci_import_issues, ci_render_data,
                                            is_ci_conversion_request, apply_document_prices as apply_verified_eclado_prices)
 from Quotation_KEKOREA.agent.packing_review import (reconcile_packing, normalize_packing_inputs, packing_total_changes,
@@ -608,6 +609,28 @@ if raw:
         apply_company_profiles(data, active_company_profiles)
         if expected_type != "PL":
             apply_verified_eclado_prices(data, active_catalog)
+            if data.get("product_family") == "cosmetics":
+                for index, item in enumerate(data.get("items", [])):
+                    match = match_eclado_product(item.get("product_name"), item.get("capacity"),
+                                                 active_catalog.get("products", []), item.get("product_code"))
+                    needs_double_check = (match["status"] in {"suggested", "ambiguous", "not_found"}
+                                          or match.get("match_method") == "fuzzy")
+                    if not needs_double_check:
+                        continue
+                    st.warning(f"Item {index + 1}: Double-check this product / 제품을 다시 확인해 주세요.")
+                    if match.get("suggestions"):
+                        st.caption("Possible catalog matches: " + "; ".join(
+                            f"{candidate['product']['item_name']} ({candidate['similarity']:.0%})"
+                            for candidate in match["suggestions"]))
+                    elif match.get("status") == "ambiguous":
+                        st.caption("Multiple catalog products match. Confirm the product and capacity/SKU.")
+                    else:
+                        st.caption("No unique catalog match. The name you enter below will be kept as written.")
+                    item["product_name"] = st.text_input(
+                        f"Item {index + 1}: product name to print on the quote",
+                        value=str(item.get("product_name") or ""),
+                        key=f"product_double_check_{page}_{index}")
+                apply_verified_eclado_prices(data, active_catalog)
         sample_review_paths = edit_sample_rows(data, page)
         review_fields = missing_review_fields(data, packing=create_cipl_bundle)
         existing_review_paths = set(sample_review_paths)
@@ -847,7 +870,7 @@ if raw:
                     st.session_state["trade_draft"] = corrected
                     work.reset_editor(page)
                     for state_key in list(st.session_state):
-                        if str(state_key).startswith((f"review_missing_{page}_", f"review_values_{page}", f"packing_{page}_", f"po_seller_name_{page}", f"po_seller_address_{page}")):
+                        if str(state_key).startswith((f"review_missing_{page}_", f"review_values_{page}", f"packing_{page}_", f"po_seller_name_{page}", f"po_seller_address_{page}", f"product_double_check_{page}_")):
                             del st.session_state[state_key]
                     st.session_state["rendered_paths"] = {}
                     st.session_state.pop("rendered_json", None)

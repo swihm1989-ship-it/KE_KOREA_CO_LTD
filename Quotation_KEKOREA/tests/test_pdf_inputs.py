@@ -53,6 +53,10 @@ class PdfInputsTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     prepare_uploads(files)
 
+    def test_pdf_header_may_appear_within_the_first_1024_bytes(self):
+        uploaded = SavedUpload('prefixed.pdf', 'application/pdf', b'\x00' * 20 + PDF)
+        self.assertEqual(prepare_uploads([uploaded])[0]['data'], uploaded.data)
+
     def test_saved_pdf_survives_workspace_switch_without_becoming_an_image(self):
         from Quotation_KEKOREA.agent.workflow_state import DocumentWorkspaces
         work = DocumentWorkspaces()

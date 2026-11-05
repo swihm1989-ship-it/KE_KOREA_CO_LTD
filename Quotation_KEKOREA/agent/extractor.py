@@ -107,13 +107,37 @@ def extract_trade_data(prompt, *, images=None, env=None, opener=urllib.request.u
     request = urllib.request.Request("https://api.openai.com/v1/responses",
         data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"}, method="POST")
+    pdf_attached = any(item.get("mime_type") == "application/pdf" for item in images or [])
     try:
         with opener(request, timeout=90) as response:
             result = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
-        raise RuntimeError(f"OpenAI API request failed (HTTP {exc.code}); check model access and API key") from None
+        detail = ""
+        try:
+            body = json.loads(exc.read().decode("utf-8"))
+            error = body.get("error") if isinstance(body, dict) else None
+            if isinstance(error, dict) and error.get("message"):
+                detail = f": {error['message']}"
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            pass
+        source = "attached PDF" if pdf_attached else "request"
+        raise RuntimeError(f"OpenAI could not process the {source} (HTTP {exc.code}){detail}") from None
     except (urllib.error.URLError, TimeoutError):
         raise RuntimeError("OpenAI API could not be reached; check your network connection") from None
+    if not isinstance(result, dict):
+        raise RuntimeError("OpenAI returned an invalid response; no document was created")
+    if result.get("status") == "incomplete":
+        details = result.get("incomplete_details")
+        reason = details.get("reason") if isinstance(details, dict) else None
+        if reason == "max_output_tokens" and pdf_attached:
+            raise RuntimeError(
+                "The PDF was received, but extraction exceeded the response limit. "
+                "Split the PDF into fewer pages and upload the parts separately."
+            )
+        raise RuntimeError(f"OpenAI extraction was incomplete{f' ({reason})' if reason else ''}; no document was created")
+    api_error = result.get("error")
+    if isinstance(api_error, dict) and api_error.get("message"):
+        raise RuntimeError(f"OpenAI could not complete extraction: {api_error['message']}")
     texts = [part.get("text", "") for output in result.get("output", [])
              for part in output.get("content", []) if part.get("type") == "output_text"]
     if not texts:

@@ -2,6 +2,7 @@
 import importlib.util
 import json
 from pathlib import Path
+import urllib.error
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -48,6 +49,28 @@ class ExtractorTests(unittest.TestCase):
         self.assertIn("container_count", body["text"]["format"]["schema"]["properties"])
         self.assertIn("supplier document is packing evidence", body["instructions"])
         self.assertEqual(body["input"][0]["content"][1]["type"], "input_image")
+
+    def test_incomplete_pdf_extraction_explains_how_to_retry(self):
+        response = FakeResponse({"status": "incomplete",
+                                 "incomplete_details": {"reason": "max_output_tokens"},
+                                 "output": []})
+        with self.assertRaisesRegex(RuntimeError, "PDF was received.*Split the PDF"):
+            extractor.extract_trade_data(
+                "Extract this invoice",
+                images=[{"name": "source.pdf", "mime_type": "application/pdf", "data": b"%PDF-1.7"}],
+                env={"OPENAI_API_KEY": "test"}, opener=lambda request, timeout: response)
+
+    def test_pdf_api_error_includes_the_service_reason(self):
+        error_body = json.dumps({"error": {"message": "The uploaded PDF could not be processed."}}).encode()
+        http_error = urllib.error.HTTPError(
+            "https://api.openai.com/v1/responses", 400, "Bad Request", {}, __import__("io").BytesIO(error_body))
+        def reject(request, timeout):
+            raise http_error
+        with self.assertRaisesRegex(RuntimeError, r"attached PDF \(HTTP 400\).*could not be processed"):
+            extractor.extract_trade_data(
+                "Extract this invoice",
+                images=[{"name": "source.pdf", "mime_type": "application/pdf", "data": b"%PDF-1.7"}],
+                env={"OPENAI_API_KEY": "test"}, opener=reject)
 
     def test_translation_rules_are_in_openai_instructions(self):
         self.assertIn("Chinese", extractor.SYSTEM_PROMPT)
