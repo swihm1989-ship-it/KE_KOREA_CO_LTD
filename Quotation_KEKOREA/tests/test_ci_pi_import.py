@@ -48,6 +48,28 @@ class CiPiImportTests(unittest.TestCase):
         self.assertEqual(result['total'], '18.00')
         self.assertEqual(ci_import_issues(result), [])
 
+    def test_import_defaults_omitted_discount_to_zero_when_source_has_no_discount_evidence(self):
+        doc = pi_source()
+        doc.update(source_total='20.00')
+        doc['items'][0].update(discount_percent=None, source_line_total='20.00',
+                               source='Test Toner 10 PCS USD 2.00 20.00')
+        prepare_ci_import(doc, requested_type='CI', has_attachments=True)
+        self.assertEqual(doc['items'][0]['discount_percent'], '0')
+        result = validate_and_calculate(doc)
+        self.assertFalse(any('discount' in issue.lower() for issue in result['blocking_issues']))
+        self.assertEqual(ci_import_issues(result), [])
+
+    def test_import_keeps_discount_review_when_source_mentions_discount_but_rate_is_missing(self):
+        doc = pi_source()
+        doc['items'][0].update(discount_percent=None,
+                               source='Test Toner 10 PCS USD 2.00 discount 18.00')
+        prepare_ci_import(doc, requested_type='CI', has_attachments=True)
+        self.assertIsNone(doc['items'][0]['discount_percent'])
+        result = validate_and_calculate(doc)
+        self.assertTrue(any('Confirm discount percentage' in issue
+                            for issue in result['blocking_issues']))
+        self.assertTrue(any('discount' in issue.lower() for issue in ci_import_issues(result)))
+
     def test_ci_import_matches_product_without_replacing_pi_transaction_price(self):
         doc = pi_source()
         prepare_ci_import(doc, requested_type='CI', has_attachments=True)

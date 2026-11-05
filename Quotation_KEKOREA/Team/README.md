@@ -38,7 +38,7 @@ Streamlit 앱에서 사용자가 PO(구매주문서), PI(견적/Proforma Invoice
 - [promotions.py](../agent/promotions.py)는 PI/PO 기존 행에 명시된 Buy-N-Get-M 행사를 적용합니다. 유상 수량·FOC 수량·출고 수량을 나누며, 증정분에 금액을 중복 부과하지 않습니다.
 - 샘플 PI 행은 거래별 수동 입력이며 카탈로그 가격·일반 할인·행사로 덮어쓰지 않습니다.
 - [packing_review.py](../agent/packing_review.py)는 공급처 포장 합계와 계산 합계를 비교합니다. 단위는 구분하고, 사용자가 승인하기 전에는 합계를 수정하지 않으며 컨테이너 정보를 추측하지 않습니다.
-- [ci_import.py](../agent/ci_import.py)는 첨부 PI에서 CI 초안을 준비할 때 가격·수량 근거를 보존하고 은행/결제 정보를 제외합니다. CI에 PI가 첨부되지 않으면 transaction price를 임의로 채우지 않고 차단합니다. CI/PL 상품은 ECLADO 이름·용량만 확인하며 PL에 가격은 적용하지 않습니다.
+- [ci_import.py](../agent/ci_import.py)는 첨부 PI에서 CI 초안을 준비할 때 가격·수량 근거를 보존하고 은행/결제 정보를 제외합니다. 원문 행에 할인 표기가 없으면 누락 할인율을 0%로 처리하고, 할인 표기가 있으나 값이 누락된 경우는 재확인합니다. CI에 PI가 첨부되지 않으면 transaction price를 임의로 채우지 않고 차단합니다. CI/PL 상품은 ECLADO 이름·용량만 확인하며 PL에 가격은 적용하지 않습니다.
 - 필수 누락, 근거 없는 값, 미확정 제품 및 계산 충돌은 검토 화면에서 해결해야 합니다. PI에만 KE KOREA 은행정보를 출력합니다.
 - [renderers.py](../agent/renderers.py)와 [pi_pdf.py](../agent/pi_pdf.py)는 PDF/Excel 문서와 레이아웃을 생성합니다. HTML 렌더러도 코드에 있으나 앱 다운로드 선택지는 PDF/Excel입니다.
 

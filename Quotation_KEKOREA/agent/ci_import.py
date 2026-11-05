@@ -39,6 +39,11 @@ def _amount(value):
         return None
 
 
+def _has_discount_evidence(item):
+    source = str(item.get('source') or '')
+    return bool(re.search(r'\b(?:discount|discounted|disc)\b|%|할인', source, re.I))
+
+
 def _sanitize_import(draft):
     draft['payment_terms'] = 'N/A'
     for key in ('bank_details', 'bank_information', 'payment_details', 'payment_information', 'bank_account', 'swift', 'account_number'):
@@ -69,6 +74,9 @@ def _sanitize_import(draft):
             if entry not in kept:
                 kept.append(entry)
         return kept
+    for item in draft.get('items', []):
+        if item.get('discount_percent') in (None, '') and item.get('source') and not _has_discount_evidence(item):
+            item['discount_percent'] = '0'
     draft['missing_fields'] = notices(draft.get('missing_fields', []))
     draft['conflicts'] = notices(draft.get('conflicts', []))
     for item in draft.get('items', []):
