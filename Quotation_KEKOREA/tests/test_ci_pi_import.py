@@ -48,6 +48,46 @@ class CiPiImportTests(unittest.TestCase):
         self.assertEqual(result['total'], '18.00')
         self.assertEqual(ci_import_issues(result), [])
 
+    def test_ci_import_matches_product_without_replacing_pi_transaction_price(self):
+        doc = pi_source()
+        prepare_ci_import(doc, requested_type='CI', has_attachments=True)
+        item = doc['items'][0]
+        seed = {'products': [{'id': 'p1', 'brand': 'ECLADO', 'item_name': item['product_name'],
+                              'capacity': item.get('capacity')}],
+                'buyer_prices': [{'product_id': 'p1', 'buyer_key': 'DEAR_GLOW',
+                                  'currency': 'USD', 'unit_price': '99'}]}
+        original_price, original_basis, original_source = (
+            item['unit_price'], item['price_basis'], item['price_source'])
+        apply_document_prices(doc, seed)
+        self.assertEqual(item['product_id'], 'p1')
+        self.assertEqual(item['unit_price'], original_price)
+        self.assertEqual(item['price_basis'], original_basis)
+        self.assertEqual(item['price_source'], original_source)
+
+    def test_ci_without_pi_does_not_use_catalog_price_and_is_blocked(self):
+        doc = order('CI')
+        doc['items'][0]['unit_price'] = None
+        seed = {'products': [{'id': 'p1', 'brand': 'ECLADO', 'item_name': 'Test Toner'}],
+                'buyer_prices': [{'product_id': 'p1', 'buyer_key': 'DEAR_GLOW',
+                                  'currency': 'USD', 'unit_price': '99'}]}
+        apply_document_prices(doc, seed)
+        self.assertIsNone(doc['items'][0]['unit_price'])
+        self.assertIn('CI must be created from an attached PI to use its transaction prices',
+                      ci_import_issues(doc))
+
+    def test_pl_matches_product_without_applying_catalog_price(self):
+        doc = order('PL')
+        doc['items'][0]['product_name'] = 'Test Toner'
+        doc['items'][0]['capacity'] = '150ml'
+        doc['items'][0]['unit_price'] = '42'
+        seed = {'products': [{'id': 'p1', 'brand': 'ECLADO', 'item_name': 'Test Toner',
+                              'capacity': '150ml'}],
+                'purchase_prices': [{'product_id': 'p1', 'supplier_key': 'ECLADO',
+                                     'currency': 'KRW', 'unit_price': '7920'}]}
+        apply_document_prices(doc, seed)
+        self.assertEqual(doc['items'][0]['product_id'], 'p1')
+        self.assertEqual(doc['items'][0]['unit_price'], '42')
+
     def test_source_line_and_total_mismatches_are_actionable(self):
         doc = pi_source()
         prepare_ci_import(doc, requested_type='CI', has_attachments=True)
@@ -71,14 +111,18 @@ class CiPiImportTests(unittest.TestCase):
         self.assertTrue(any('positive number required for unit price' in s
                             for s in validate_and_calculate(regular)['blocking_issues']))
 
-    def test_regular_ci_and_other_workflows_are_unchanged(self):
+    def test_pi_and_po_workflows_remain_unchanged_and_ci_requires_pi(self):
         for dtype, attached, source in (('PI', True, 'PI'), ('PO', True, 'PI'), ('CI', False, 'PI'), ('CI', True, 'PO')):
             doc = order(dtype)
             doc['source_document_type'] = source
             before = copy.deepcopy(doc)
             prepare_ci_import(doc, requested_type=dtype, has_attachments=attached)
             self.assertEqual(doc, before)
-            self.assertEqual(ci_import_issues(doc), [])
+            if dtype == 'CI':
+                self.assertIn('CI must be created from an attached PI to use its transaction prices',
+                              ci_import_issues(doc))
+            else:
+                self.assertEqual(ci_import_issues(doc), [])
             self.assertEqual(ci_render_data(doc), doc)
 
     def test_render_adapter_keeps_existing_ci_paid_plus_foc_display_correct_without_mutation(self):

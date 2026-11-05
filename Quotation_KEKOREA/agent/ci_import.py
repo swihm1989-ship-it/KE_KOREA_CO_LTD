@@ -93,6 +93,17 @@ def prepare_ci_import(draft, *, requested_type, has_attachments):
 
 
 def apply_document_prices(draft, catalog=None):
+    if draft.get('document_type') in {'CI', 'PL'}:
+        from Quotation_KEKOREA.agent.pricing import apply_catalog_product_matches
+        apply_catalog_product_matches(draft, catalog)
+        pi_required = 'CI must be created from an attached PI to use its transaction prices'
+        draft['missing_fields'] = [entry for entry in draft.get('missing_fields', [])
+                                   if entry != pi_required]
+        if is_pi_import(draft):
+            return _sanitize_import(draft)
+        if draft.get('document_type') == 'CI':
+            draft.setdefault('missing_fields', []).append(pi_required)
+        return draft
     if is_pi_import(draft):
         return _sanitize_import(draft)
     from Quotation_KEKOREA.agent.pricing import apply_verified_eclado_prices
@@ -104,6 +115,8 @@ def pi_source_zero_price(draft, item):
 
 
 def ci_import_issues(result):
+    if result.get('document_type') == 'CI' and not is_pi_import(result):
+        return ['CI must be created from an attached PI to use its transaction prices']
     if not is_pi_import(result):
         return []
     issues = []

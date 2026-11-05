@@ -119,8 +119,62 @@ def is_eclado_supplier(name):
     return any(alias in key for alias in ("eclado", "에끌라도", "에끌라두"))
 
 
+def apply_catalog_product_matches(draft, seed=None):
+    """Attach confident ECLADO product identities without changing document prices."""
+    from Quotation_KEKOREA.agent.samples import is_manual_sample
+    seed = seed if seed is not None else load_local_seed()
+    products = seed.get("products", [])
+    product_ids = {product.get("id") for product in products}
+    draft["missing_fields"] = [
+        entry for entry in draft.get("missing_fields", [])
+        if not (str(entry).startswith("Exact ECLADO product match for ")
+                and str(entry).endswith("; capacity/SKU may be needed"))
+    ]
+    pending = draft.setdefault("pending_confirmations", [])
+    pending[:] = [entry for entry in pending if not str(entry).startswith(
+        ("Confirm product annotation for ", "Double-check this product:"))]
+
+    items = draft.get("items", [])
+    matches = [match_eclado_product(item.get("product_name"), item.get("capacity"), products,
+                                    item.get("product_code"))
+               for item in items]
+    if (draft.get("document_type") == "PL" and draft.get("product_family") != "cosmetics"
+            and not any(match["status"] in {"matched", "suggested", "ambiguous"} for match in matches)):
+        return draft
+
+    for item, match in zip(items, matches):
+        if is_manual_sample(draft, item):
+            continue
+        if match["status"] == "matched":
+            item["product_id"] = match["product"]["id"]
+            confirmation = match.get("confirmation")
+            if confirmation and confirmation not in pending:
+                pending.append(confirmation)
+            continue
+
+        if item.get("product_id") in product_ids:
+            item.pop("product_id", None)
+        name = item.get("product_name") or "item"
+        suggestions = match.get("suggestions", [])
+        if suggestions:
+            candidate = suggestions[0]
+            message = (f"Double-check this product: {name} may be "
+                       f"{candidate['product']['item_name']} ({candidate['similarity']:.0%} similarity). "
+                       "Confirm the source or keep the manually entered name.")
+        else:
+            message = (f"Double-check this product: {name} has no unique ECLADO catalog match. "
+                       "Confirm the source or keep the manually entered name.")
+        if message not in pending:
+            pending.append(message)
+        draft.setdefault("missing_fields", []).append(
+            f"Exact ECLADO product match for {name}; capacity/SKU may be needed")
+    return draft
+
+
 def apply_verified_eclado_prices(draft, seed=None):
     """Replace ECLADO candidate price with exact catalog price or mark the uncertainty."""
+    if draft.get("document_type") in {"CI", "PL"}:
+        return apply_catalog_product_matches(draft, seed)
     from Quotation_KEKOREA.agent.samples import is_manual_sample
     is_purchase_order = draft.get("document_type") == "PO"
     # Recompute catalog-owned warnings after the user completes buyer/product/currency fields.

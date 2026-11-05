@@ -22,7 +22,7 @@
 | 입력값 유지와 새 파일 생성 | 메뉴를 이동해도 보완 입력값을 유지한다. 새 주문 추출 또는 명시적 JSON 정정 시 이전 입력을 초기화한다. 내용 수정 시 기존 다운로드를 무효화한다. | `tests/test_review_ui.py` |
 | 문서별 동시 작업 (로컬 구현) | PI/PO/CI/PL/CIPL의 주문 입력·첨부·초안·검토값·승인·다운로드를 메뉴별로 보관한다. 메뉴를 이동해도 실행 중 추출/생성은 계속되며 결과는 시작한 메뉴에 저장한다. | `tests/test_workflow_state.py`, `tests/test_workflow_ui.py`; 배포 검증 전 |
 | 주문수량 0 | 숫자 `0`, 문자열 `"0"`, `"0.0"`을 정상 수량으로 인정한다. 행은 삭제하지 않으며 해당 행 금액은 0이다. 빈 값·음수·비숫자·NaN/Infinity는 계속 오류다. 단가의 양수 검증은 별도 유지한다. | `tests/test_trade_documents.py`, `tests/test_review_ui.py`, 배포 PO의 0+5 수량/금액 표시 |
-| PO와 판매 가격 구분 | ECLADO PO는 공급처와 정확한 제품·용량·통화가 맞는 매입가격을 사용한다. Dear Glow PI/CI 판매가격을 PO에 사용하지 않는다. 공급처나 통화를 임의로 바꾸지 않는다. | `tests/test_supabase_catalog.py`, `tests/test_packing_workflow.py`, `tests/test_review_fields.py` |
+| 문서별 가격 구분 | ECLADO PO는 정확한 제품·용량의 검증된 KRW 매입가격을 사용한다. PI는 Dear Glow 판매가격을 사용한다. CI는 첨부 PI의 거래가격을 그대로 사용하며 PI가 없으면 카탈로그 가격으로 대체하지 않고 생성을 막는다. CI/PL은 ECLADO 제품명·용량 매칭만 수행하고, 가격 없는 PL에 카탈로그 가격을 적용하지 않는다. | `tests/test_supabase_catalog.py`, `tests/test_ci_pi_import.py`, `tests/test_product_matching.py` |
 | ECLADO 공급처 별칭 | `eclado`, `ECLADO CO. LTD`, `에끌라도`, `에끌라두`를 대소문자·공백·구두점 차이 없이 같은 공급처로 인식한다. 원래 법인명 필드는 그대로 보존한다. 화면에 인식 여부와 카탈로그 매입가격 적용 상품 수를 표시한다. | `tests/test_supabase_catalog.py`, `tests/test_review_ui.py` |
 | OCR 상품명 유사 매칭 및 직접 수정 (로컬 구현) | 정확한 상품명 일치가 없을 때만 문자열 유사도를 이용해 ECLADO 카탈로그 후보를 찾는다. 유사도 90% 이상이며 SKU·용량·제품 구분에 충돌이 없는 단일 후보는 카탈로그 가격을 불러오되 `Double-check this product` 확인 전에는 문서 생성을 막는다. 68% 이상 90% 미만은 가격을 자동 적용하지 않고 후보를 제시한다. 후보가 없거나 직접 수정한 상품명은 사용자가 입력한 그대로 견적에 표시하며 가격은 별도 입력/확인한다. 벡터 검색은 사용하지 않는다. | `tests/test_product_matching.py`, `tests/test_product_matching_ui.py`, `tests/test_workflow_state.py`; 배포 검증 전 |
 | 거래처 정보 DB (데이터 저장 완료, 자동 반영 코드는 로컬) | Supabase 비공개 `kekorea_counterparties`에 등록된 거래처의 법인명·주소·담당자·명시적 기본 배송지를 누락 필드에 적용한다. 주문에 명시한 값과 N/A가 우선한다. | `tests/test_counterparties.py`, `tests/test_counterparties_api.py`, `tests/test_counterparties_ui.py` |
@@ -86,6 +86,8 @@ git diff --check
 상품명 부가 표기 인식은 PO/PI/CI가 같은 함수를 사용한다. 앞서 제공된 24개 상품 JSON을 PI로 바꾸고 구매자를 Dear Glow로 지정한 로컬 검증에서는 24/24 상품이 USD 판매가격에 연결되었다. 구매자가 비어 있거나 다른 구매자이면 Dear Glow 전용 판매가격을 자동 적용하지 않는다. 이 경우는 이미지 인식 실패와 구분한다.
 
 추가로 재현한 오류: 구매자가 Dear Glow로 확인되어도 제품 분류가 미확정/`other`이고 일부 행이 미일치하면, PO에만 있던 부분 인식 보완이 PI/CI에는 적용되지 않아 일치 상품의 가격까지 건너뛰었다. `agent/pricing.py`의 분류 보완 조건을 PI/CI의 확인된 거래처에도 적용한다. 일치한 행만 해당 구매자의 판매가격을 조회하고 미일치 행은 확인 대상으로 남긴다. 명시된 통화를 변경하거나 PO의 KRW 매입가격을 PI/CI에 대입하지 않는다.
+
+이후 CI 가격 정책을 명확히 분리했다. PI 생성 시 Dear Glow 판매 카탈로그를 사용할 수 있지만, CI는 반드시 첨부된 PI의 거래 단가를 보존하며 첨부 PI가 없으면 CI 내보내기를 차단한다. CI와 PL의 ECLADO 제품명·용량 매칭은 카탈로그 식별에만 사용하고 가격은 변경하지 않는다. PL에는 가격을 적용하지 않는다.
 
 회귀 검증은 `tests/test_sale_partial_catalog.py`에서 PI/CI 분류 미확정+일부 미일치, 구매자 누락/타 구매자 보호, KRW 명시 시 매입가격 대체 금지, 실제 검토 화면의 미일치 행 단가 입력 요구를 다룬다. 이후 제공된 실제 PI JSON은 구매자 `dear glow`, 분류 `cosmetics`, 괄호 코드가 붙은 24개 상품이었다. 따라서 이 주문의 문제는 구매자 누락이나 `other` 분류가 아니다. 아래 배포 검증 결과를 따른다.
 
@@ -468,7 +470,7 @@ The uploader uses local credentials, creates a private bucket if necessary, and 
 
 ## Shared document handling and document names
 
-PI, PO, CI, PL, and CIPL use the same extraction, verified ECLADO catalog lookup, quantity synchronization, discount parsing, Decimal calculation, English translation checks, explicit REMARK handling (`N/A` when omitted), and branded PDF/XLSX renderer. PO uses ECLADO purchase prices when the supplier is ECLADO; sale documents use the Dear Glow price list only for Dear Glow buyers. Other cosmetic buyers require a separately approved price.
+PI, PO, CI, PL, and CIPL use the same extraction, quantity synchronization, Decimal calculation, English translation checks, explicit REMARK handling (`N/A` when omitted), and branded PDF/XLSX renderer. Product matching can use ECLADO names and capacities across PO, CI, and PL; uncertain matches require review. PO uses verified ECLADO KRW purchase prices. PI may use the Dear Glow sale price list. CI must preserve transaction prices from its attached PI and is blocked without that source; it is never repriced from the ECLADO purchase catalog. PL remains price-free and uses product matching only.
 
 The Streamlit sidebar offers separate PI, PO, CI, PL, and CIPL workflows. CI creates a Commercial Invoice only; PL creates a Packing List only; CIPL creates both CI and PL using the same transaction data. PI alone includes KE KOREA's USD bank details. CIPL is recognized as a paired document request; PI/Proforma Invoice, PO/Purchase Order, CI/Commercial Invoice, and PL/Packing List aliases are accepted when the prompt explicitly requests creation. If the named document conflicts with the selected menu, extraction stops and tells the user which menu to choose.
 

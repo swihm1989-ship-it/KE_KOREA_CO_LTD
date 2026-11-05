@@ -2,7 +2,8 @@
 import copy
 import unittest
 
-from Quotation_KEKOREA.agent.pricing import match_eclado_product, apply_verified_eclado_prices
+from Quotation_KEKOREA.agent.pricing import (match_eclado_product, apply_catalog_product_matches,
+    apply_verified_eclado_prices)
 
 
 PRODUCTS = [
@@ -179,6 +180,25 @@ class ProductMatchingTests(unittest.TestCase):
         self.match('Cell Memory Cream (E165)', products=products)
         self.assertEqual(products, before)
         self.assertEqual(self.match('Cell Memory Cream', products=[{**PRODUCTS[0], 'brand': 'OTHER'}])['status'], 'not_found')
+
+    def test_match_only_preserves_manual_names_and_document_prices(self):
+        draft = dict(document_type='PL', items=[dict(
+            product_name='Cell Memery Crim', capacity='50g', product_id='cream50',
+            unit_price='42', price_basis='USD/PCS', price_source='Source document')])
+        apply_catalog_product_matches(draft, {'products': PRODUCTS})
+        item = draft['items'][0]
+        self.assertEqual(item['product_name'], 'Cell Memery Crim')
+        self.assertEqual(item['unit_price'], '42')
+        self.assertEqual(item['price_basis'], 'USD/PCS')
+        self.assertEqual(item['price_source'], 'Source document')
+        self.assertNotIn('product_id', item)
+        self.assertTrue(any(message.startswith('Double-check this product:')
+                            for message in draft['pending_confirmations']))
+
+        item['product_name'] = 'Manual product name'
+        apply_catalog_product_matches(draft, {'products': PRODUCTS})
+        self.assertEqual(item['product_name'], 'Manual product name')
+        self.assertEqual(item['unit_price'], '42')
 
     def test_catalog_price_is_cleared_if_a_previously_matched_sku_becomes_conflicting(self):
         draft = dict(document_type='PO', product_family='cosmetics', currency='KRW',

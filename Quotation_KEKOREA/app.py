@@ -302,8 +302,7 @@ def _extract_draft(prompt, title, expected_type, create_cipl_bundle, image_input
     _synchronize_extracted_quantities(draft)
     _apply_ke_korea_company_defaults(draft, expected_type)
     apply_company_profiles(draft, company_profiles, prompt=prompt)
-    if expected_type != "PL":
-        apply_verified_eclado_prices(draft, catalog)
+    apply_verified_eclado_prices(draft, catalog)
     if is_pi_import(draft):
         return draft  # Printed PI prices/discounts remain transaction-specific.
     discount_rate, discount_issue = _discount_instruction(prompt)
@@ -607,32 +606,36 @@ if raw:
             data.pop('_packing_original_totals', None)
             data = normalize_packing_inputs(data)
         apply_company_profiles(data, active_company_profiles)
-        if expected_type != "PL":
+        apply_verified_eclado_prices(data, active_catalog)
+        if data.get("product_family") == "cosmetics" or expected_type in {"CI", "PL"}:
+            for index, item in enumerate(data.get("items", [])):
+                if is_manual_sample(data, item):
+                    continue
+                match = match_eclado_product(item.get("product_name"), item.get("capacity"),
+                                             active_catalog.get("products", []), item.get("product_code"))
+                needs_double_check = (match["status"] in {"suggested", "ambiguous", "not_found"}
+                                      or match.get("match_method") == "fuzzy")
+                if not needs_double_check:
+                    continue
+                st.warning(f"Item {index + 1}: Double-check this product / 제품을 다시 확인해 주세요.")
+                if match.get("suggestions"):
+                    st.caption("Possible catalog matches: " + "; ".join(
+                        f"{candidate['product']['item_name']} ({candidate['similarity']:.0%})"
+                        for candidate in match["suggestions"]))
+                elif match["status"] == "ambiguous":
+                    st.caption("Multiple catalog products match. Confirm the product and capacity/SKU.")
+                else:
+                    st.caption("No unique catalog match. The name you enter below will be kept as written.")
+                item["product_name"] = st.text_input(
+                    f"Item {index + 1}: product name to print on the quote",
+                    value=str(item.get("product_name") or ""),
+                    key=f"product_double_check_{page}_{index}")
             apply_verified_eclado_prices(data, active_catalog)
-            if data.get("product_family") == "cosmetics":
-                for index, item in enumerate(data.get("items", [])):
-                    match = match_eclado_product(item.get("product_name"), item.get("capacity"),
-                                                 active_catalog.get("products", []), item.get("product_code"))
-                    needs_double_check = (match["status"] in {"suggested", "ambiguous", "not_found"}
-                                          or match.get("match_method") == "fuzzy")
-                    if not needs_double_check:
-                        continue
-                    st.warning(f"Item {index + 1}: Double-check this product / 제품을 다시 확인해 주세요.")
-                    if match.get("suggestions"):
-                        st.caption("Possible catalog matches: " + "; ".join(
-                            f"{candidate['product']['item_name']} ({candidate['similarity']:.0%})"
-                            for candidate in match["suggestions"]))
-                    elif match.get("status") == "ambiguous":
-                        st.caption("Multiple catalog products match. Confirm the product and capacity/SKU.")
-                    else:
-                        st.caption("No unique catalog match. The name you enter below will be kept as written.")
-                    item["product_name"] = st.text_input(
-                        f"Item {index + 1}: product name to print on the quote",
-                        value=str(item.get("product_name") or ""),
-                        key=f"product_double_check_{page}_{index}")
-                apply_verified_eclado_prices(data, active_catalog)
         sample_review_paths = edit_sample_rows(data, page)
         review_fields = missing_review_fields(data, packing=create_cipl_bundle)
+        if expected_type == "CI" and not is_pi_import(data):
+            review_fields = [field for field in review_fields if not (
+                field.path[0] == "items" and field.path[-1] in {"unit_price", "discount_percent"})]
         existing_review_paths = set(sample_review_paths)
         if expected_type == "PO":
             existing_review_paths.update({("seller", "legal_name"), ("seller", "address")})
@@ -654,8 +657,7 @@ if raw:
                 review_values[widget_key] = value
                 apply_review_value(data, field, value)
             apply_company_profiles(data, active_company_profiles)
-            if expected_type != "PL":
-                apply_verified_eclado_prices(data, active_catalog)
+            apply_verified_eclado_prices(data, active_catalog)
         data = recalculate_order_promotions(data)
         pending_review_fields = missing_review_fields(data, packing=create_cipl_bundle)
         if expected_type == "PO":
@@ -734,7 +736,7 @@ if raw:
         if is_pi_import(result):
             st.caption('첨부 PI의 거래 단가·할인율·수량을 사용합니다. 은행·결제 값은 CI에 가져오지 않습니다.')
         buyer_key = re.sub(r"[^a-z0-9]", "", buyer_name)
-        if expected_type != "PO" and result.get("product_family") == "cosmetics" and "dearglow" not in buyer_key:
+        if expected_type == "PI" and result.get("product_family") == "cosmetics" and "dearglow" not in buyer_key:
             st.warning("The current ECLADO sale-price catalog is for Dear Glow only. This buyer has no stored catalog price yet, so enter an approved price before creating a document.")
 
         supported_currencies = {"USD", "KRW", "EUR", "CNY"}
