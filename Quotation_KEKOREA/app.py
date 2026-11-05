@@ -829,9 +829,13 @@ if raw:
             st.dataframe(display_rows, hide_index=True, use_container_width=True)
 
         unconfirmed_aliases = []
+        unconfirmed_product_matches = []
         for index, confirmation in enumerate(data.get("pending_confirmations", []), 1):
             if not st.checkbox(confirmation, key=f"confirm_source_alias_{page}_{index}"):
-                unconfirmed_aliases.append(confirmation)
+                if str(confirmation).startswith(("Confirm product annotation for ", "Double-check this product:")):
+                    unconfirmed_product_matches.append(confirmation)
+                else:
+                    unconfirmed_aliases.append(confirmation)
 
         delivery_cols = st.columns(4)
         delivery_values = (
@@ -896,7 +900,7 @@ if raw:
                                       ("promotion rule", "promotion quantity", "promotion command"))]
                               if expected_type in {"PO", "PI"} else [])
         sample_blockers = [issue for issue in result["blocking_issues"] if issue.startswith("Sample ")]
-        export_blocked = bool(pending_review_fields or financial_blockers or bank_blockers or seal_blockers or unconfirmed_aliases or
+        export_blocked = bool(pending_review_fields or financial_blockers or bank_blockers or seal_blockers or
                               promotion_blockers or sample_blockers or source_import_blockers or (packing_check and packing_check["issues"]) or not packing_image_confirmed)
         if sample_blockers:
             st.error("샘플 입력값을 확인해 주세요: " + "; ".join(sample_blockers))
@@ -904,6 +908,8 @@ if raw:
             st.error("행사 조건 또는 행사 수량을 확인해 주세요: " + "; ".join(promotion_blockers))
         if financial_blockers:
             st.error("Confirm valid quantities, unit prices, and discounts before creating a PDF or Excel file.")
+        if unconfirmed_product_matches:
+            st.warning("Unconfirmed product details will be included as entered; generated files will remain marked DRAFT.")
         if unconfirmed_aliases:
             st.warning("Confirm the interpreted order field above before creating the documents.")
         if not packing_image_confirmed:

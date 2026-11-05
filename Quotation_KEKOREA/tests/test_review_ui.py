@@ -10,6 +10,38 @@ from Quotation_KEKOREA.tests.test_review_fields import complete_draft
 
 @unittest.skipUnless(importlib.util.find_spec('streamlit'), 'Streamlit is not installed')
 class ReviewUiTests(unittest.TestCase):
+    def test_unconfirmed_ci_product_match_allows_draft_pdf(self):
+        from streamlit.testing.v1 import AppTest
+        app_path = Path(__file__).resolve().parents[1] / 'app.py'
+        doc = complete_draft()
+        doc.update(document_type='CI', source_document_type='PI', _ci_from_pi=True,
+                   product_family='cosmetics', shipment_reference='SHIP-001',
+                   source_image_attached=True,
+                   source_total='100',
+                   missing_fields=['HS codes'],
+                   conflicts=['Order details were extracted from an image; visually confirm product names, sizes, and quantities'])
+        doc['seller'].update(legal_name='KE KOREA CO. LTD', address='Seoul, South Korea')
+        doc['items'][0].update(product_name='Unmatched Cream', unit_price='10', price_source='Attached PI transaction price',
+                               price_basis='USD/PC', source='Unmatched Cream 10 PCS at USD 10/PCS',
+                               source_line_total='100', price_override_confirmed=True, master_price=False,
+                               _pi_import_price=True)
+        with patch('Quotation_KEKOREA.agent.extractor.load_env', return_value={'OPENAI_API_KEY': 'test'}), \
+             patch('Quotation_KEKOREA.agent.pricing.load_local_seed', return_value={'products': []}), \
+             patch('Quotation_KEKOREA.agent.branding.resolve_company_seal', return_value=(app_path, b'test seal', None)):
+            at = AppTest.from_file(str(app_path))
+            at.session_state['selected_document_page'] = 'CI 만들기'
+            at.session_state['trade_draft'] = doc
+            at.session_state['trade_draft_page'] = 'CI 만들기'
+            at.run(timeout=20)
+            self.assertFalse(at.exception)
+            self.assertTrue(any('remain marked DRAFT' in warning.value for warning in at.warning))
+            effective = __import__('json').loads(at.session_state['rendered_json'])['document']
+            self.assertEqual(effective['status'], 'DRAFT')
+            self.assertTrue(any('HS codes' in issue for issue in effective['blocking_issues']))
+            self.assertTrue(any('Double-check this product' in box.label for box in at.checkbox))
+            self.assertFalse(next(button for button in at.button if button.label == 'Create PDF').disabled,
+                             effective['blocking_issues'])
+
     def test_po_unresolved_promotion_does_not_request_all_24_prices(self):
         from streamlit.testing.v1 import AppTest
         from Quotation_KEKOREA.tests.test_po_partial_catalog import partial_order
