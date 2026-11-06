@@ -18,15 +18,13 @@ Set these values only in the local ignored `.env` file or the hosting provider's
 
 | Variable | Requirement |
 | --- | --- |
-| `CONTRACT_ACCESS_PASSWORD` | Required single-user access password. Prefer a long, unique secret. |
-| `CONTRACT_ACCESS_PASSWORD_HASH` | Optional alternative to the plaintext environment value. Format: `pbkdf2_sha256$salt$hex_digest`, using PBKDF2-HMAC-SHA256 with 240,000 iterations. |
 | `OPENAI_API_KEY` | Required for analysis, drafting, revisions and consented OCR. Never expose it to browser code. |
 | `OPENAI_MODEL` | Required default model. |
 | `CONTRACT_OPENAI_MODEL` | Optional contract-specific model override. |
 | `SUPABASE_URL` | Required Supabase project HTTPS URL. |
 | `SUPABASE_SECRET_KEY` | Required server-only Supabase key. Do not use the publishable key for this feature. |
 
-The password is checked server-side and is not stored in the contract database. Avoid deploying this workflow to a public unauthenticated URL. The current gate is a shared single-user password, not account-level identity or access control.
+**The contract UI has no login or password gate.** Anyone who can reach the app URL can view, edit, export and delete stored contracts and reference materials through the app. Do not store confidential agreements or deploy this app publicly unless that exposure is acceptable. The Supabase bucket is private at the storage layer, but the app's server-side secret can access it on behalf of every visitor.
 
 ## Supabase setup
 
@@ -62,4 +60,4 @@ The tests use synthetic contract content and fake API/database clients. They do 
 
 ## Current rollout status
 
-The code and local tests are present, but this feature has not been deployed. The Supabase migration, deployed secrets, live database persistence, deployed login, external OCR/API behavior and production document layout remain unverified. Keep real agreements, signatures, account details and keys out of test fixtures and source control.
+The code and local tests are present, but this feature has not been deployed. The Supabase migration, deployed secrets, live database persistence, external OCR/API behavior and production document layout remain unverified. The UI is intentionally unauthenticated. Keep real agreements, signatures, account details and keys out of test fixtures and source control.

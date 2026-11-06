@@ -1,6 +1,5 @@
 """Streamlit UI for private contract drafting, review, revision and export."""
 import hashlib
-import hmac
 import re
 from copy import deepcopy
 from uuid import uuid4
@@ -43,19 +42,6 @@ ROLE_LABELS = {
 }
 PARTY_FIELDS = ("legal_name", "country", "address", "representative")
 STATUS_LABELS = {"confirmed": "확정", "suggested": "AI 제안", "missing": "미정"}
-
-
-def _password_matches(candidate, env):
-    direct = str(env.get("CONTRACT_ACCESS_PASSWORD", ""))
-    if direct:
-        return hmac.compare_digest(str(candidate), direct)
-    encoded = str(env.get("CONTRACT_ACCESS_PASSWORD_HASH", ""))
-    parts = encoded.split("$")
-    if len(parts) != 3 or parts[0] != "pbkdf2_sha256":
-        return False
-    salt, expected = parts[1], parts[2]
-    actual = hashlib.pbkdf2_hmac("sha256", str(candidate).encode(), salt.encode(), 240_000).hex()
-    return hmac.compare_digest(actual, expected)
 
 
 def _repository(env):
@@ -792,33 +778,15 @@ def _contract_chat(repo, snapshot, state_key, env):
 
 def render_contract_page(page, env):
     """Render a contract workflow without changing the existing sidebar definition."""
-    st.markdown('<div class="ke-header"><div class="ke-eyebrow">KE KOREA · PRIVATE CONTRACT WORKSPACE</div>'
+    st.markdown('<div class="ke-header"><div class="ke-eyebrow">KE KOREA · CONTRACT WORKSPACE</div>'
                 '<h1>계약서 작성 및 검토</h1><p>AI 초안은 제안이며, 조건 확인과 사용자 적용 없이는 최종 검토 파일을 내보낼 수 없습니다.</p></div>',
                 unsafe_allow_html=True)
-    if not env.get("CONTRACT_ACCESS_PASSWORD") and not env.get("CONTRACT_ACCESS_PASSWORD_HASH"):
-        st.error("계약 화면 접근 비밀번호가 설정되지 않았습니다. CONTRACT_ACCESS_PASSWORD 또는 CONTRACT_ACCESS_PASSWORD_HASH를 서버 Secrets에 설정하세요.")
-        return
-    if not st.session_state.get("contract_authenticated"):
-        with st.form("contract_login"):
-            password = st.text_input("계약 작업공간 비밀번호", type="password")
-            submit = st.form_submit_button("접속")
-        if submit:
-            if _password_matches(password, env):
-                st.session_state["contract_authenticated"] = True
-                st.rerun()
-            st.error("비밀번호가 일치하지 않습니다.")
-        return
+    st.warning("이 계약 화면은 비밀번호 없이 공개 접근됩니다. 앱 주소를 아는 누구나 저장된 계약과 참고 파일을 열람·수정·삭제할 수 있습니다.")
     try:
         repo = _repository(env)
     except (ValueError, ContractRepositoryError) as exc:
         st.error(str(exc))
         return
-    with st.sidebar:
-        st.markdown("### 계약 작업공간")
-        if st.button("계약 작업공간 잠금", key="contract_logout"):
-            st.session_state.pop("contract_authenticated", None)
-            st.rerun()
-
     default_type = PAGE_TYPE[page]
     contract_type = default_type
     if page == "커미션 계약서 만들기 · 준비 중":

@@ -51,8 +51,12 @@ class WorkspaceUiTests(unittest.TestCase):
             self.at.session_state['rendered_paths'] = {'pdf': dtype + '.pdf'}
             self.at.session_state['download_format'] = 'pdf'
         self.navigate('계약서 만들기 · 준비 중')
-        self.assertTrue(any('계약 화면 접근 비밀번호가 설정되지 않았습니다' in item.value
-                            for item in self.at.error))
+        self.assertFalse(any('계약 화면 접근 비밀번호' in item.value
+                             for item in self.at.error))
+        self.assertFalse(any(item.label == '계약 작업공간 비밀번호'
+                             for item in self.at.text_input))
+        self.assertTrue(any('비밀번호 없이 공개 접근됩니다' in item.value
+                            for item in self.at.warning))
         self.navigate('커미션 계약서 만들기 · 준비 중')
         self.assertEqual(list(self.at.radio[0].options), original_menus)
         for dtype in ('PI', 'PO', 'CI', 'PL'):

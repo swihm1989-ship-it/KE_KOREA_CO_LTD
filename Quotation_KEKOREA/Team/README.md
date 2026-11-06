@@ -128,7 +128,7 @@ Render Free는 절전 후 재기동될 수 있고 영구 디스크가 없습니�
 
 - 기존 사이드바의 두 계약 메뉴 라벨과 메뉴 목록은 그대로 두고, 해당 메뉴를 매매계약/커미션 계약 UI에 연결했습니다. PI/PO/CI/PL 코드는 계약 저장소와 분리되어 있습니다.
 - 자연어 거래 분석, 당사자·조건표, 한국어/영어 초안, 문장별 메모·수정안·revision 복구, 참고 PDF/DOCX 및 사용자 승인 선호 조항, DOCX/PDF 내보내기를 `Quotation_KEKOREA/contracts/`에 분리했습니다.
-- 계약 접근은 `CONTRACT_ACCESS_PASSWORD` 또는 PBKDF2-SHA256 해시 Secret으로 제한합니다. 계약 데이터와 파일은 서버 `SUPABASE_SECRET_KEY` 및 비공개 Storage를 사용하도록 구성했습니다. 스캔 PDF OCR은 별도 동의를 요구합니다.
+- 계약 화면은 사용자 요청으로 비밀번호 없이 공개 접근하도록 변경했습니다. 앱 URL에 접근 가능한 누구나 계약 및 참고 파일을 열람·수정·삭제할 수 있으므로, 비공개/민감 계약을 저장하지 마세요. Supabase Storage 버킷은 비공개지만 앱은 서버 `SUPABASE_SECRET_KEY`로 파일을 대신 제공합니다. 스캔 PDF OCR은 별도 동의를 요구합니다.
 - 구현 설정·테스트 명령·운영 전 확인사항은 [README_CONTRACTS.md](../README_CONTRACTS.md)에 기록했습니다. 새 테이블/Storage 버킷은 [계약 migration](../supabase/migrations/202611050001_contracts.sql) 적용 전에는 운영에서 사용할 수 없습니다.
 - **현재 상태:** 코드와 합성 데이터 로컬 테스트는 추가됐지만 Supabase migration 적용, 실제 비밀 설정, 실제 DB 권한/RLS 검증, 앱 배포 및 운영 문서 시각 검증은 완료되지 않았습니다. 이를 배포 완료로 표현하지 마세요.
 
