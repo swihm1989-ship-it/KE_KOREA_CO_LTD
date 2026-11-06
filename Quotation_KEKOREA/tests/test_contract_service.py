@@ -72,6 +72,10 @@ class ContractServiceTests(unittest.TestCase):
         self.assertIn("commission_payer", result["parties"][1]["roles"])
         self.assertIn("Bearer test", captured["request"].get_header("Authorization"))
 
+        payload = json.loads(captured["request"].data.decode("utf-8"))
+        self.assertIn("json", payload["input"][0]["content"].casefold())
+        self.assertEqual(payload["text"]["format"]["type"], "json_object")
+
     def test_missing_terms_are_not_invented_by_service_validation(self):
         response = {
             "contract_type": "sale", "parties": [], "terms": [],
