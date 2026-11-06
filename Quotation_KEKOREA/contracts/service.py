@@ -25,6 +25,36 @@ def language_conflict(text, selected_language):
     return requested is not None and requested != selected_language
 
 
+def _normalize_ai_issues(issues, error_message):
+    if not isinstance(issues, list):
+        raise ValueError(error_message)
+    normalized = []
+    for issue in issues:
+        if not isinstance(issue, dict):
+            raise ValueError("Contract AI returned an invalid review issue.")
+        candidate = dict(issue)
+        message = candidate.get("message")
+        if not isinstance(message, str) or not message.strip():
+            raise ValueError("Contract AI returned a review issue without a message.")
+        if candidate.get("severity") not in {"block", "confirm", "info"}:
+            reported_severity = candidate.get("severity")
+            reported_severity = (
+                reported_severity.strip()[:40]
+                if isinstance(reported_severity, str) and reported_severity.strip()
+                else "unspecified"
+            )
+            candidate["severity"] = "confirm"
+            candidate["message"] = (
+                f"{message.strip()} (AI severity '{reported_severity}' was unclear; "
+                "please review and confirm.)"
+            )
+        code = candidate.get("code")
+        if not isinstance(code, str) or not code.strip():
+            candidate["code"] = "ai_review"
+        normalized.append(candidate)
+    return normalized
+
+
 def _http_error_detail(exc, api_key=""):
     try:
         body = json.loads(exc.read(8192).decode("utf-8"))
@@ -125,7 +155,8 @@ def analyze_trade(messages, current_snapshot, reference_context, *, env, client=
         "Do not invent parties, legal facts, amounts, dates, governing law, dispute forum, terms, currencies, or triggers. "
         "Each party has legal_name, country, address, representative, roles (array of buyer/seller/client/intermediary/commission_payer/fundraiser/investor). "
         "Keep buyer/seller distinct from commission payer and intermediary. Each term has key, value, unit, currency, status, source_refs; use status suggested for extracted values and missing for absent values, never confirmed. "
-        "Preserve exact numeric strings, currencies and units. Questions are strings. Issues are objects with severity, code, message. "
+        "Preserve exact numeric strings, currencies and units. Questions are strings. Issues must be objects with non-empty string code and message, "
+        "and severity exactly one of block, confirm, or info. "
         "Do not state that terms are legally enforceable or legally compliant.",
         user_data, env=env, opener=client or urllib.request.urlopen)
     if data.get("contract_type") not in CONTRACT_TYPES:
@@ -153,9 +184,8 @@ def analyze_trade(messages, current_snapshot, reference_context, *, env, client=
             raise ValueError("Contract AI must return term values as text to preserve exact decimals and units.")
     if any(not isinstance(question, str) for question in data["questions"]):
         raise ValueError("Contract AI returned an invalid question.")
-    if any(not isinstance(issue, dict) or issue.get("severity") not in {"block", "confirm", "info"}
-           for issue in data["issues"]):
-        raise ValueError("Contract AI returned an invalid analysis issue.")
+    data["issues"] = _normalize_ai_issues(
+        data["issues"], "Contract AI returned an invalid analysis issue list.")
     message_by_id = {str(message["id"]): str(message.get("content") or "")
                      for message in messages if message.get("id")}
     message_texts = [str(message.get("content") or "") for message in messages]
@@ -204,7 +234,8 @@ def generate_draft(snapshot, preferred_clauses, *, env, reference_context=None,
         "Return JSON keys title, clauses, issues. clauses is an ordered array of {id,title,order,sentences}; each sentence is {id,text,term_ids,source_refs}. IDs must be unique stable-looking IDs. "
         "Use the user's transaction_messages for cautions and commercial context; distinguish these from reference document examples. "
         "Reconcile material conflicts in issues and ask for missing terms. Do not silently discard user cautions. "
-        "issues is an array of {severity,code,message}. Do not include reviewer notes in contract prose.",
+        "issues is an array of objects with non-empty string code and message, and severity exactly one of block, confirm, or info. "
+        "Do not include reviewer notes in contract prose.",
         {"snapshot": snapshot, "preferred_clauses": preferred_clauses,
          "reference_context": reference_context,
          "transaction_messages": (transaction_messages or [])[-30:]},
@@ -212,15 +243,12 @@ def generate_draft(snapshot, preferred_clauses, *, env, reference_context=None,
     clauses = data.get("clauses")
     if not isinstance(data.get("title"), str) or not isinstance(clauses, list) or not clauses:
         raise ValueError("Contract AI did not return a complete draft.")
-    if not isinstance(data.get("issues", []), list):
-        raise ValueError("Contract AI returned an invalid draft issue list.")
     result = deepcopy(snapshot)
     result["title"] = snapshot.get("title") or data["title"]
     result["clauses"] = clauses
-    result["issues"] = data.get("issues", [])
+    result["issues"] = _normalize_ai_issues(
+        data.get("issues", []), "Contract AI returned an invalid draft issue list.")
     for issue in result["issues"]:
-        if not isinstance(issue, dict) or issue.get("severity") not in {"block", "confirm", "info"}:
-            raise ValueError("Contract AI returned an invalid review issue.")
         issue.setdefault("id", f"issue_{uuid4().hex}")
         issue.setdefault("confirmed", False)
     checked = validate_snapshot(result)

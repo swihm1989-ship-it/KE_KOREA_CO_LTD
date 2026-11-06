@@ -38,6 +38,26 @@ class ContractServiceTests(unittest.TestCase):
                                 client=self.opener_for(response))
         self.assertEqual(result['title'], 'Example FI Agreement')
 
+    def test_draft_unknown_issue_severity_is_kept_for_user_confirmation(self):
+        snapshot = new_snapshot("contract-1", "sale", "en")
+        response = {
+            "title": "Sale Agreement",
+            "issues": [{"severity": "warning", "code": "payment", "message": "Confirm payment terms."}],
+            "clauses": [{"id": "c1", "title": "Payment", "order": 1,
+                         "sentences": [{"id": "s1", "text": "Payment terms need confirmation.",
+                                        "term_ids": [], "source_refs": []}]}],
+        }
+        captured = {}
+        result = generate_draft(
+            snapshot, [], env={"OPENAI_API_KEY": "test", "OPENAI_MODEL": "test"},
+            client=self.opener_for(response, captured))
+        issue = result["issues"][0]
+        self.assertEqual(issue["severity"], "confirm")
+        self.assertIn("warning", issue["message"])
+        self.assertIn("please review and confirm", issue["message"])
+        payload = json.loads(captured["request"].data.decode("utf-8"))
+        self.assertIn("block, confirm, or info", payload["instructions"])
+
     def opener_for(self, value, captured=None):
         def opener(request, timeout):
             if captured is not None:
@@ -86,6 +106,24 @@ class ContractServiceTests(unittest.TestCase):
         }, client=self.opener_for(response))
         self.assertEqual(result["terms"], [])
         self.assertEqual(result["questions"], ["Which governing law applies?"])
+
+    def test_analysis_unknown_issue_severity_is_kept_for_user_confirmation(self):
+        response = {
+            "contract_type": "sale", "parties": [], "terms": [], "questions": [],
+            "issues": [{"severity": "warning", "code": "scope", "message": "Confirm the scope."}],
+        }
+        captured = {}
+        result = analyze_trade(
+            [{"role": "user", "content": "The project scope is preliminary."}],
+            {"contract_type": "sale"}, [],
+            env={"OPENAI_API_KEY": "test", "OPENAI_MODEL": "test"},
+            client=self.opener_for(response, captured))
+        issue = result["issues"][0]
+        self.assertEqual(issue["severity"], "confirm")
+        self.assertIn("warning", issue["message"])
+        self.assertIn("please review and confirm", issue["message"])
+        payload = json.loads(captured["request"].data.decode("utf-8"))
+        self.assertIn("block, confirm, or info", payload["instructions"])
 
     def test_analysis_accepts_only_verifiable_reference_quotes(self):
         response = {
