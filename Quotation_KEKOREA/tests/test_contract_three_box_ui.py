@@ -63,8 +63,8 @@ class ThreeBoxUiTests(unittest.TestCase):
     def save_note(self, sentence_id, instruction):
         self.at.button(key=f'contract_sentence_sample_{sentence_id}').click()
         self.run_app()
-        next(t for t in self.at.text_area if t.label == '수정 메모 / 원하는 변경을 입력하세요').set_value(instruction)
-        self.button('메모 저장').click()
+        self.at.text_area(key=f'contract_note_sample_1_{sentence_id}').set_value(instruction)
+        self.at.button(key=f'contract_save_note_sample_{sentence_id}').click()
         self.run_app()
 
     def test_three_boxes_in_order_with_manual_editor_before_preview(self):
@@ -82,20 +82,27 @@ class ThreeBoxUiTests(unittest.TestCase):
         self.save_note('s2', '둘째 문장 삭제')
         self.at.button(key='contract_sentence_sample_s1').click()
         self.run_app()
-        note = next(t for t in self.at.text_area if t.label == '수정 메모 / 원하는 변경을 입력하세요')
+        note = self.at.text_area(key='contract_note_sample_1_s1')
         self.assertEqual(note.value, '첫 문장만 간결하게')
         self.assertEqual({r['sentence_id'] for r in self.repo.annotations.values()}, {'s1', 's2'})
         self.assertEqual(self.repo.records['sample']['current_revision'], 1)
 
     def test_final_revision_request_commits_only_after_comparison_approval(self):
         self.run_app()
+        self.at.checkbox(key='contract_ai_consent_sample').check()
+        self.run_app()
         self.save_note('s1', '첫째 수정')
         self.save_note('s2', '둘째 수정')
-        def proposer(snapshot, sentence_id, instruction, *, env):
-            original = next(s['text'] for s in snapshot['clauses'][0]['sentences'] if s['id'] == sentence_id)
-            return {'changes': [{'id': sentence_id, 'sentence_id': sentence_id,
-                                 'original_text': original, 'proposed_text': instruction}], 'issues': []}
-        with patch('Quotation_KEKOREA.contracts.ui.propose_revision', side_effect=proposer):
+        def proposer(snapshot, notes, *, env):
+            changes = []
+            for note in notes:
+                sentence_id, instruction = note['sentence_id'], note['instruction']
+                original = next(s['text'] for s in snapshot['clauses'][0]['sentences'] if s['id'] == sentence_id)
+                changes.append({'id': sentence_id, 'sentence_id': sentence_id,
+                                'original_text': original, 'proposed_text': instruction})
+            return {'id': 'proposal_batch', 'contract_id': 'sample', 'base_revision': 1,
+                    'note_ids': [n['id'] for n in notes], 'changes': changes, 'issues': []}
+        with patch('Quotation_KEKOREA.contracts.ui.propose_notes_revision', side_effect=proposer):
             self.button('최종 수정 요청').click()
             self.run_app()
         self.assertEqual(self.repo.records['sample']['current_revision'], 1)
@@ -141,6 +148,8 @@ class ThreeBoxUiTests(unittest.TestCase):
         self.assertIn('review_one', [i['code'] for i in validate_snapshot(saved, for_export=True)])
 
     def test_unchanged_review_does_not_make_saved_notes_stale(self):
+        self.run_app()
+        self.at.checkbox(key='contract_ai_consent_sample').check()
         self.run_app()
         self.save_note('s1', '저장된 요청')
         self.button('항목별 검토 상태 저장').click()

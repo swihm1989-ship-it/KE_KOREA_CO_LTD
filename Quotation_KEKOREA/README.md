@@ -9,7 +9,7 @@
 
 계약 자동화 기능의 구현 범위·설정·DB migration 및 검증 상태는 [README_CONTRACTS.md](README_CONTRACTS.md)를 참조한다. 계약 코드는 GitHub `main`에 반영되었지만 Supabase migration 적용·운영 데이터 저장·실제 Streamlit 경로의 동작은 별도로 검증해야 한다.
 
-현재 계약서 화면은 **BOX 1 계약조건 입력·AI 대화, BOX 2 상세조건 수동 입력, BOX 3 문서형 미리보기**로 구성한다. BOX 2의 확정/AI 제안/확인 필요/TBD 유지는 기존 confirmed/suggested/missing 상태에 대응하며, 조건 변경은 기존 본문 영향 검토·승인 절차를 따른다. BOX 3에서 문장을 클릭해 메모를 저장한 다음 `최종 수정 요청`으로 여러 메모의 제안을 함께 비교한다. 승인 전에는 본문이 바뀌지 않고, 승인한 변경은 기존 revision RPC 한 번으로 저장한다.
+현재 계약서 화면은 **BOX 1 계약조건 입력·AI 대화, BOX 2 상세조건 수동 입력, BOX 3 문서형 미리보기**로 구성한다. BOX 2의 확정/AI 제안/확인 필요/TBD 유지는 기존 confirmed/suggested/missing 상태에 대응하며, 조건 변경은 기존 본문 영향 검토·승인 절차를 따른다. BOX 3에서 여러 문장을 클릭하면 각 문장 옆에 메모가 동시에 열린다. 메모별 저장을 누르지 않아도 `최종 수정 요청` 한 번으로 모두 저장하고 한 번의 AI 요청으로 수정안을 만든다. 승인 전에는 본문이 바뀌지 않고, 승인한 변경은 기존 revision RPC 한 번으로 저장한다.
 
 계약서 출력은 검토용 DRAFT와 최종 계약서로 구분한다. DRAFT는 실제 조항이 필요하며 미확정 상태의 본문에 `[확인 필요]`/`[TBD / UNCONFIRMED]` 표시와 미확정 부록을 붙인다. PDF에는 매 페이지 DRAFT 워터마크, DOCX에는 반복 DRAFT 머리글을 넣고 서명 페이지를 생성하지 않는다. 최종 PDF/DOCX는 기존 `validate_rules(..., for_export=True)`를 통과해야 한다. 두 경로 모두 기존 비공개 Storage·revision·내보내기 기록을 사용하며 경로의 `exports/draft/`와 `exports/final/`로 구분한다.
 
@@ -556,7 +556,7 @@ PO/PI에서 확인이 필요한 상품 주석은 문서 생성 전에 확인해�
 
 ### 계약 UI 전용 조정 계층과 제한
 
-`contracts/workspace.py`는 현재 계약·revision·sentence ID에 맞는 최신 메모만 수집하고 기존 `propose_revision()` 제안을 하나로 합친다. 같은 대상에 서로 다른 수정값이 있으면 전체 요청을 차단하며, 기존 `apply_proposal()`로 저장 전 적용 가능성을 검사한다. 서로 다른 문장 간의 법률적·의미적 충돌을 자동 판정하는 엔진은 추가하지 않았다. 여러 메모를 승인할 때 사용자가 금액·기한·역할의 일관성을 별도로 확인해야 한다. 일부 변경만 승인한 경우 나머지 메모는 이전 revision의 기록으로 남고 재검토 후 다시 저장해야 한다.
+`contracts/workspace.py`는 현재 계약·revision·sentence ID에 맞는 메모를 하나의 AI 요청으로 전달하고 결과의 대상·원문·중복·누락·삭제 여부·보호 지급조항을 검사한다. AI 전송에는 BOX 1의 전송 동의가 필요하다. AI가 메모 간 충돌을 보고하면 계약 본문을 변경하지 않고 조정을 요청한다. `apply_proposal()`로 적용 가능성을 검증하며, AI가 모든 법률적·의미적 충돌을 발견한다고 보장하지 않으므로 사용자가 금액·기한·역할을 확인해야 한다. 일부 변경만 승인하면 나머지 메모는 이전 revision의 기록으로 남는다. 열려 있는 미저장 메모는 브라우저 세션에 보관되며 `최종 수정 요청` 또는 개별 저장 시 DB에 저장된다. 이전 revision 메모는 확인용으로 불러올 수 있지만 명시적으로 다시 수정·저장해야 요청에 포함된다.
 
 `contracts/draft_exports.py`는 최종 렌더러를 변경하지 않는 별도 검토용 출력 경로다. 미확정이 있으면 본문 전체를 미승인으로 표시하고 원문 근거를 부록에 보존한다. `contracts/rules.py`, `commission_policy.py`, `service.py`, `editing.py`, 저장 스키마와 PO/PI/CI/PL·ECLADO 코드는 보존했다. 로컬 PDF 다중 페이지·혼합 언어 렌더링을 확인했으나 실제 브라우저의 반응형·시각 검수와 Word 렌더링, 운영 DB/API/배포 검증은 미완료다. Windows 브라우저 URL 확인 제한으로 컴퓨터 제어가 중단됐다.
 

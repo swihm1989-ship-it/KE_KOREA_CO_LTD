@@ -12,7 +12,7 @@ from Quotation_KEKOREA.contracts.editing import (
 )
 from Quotation_KEKOREA.contracts.exports import export_contract
 from Quotation_KEKOREA.contracts.draft_exports import export_draft
-from Quotation_KEKOREA.contracts.workspace import build_batch_proposal, collect_notes
+from Quotation_KEKOREA.contracts.workspace import collect_notes, propose_notes_revision
 from Quotation_KEKOREA.contracts.models import new_snapshot, validate_snapshot
 from Quotation_KEKOREA.contracts.library import search_library
 from Quotation_KEKOREA.contracts.review_summary import review_cards
@@ -394,7 +394,10 @@ def _proposal_panel(repo, snapshot, proposal, state_key):
             if change.get("reason"):
                 st.caption("변경 이유: " + change["reason"])
             if is_required:
-                st.warning("충돌 해소에 필요한 변경입니다. 적용하거나 전체 제안을 취소해야 합니다.")
+                if change.get("term_key"):
+                    st.caption("입력한 조건을 본문의 관련 변경과 함께 적용합니다.")
+                else:
+                    st.warning("관련 문장과 함께 적용해야 하는 수정입니다. 적용하거나 전체 제안을 취소해 주세요.")
             checked = st.checkbox(
                 "이 변경 적용" if not is_required else "필수 변경 적용",
                 value=True, disabled=is_required,
@@ -457,16 +460,54 @@ def _proposal_panel(repo, snapshot, proposal, state_key):
         st.rerun()
 
 
+def _note_buffer_key(snapshot):
+    return f"contract_note_buffer_{snapshot['contract_id']}_{snapshot['revision']}"
+
+
+def _note_changed(buffer_key, sentence_id, widget_key, contract_id):
+    st.session_state.setdefault(buffer_key, {})[sentence_id] = st.session_state.get(widget_key, '')
+    # A changed request cannot reuse an earlier proposal.
+    proposal = st.session_state.get('contract_pending_proposal') or {}
+    if proposal.get('contract_id') == contract_id and proposal.get('note_ids'):
+        st.session_state.pop('contract_pending_proposal', None)
+
+
+def _remove_note(repo, snapshot, sentence_id, saved_notes, buffer_key, open_key, widget_key):
+    try:
+        if sentence_id in saved_notes:
+            repo.save_annotation(dict(saved_notes[sentence_id], status='dismissed'))
+        st.session_state.get(buffer_key, {}).pop(sentence_id, None)
+        if sentence_id in st.session_state.get(open_key, []):
+            st.session_state[open_key].remove(sentence_id)
+        st.session_state.pop(widget_key, None)
+        proposal = st.session_state.get('contract_pending_proposal') or {}
+        if proposal.get('contract_id') == snapshot['contract_id'] and proposal.get('note_ids'):
+            st.session_state.pop('contract_pending_proposal', None)
+    except ContractRepositoryError as exc:
+        st.session_state[f"contract_note_error_{snapshot['contract_id']}"] = str(exc)
+
+
 def _render_draft(repo, snapshot, state_key, env):
-    st.caption(f"Revision {snapshot.get('revision')} · DRAFT / 검토용 · 문장을 클릭하면 메모가 열립니다.")
-    selected_key = f"contract_selected_sentence_{snapshot['contract_id']}"
-    annotations = repo.list_annotations(snapshot["contract_id"])
+    st.caption(f"Revision {snapshot.get('revision')} · DRAFT / 검토용 · 문장을 클릭해 옆에 메모를 작성하세요.")
+    contract_id, revision = snapshot['contract_id'], snapshot['revision']
+    annotations = repo.list_annotations(contract_id)
     pending = collect_notes(snapshot, annotations)
-    note_sentences = {n['sentence_id'] for n in pending['notes']}
+    saved_notes = {row['sentence_id']: row for row in pending['notes']}
+    open_key = f"contract_open_notes_{contract_id}_{revision}"
+    buffer_key = _note_buffer_key(snapshot)
+    opened = st.session_state.setdefault(open_key, [])
+    buffers = st.session_state.setdefault(buffer_key, {})
+    error = st.session_state.pop(f"contract_note_error_{contract_id}", None)
+    if error:
+        st.error(f"메모를 삭제하지 못했습니다. {error}")
+    # RAG review can select a sentence using the existing navigation key.
+    selected = st.session_state.pop(f"contract_selected_sentence_{contract_id}", None)
+    if selected and selected not in opened:
+        opened.append(selected)
     st.markdown("""<style>
     .st-key-contract_document_surface {background:#eef1f4;padding:clamp(.5rem,2vw,2rem);}
-    .st-key-contract_document_paper {background:#fff;color:#172b3a;max-width:50rem;
-        margin:auto;padding:clamp(1rem,5vw,4rem);border:1px solid #dbe3ea;border-radius:2px;}
+    .st-key-contract_document_paper {background:#fff;color:#172b3a;max-width:64rem;
+        margin:auto;padding:clamp(1rem,4vw,3rem);border:1px solid #dbe3ea;border-radius:2px;}
     .st-key-contract_document_paper h2 {text-align:center;font-size:1.5rem;line-height:1.6;}
     .st-key-contract_document_paper h4 {color:#092b4c;font-size:1rem;margin-top:1.5rem;}
     .st-key-contract_document_paper [data-testid="stButton"] button {
@@ -480,97 +521,135 @@ def _render_draft(repo, snapshot, state_key, env):
         outline:2px solid #0877c9;outline-offset:2px;}
     .st-key-contract_document_paper button[kind="primary"] {background:#e7f2fa;
         border-left:3px solid #0877c9;color:#092b4c;}
-    @media(max-width:480px) {.st-key-contract_document_surface {padding:.25rem;}
+    @media(max-width:640px) {.st-key-contract_document_surface {padding:.25rem;}
         .st-key-contract_document_paper {padding:1rem;}}
     </style>""", unsafe_allow_html=True)
     with st.container(key="contract_document_surface"):
         with st.container(key="contract_document_paper"):
             st.markdown(f"<h2>{escape(snapshot.get('title') or 'Contract')}</h2>", unsafe_allow_html=True)
             st.caption("DRAFT / 검토용 · 미확정 내용은 최종 합의가 아닙니다.")
-            for clause in sorted(snapshot.get("clauses", []), key=lambda item: item.get("order", 0)):
+            for clause in sorted(snapshot.get('clauses', []), key=lambda item: item.get('order', 0)):
                 st.markdown(f"<h4>{escape(clause.get('title', ''))}</h4>", unsafe_allow_html=True)
-                for sentence in clause.get("sentences", []):
-                    selected = st.session_state.get(selected_key) == sentence["id"]
-                    if st.button(sentence['text'],
-                                 key=f"contract_sentence_{snapshot['contract_id']}_{sentence['id']}",
-                                 help="저장된 수정 메모 있음" if sentence['id'] in note_sentences else "클릭해 수정 메모 작성",
-                                 type="primary" if selected else "secondary",
-                                 use_container_width=True):
-                        st.session_state[selected_key] = sentence["id"]
-                        st.rerun()
-    selected_sentence_id = st.session_state.get(selected_key)
-    selected_sentence = next((sentence for clause in snapshot["clauses"]
-                              for sentence in clause["sentences"]
-                              if sentence["id"] == selected_sentence_id), None)
-    if selected_sentence:
-        prior_note = next((row for row in annotations
-                           if row.get('sentence_id') == selected_sentence_id and row.get('status') == 'note'), {})
-        with st.container(border=True):
-            st.markdown("#### 선택 문장 수정 메모")
-            st.caption(f"문장 {selected_sentence_id} · revision {snapshot['revision']}")
-            st.write(selected_sentence["text"])
-            if prior_note and prior_note.get('base_revision') != snapshot['revision']:
-                st.caption("이전 revision의 메모입니다. 현재 문장과 비교한 뒤 다시 저장해야 요청에 포함됩니다.")
-            note = st.text_area("수정 메모 / 원하는 변경을 입력하세요",
-                                value=prior_note.get('instruction', ''),
-                                key=f"contract_note_{snapshot['contract_id']}_{snapshot['revision']}_{selected_sentence_id}")
-            note_col, revise_col, close_col = st.columns([1, 1, 1])
-            if note_col.button("메모 저장", key=f"contract_save_note_{snapshot['contract_id']}_{selected_sentence_id}"):
-                if not note.strip():
-                    st.error("메모를 입력해 주세요.")
-                else:
-                    try:
-                        repo.save_annotation({
-                            "id": str(uuid5(NAMESPACE_URL, f"{snapshot['contract_id']}:{snapshot['revision']}:{selected_sentence_id}:note")),
-                            "contract_id": snapshot["contract_id"], "sentence_id": selected_sentence_id,
-                            "base_revision": snapshot["revision"], "instruction": note.strip(),
-                            "proposal": None, "status": "note",
-                        })
-                        st.session_state.pop("contract_pending_proposal", None)
-                        st.success("메모를 저장했습니다. 아래 최종 수정 요청으로 모아서 검토할 수 있습니다.")
-                        st.rerun()
-                    except ContractRepositoryError as exc:
-                        st.error(str(exc))
-            if revise_col.button("AI 수정안 만들기", disabled=not note.strip(),
-                                 key=f"contract_make_revision_{snapshot['contract_id']}_{selected_sentence_id}"):
-                try:
-                    proposal = propose_revision(snapshot, selected_sentence_id, note, env=env)
-                    st.session_state["contract_pending_proposal"] = proposal
-                    st.session_state["contract_pending_proposal_key"] = state_key
-                    repo.save_annotation({
-                        "id": proposal["id"].replace("proposal_", ""), "contract_id": snapshot["contract_id"],
-                        "sentence_id": selected_sentence_id, "base_revision": snapshot["revision"],
-                        "instruction": note, "proposal": proposal, "status": "proposed",
-                    })
-                    st.rerun()
-                except (ValueError, RuntimeError, ContractRepositoryError) as exc:
-                    st.error(str(exc))
-            if close_col.button("메모 닫기", key=f"contract_note_close_{snapshot['contract_id']}"):
-                st.session_state.pop(selected_key, None)
-                st.rerun()
-    _batch_request_panel(repo, snapshot, state_key, env, pending)
+                for sentence in clause.get('sentences', []):
+                    sentence_id = sentence['id']
+                    is_open = sentence_id in opened
+                    text_col, note_col = st.columns([7, 3]) if is_open else (st.container(), None)
+                    with text_col:
+                        if st.button(sentence['text'], key=f"contract_sentence_{contract_id}_{sentence_id}",
+                                     help="클릭해 이 문장의 메모를 열거나 선택합니다.",
+                                     type='primary' if is_open else 'secondary', use_container_width=True):
+                            if sentence_id not in opened:
+                                opened.append(sentence_id)
+                            st.rerun()
+                    if note_col is None:
+                        continue
+                    with note_col:
+                        st.caption("이 문장의 수정 메모")
+                        widget_key = f"contract_note_{contract_id}_{revision}_{sentence_id}"
+                        old_note = next((row for row in annotations
+                                         if row.get('sentence_id') == sentence_id and row.get('status') == 'note'
+                                         and row.get('base_revision') != revision
+                                         and row.get('id') not in snapshot.get('applied_note_ids', [])), {})
+                        prior_buffers = [(key, value) for key, value in st.session_state.items()
+                                         if key.startswith(f'contract_note_buffer_{contract_id}_')
+                                         and key != buffer_key and isinstance(value, dict)
+                                         and str(value.get(sentence_id) or '').strip()]
+                        prior_text = old_note.get('instruction', '')
+                        if not prior_text and prior_buffers:
+                            prior_text = prior_buffers[-1][1][sentence_id]
+                        initial = buffers.get(sentence_id, saved_notes.get(sentence_id, {}).get('instruction', prior_text))
+                        if prior_text and sentence_id not in saved_notes and sentence_id not in buffers:
+                            st.caption('이전 revision의 메모입니다. 현재 문장을 확인하고 수정하거나 저장해야 새 요청에 포함됩니다.')
+                        if widget_key not in st.session_state:
+                            st.session_state[widget_key] = initial
+                        note = st.text_area("수정 메모 / 원하는 변경을 입력하세요", key=widget_key,
+                                            label_visibility='collapsed', height=100,
+                                            placeholder='이 문장을 어떻게 수정할까요?',
+                                            on_change=_note_changed,
+                                            args=(buffer_key, sentence_id, widget_key, contract_id))
+                        with st.expander("메모 저장·개별 수정", expanded=False):
+                            if st.button("메모 저장", key=f"contract_save_note_{contract_id}_{sentence_id}"):
+                                if not note.strip():
+                                    st.error("메모를 입력해 주세요.")
+                                else:
+                                    try:
+                                        row = _note_row(snapshot, sentence_id, note, saved_notes)
+                                        repo.save_annotation(row)
+                                        buffers[sentence_id] = note
+                                        st.success("메모를 저장했습니다.")
+                                        st.rerun()
+                                    except ContractRepositoryError as exc:
+                                        st.error(str(exc))
+                            if st.button("AI 수정안 만들기", disabled=not note.strip() or not st.session_state.get(f'contract_ai_consent_{contract_id}', False),
+                                         key=f"contract_make_revision_{contract_id}_{sentence_id}"):
+                                try:
+                                    proposal = propose_revision(snapshot, sentence_id, note, env=env)
+                                    repo.save_annotation({
+                                        'id': proposal['id'].replace('proposal_', ''), 'contract_id': contract_id,
+                                        'sentence_id': sentence_id, 'base_revision': revision,
+                                        'instruction': note, 'proposal': proposal, 'status': 'proposed'})
+                                    st.session_state['contract_pending_proposal'] = proposal
+                                    st.session_state['contract_pending_proposal_key'] = state_key
+                                    st.rerun()
+                                except (ValueError, RuntimeError, ContractRepositoryError) as exc:
+                                    st.error(str(exc))
+                            st.button("메모 삭제", key=f"contract_note_remove_{contract_id}_{sentence_id}",
+                                      on_click=_remove_note, args=(repo, snapshot, sentence_id, saved_notes,
+                                                                  buffer_key, open_key, widget_key))
+                        if st.button("메모 닫기", key=f"contract_note_close_{contract_id}_{sentence_id}"):
+                            buffers[sentence_id] = note
+                            opened.remove(sentence_id)
+                            st.rerun()
+    _batch_request_panel(repo, snapshot, state_key, env, pending, buffers)
 
 
-def _batch_request_panel(repo, snapshot, state_key, env, pending):
-    st.markdown("#### 저장된 수정 요청")
-    for row in pending['notes']:
-        st.write(f"{row['sentence_id']} · {row['instruction']}")
+def _note_row(snapshot, sentence_id, instruction, saved_notes):
+    return {'id': saved_notes.get(sentence_id, {}).get('id') or str(uuid5(
+                NAMESPACE_URL, f"{snapshot['contract_id']}:{snapshot['revision']}:{sentence_id}:note")),
+            'contract_id': snapshot['contract_id'], 'sentence_id': sentence_id,
+            'base_revision': snapshot['revision'], 'instruction': instruction.strip(),
+            'proposal': None, 'status': 'note'}
+
+
+def _batch_request_panel(repo, snapshot, state_key, env, pending, buffers):
+    saved_notes = {row['sentence_id']: row for row in pending['notes']}
+    instructions = {sentence_id: row['instruction'] for sentence_id, row in saved_notes.items()}
+    instructions.update(buffers)
+    notes = [_note_row(snapshot, sentence_id, instruction, saved_notes)
+             for sentence_id, instruction in instructions.items() if str(instruction).strip()]
+    st.markdown("#### 수정 메모")
+    st.caption(f"현재 revision에 요청할 메모 {len(notes)}개 · 여러 문장에 메모를 작성한 뒤 한 번에 요청하세요.")
     if pending['excluded']:
         with st.expander(f"이전·중복·제외 메모 ({len(pending['excluded'])})", expanded=False):
             for item in pending['excluded']:
                 st.caption(f"{item['note'].get('sentence_id')} · {item['reason']}")
                 st.write(item['note'].get('instruction', ''))
-    st.caption("최종 수정 요청은 메모를 모아 수정안을 만드는 단계입니다. 비교·승인 전에는 본문이 바뀌지 않습니다.")
-    if st.button("최종 수정 요청", type="primary", disabled=not pending['notes'],
+    st.caption("버튼을 누르면 메모를 저장하고 AI에 한 번에 전달합니다. 본문은 수정안 비교·승인 후에 변경됩니다.")
+    consent = st.session_state.get(f"contract_ai_consent_{snapshot['contract_id']}", False)
+    existing_proposal = st.session_state.get('contract_pending_proposal') or {}
+    other_proposal = (existing_proposal.get('contract_id') == snapshot['contract_id']
+                      and not existing_proposal.get('note_ids'))
+    if notes and not consent:
+        st.caption('BOX 1의 AI 전송 동의를 선택해야 수정 요청을 보낼 수 있습니다.')
+    if notes and other_proposal:
+        st.caption('먼저 아래 조건 수정안을 적용하거나 취소해 주세요. 작성한 문장 메모는 유지됩니다.')
+    if st.button('최종 수정 요청', type='primary', disabled=not notes or not consent or other_proposal,
                  key=f"contract_batch_request_{snapshot['contract_id']}_{snapshot['revision']}"):
         try:
-            with st.spinner("저장된 메모를 비교 가능한 수정안으로 모으고 있습니다..."):
-                proposal = build_batch_proposal(snapshot, pending['notes'], proposer=propose_revision, env=env)
+            # Persist all edited notes first. A failure prevents any AI request or contract revision.
+            for note in notes:
+                if note['instruction'] != saved_notes.get(note['sentence_id'], {}).get('instruction'):
+                    repo.save_annotation(note)
+            for sentence_id, instruction in buffers.items():
+                if not str(instruction).strip() and sentence_id in saved_notes:
+                    dismissed = dict(saved_notes[sentence_id], status='dismissed')
+                    repo.save_annotation(dismissed)
+            with st.spinner('모든 메모를 함께 검토해 수정안을 작성하고 있습니다...'):
+                proposal = propose_notes_revision(snapshot, notes, env=env)
             repo.save_annotation({
-                "id": proposal['id'].replace('proposal_', ''), "contract_id": snapshot['contract_id'],
-                "sentence_id": 'batch-revision', "base_revision": snapshot['revision'],
-                "instruction": proposal['instruction'], "proposal": proposal, "status": 'proposed',
-            })
+                'id': proposal['id'].replace('proposal_', ''), 'contract_id': snapshot['contract_id'],
+                'sentence_id': 'batch-revision', 'base_revision': snapshot['revision'],
+                'instruction': proposal.get('instruction', ''), 'proposal': proposal, 'status': 'proposed'})
             st.session_state['contract_pending_proposal'] = proposal
             st.session_state['contract_pending_proposal_key'] = state_key
             st.rerun()
