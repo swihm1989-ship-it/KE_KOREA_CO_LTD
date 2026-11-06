@@ -426,58 +426,7 @@ def _render_draft(repo, snapshot, state_key, env):
     st.caption(f"Revision {snapshot.get('revision')} · "
                + ("한국어" if snapshot["language"] == "ko" else "English"))
     if snapshot.get("issues"):
-        with st.expander("AI/검토 참고 사항", expanded=True):
-            reviewed_items = []
-            for index, issue in enumerate(snapshot["issues"]):
-                if not isinstance(issue, dict):
-                    st.write(f"- {issue}")
-                    continue
-                message = issue.get("message", issue)
-                if issue.get("severity") == "confirm":
-                    confirmed = st.checkbox(
-                        f"검토 완료: {message}",
-                        value=bool(issue.get("confirmed")),
-                        key=f"contract_issue_{snapshot['contract_id']}_{issue.get('id', index)}")
-                    reviewed_items.append((index, confirmed, None))
-                elif issue.get("severity") == "block":
-                    st.error(message)
-                    resolved = st.checkbox(
-                        f"이 쟁점을 직접 확인하고 해결함: {message}",
-                        value=bool(issue.get("resolved_by_user")),
-                        key=f"contract_resolve_issue_{snapshot['contract_id']}_{issue.get('id', index)}")
-                    reason = st.text_input(
-                        "해결 내용/근거",
-                        value=issue.get("resolution") or "",
-                        key=f"contract_resolve_reason_{snapshot['contract_id']}_{issue.get('id', index)}")
-                    reviewed_items.append((index, resolved, reason))
-                else:
-                    st.info(message)
-            if reviewed_items and st.button(
-                "검토/해결 상태를 revision으로 저장",
-                key=f"contract_confirm_issues_{snapshot['contract_id']}_{snapshot['revision']}"):
-                updated = deepcopy(snapshot)
-                invalid_resolution = False
-                for index, checked, reason in reviewed_items:
-                    issue = updated["issues"][index]
-                    if issue.get("severity") == "confirm":
-                        issue["confirmed"] = bool(checked)
-                    elif issue.get("severity") == "block":
-                        if checked and not str(reason or "").strip():
-                            invalid_resolution = True
-                            continue
-                        issue["resolved_by_user"] = bool(checked)
-                        issue["resolution"] = str(reason or "").strip() or None
-                        if checked:
-                            issue["severity"] = "info"
-                if invalid_resolution:
-                    st.error("차단 쟁점을 해결하려면 해결 내용/근거를 입력해 주세요.")
-                    return
-                try:
-                    saved = _save_snapshot(repo, updated, "User confirmed AI review items")
-                    st.session_state[state_key] = saved
-                    st.rerun()
-                except ContractRepositoryError as exc:
-                    st.error(str(exc))
+        st.caption(f"미확정·검토 항목 {len(snapshot['issues'])}개는 계약서 본문 아래에서 확인할 수 있습니다.")
     selected_key = f"contract_selected_sentence_{snapshot['contract_id']}"
     for clause in sorted(snapshot.get("clauses", []), key=lambda item: item.get("order", 0)):
         st.markdown(f"#### {clause.get('title', '')}")
@@ -537,6 +486,60 @@ def _render_draft(repo, snapshot, state_key, env):
                 st.write(f"Revision {annotation['base_revision']} · "
                          f"{annotation['sentence_id']} · {annotation['status']}")
                 st.write(annotation["instruction"])
+
+    if snapshot.get("issues"):
+        with st.expander(f"검토 사항 ({len(snapshot['issues'])}개) · 필요할 때 열기", expanded=False):
+            reviewed_items = []
+            for index, issue in enumerate(snapshot["issues"]):
+                if not isinstance(issue, dict):
+                    st.write(f"- {issue}")
+                    continue
+                message = issue.get("message", issue)
+                if issue.get("severity") == "confirm":
+                    confirmed = st.checkbox(
+                        f"검토 완료: {message}",
+                        value=bool(issue.get("confirmed")),
+                        key=f"contract_issue_{snapshot['contract_id']}_{issue.get('id', index)}")
+                    reviewed_items.append((index, confirmed, None))
+                elif issue.get("severity") == "block":
+                    st.error(message)
+                    resolved = st.checkbox(
+                        f"이 쟁점을 직접 확인하고 해결함: {message}",
+                        value=bool(issue.get("resolved_by_user")),
+                        key=f"contract_resolve_issue_{snapshot['contract_id']}_{issue.get('id', index)}")
+                    reason = st.text_input(
+                        "해결 내용/근거",
+                        value=issue.get("resolution") or "",
+                        key=f"contract_resolve_reason_{snapshot['contract_id']}_{issue.get('id', index)}")
+                    reviewed_items.append((index, resolved, reason))
+                else:
+                    st.info(message)
+            if reviewed_items and st.button(
+                "검토/해결 상태를 revision으로 저장",
+                key=f"contract_confirm_issues_{snapshot['contract_id']}_{snapshot['revision']}"):
+                updated = deepcopy(snapshot)
+                invalid_resolution = False
+                for index, checked, reason in reviewed_items:
+                    issue = updated["issues"][index]
+                    if issue.get("severity") == "confirm":
+                        issue["confirmed"] = bool(checked)
+                    elif issue.get("severity") == "block":
+                        if checked and not str(reason or "").strip():
+                            invalid_resolution = True
+                            continue
+                        issue["resolved_by_user"] = bool(checked)
+                        issue["resolution"] = str(reason or "").strip() or None
+                        if checked:
+                            issue["severity"] = "info"
+                if invalid_resolution:
+                    st.error("차단 쟁점을 해결하려면 해결 내용/근거를 입력해 주세요.")
+                    return
+                try:
+                    saved = _save_snapshot(repo, updated, "User confirmed AI review items")
+                    st.session_state[state_key] = saved
+                    st.rerun()
+                except ContractRepositoryError as exc:
+                    st.error(str(exc))
 
 
 def _export_panel(repo, snapshot, env):
@@ -976,8 +979,6 @@ def render_contract_page(page, env):
 
     _contract_chat(repo, snapshot, state_key, env)
     show_library_sources(snapshot.get('library_sources', []))
-    st.markdown("### 거래조건표")
-    _run_editor(repo, snapshot, state_key, env)
 
     refs = repo.contract_references(active_id)
     preferred = [clause for clause in repo.list_preferred_clauses()
@@ -1038,6 +1039,10 @@ def render_contract_page(page, env):
                 st.rerun()
             except (ValueError, RuntimeError, ContractRepositoryError) as exc:
                 st.error(str(exc))
+    if not snapshot.get("clauses"):
+        with st.expander("상세 거래조건 수정 (선택)", expanded=False):
+            st.markdown("### 거래조건표")
+            _run_editor(repo, snapshot, state_key, env)
     _references_panel(repo, active_id, env)
 
     proposal = st.session_state.get("contract_pending_proposal")
@@ -1063,6 +1068,9 @@ def render_contract_page(page, env):
                     except (ValueError, ContractRepositoryError) as exc:
                         st.error(str(exc))
         _render_draft(repo, snapshot, state_key, env)
+        with st.expander("상세 거래조건 수정 (선택)", expanded=False):
+            st.markdown("### 거래조건표")
+            _run_editor(repo, snapshot, state_key, env)
         revisions = st.session_state.get("contract_revisions")
         if not revisions:
             try:
