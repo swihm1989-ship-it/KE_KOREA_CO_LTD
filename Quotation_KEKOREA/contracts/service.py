@@ -151,12 +151,59 @@ def _call(instructions, user_data, *, env, opener=urllib.request.urlopen, timeou
     return data
 
 
+def _localize_contract_followups(data, language, *, env, opener):
+    """Localize AI-generated questions without changing transaction facts/terms.
+
+    An explicit second call is used only when questions/issue text ignores the
+    language rule. Invalid translations fail closed rather than saving English
+    output as if the language requirement had been satisfied.
+    """
+    questions = data["questions"]
+    issues = data["issues"]
+    original = [*questions, *(issue["message"] for issue in issues)]
+    def correct_language(value):
+        has_hangul = bool(re.search(r"[\uac00-\ud7a3\u1100-\u11ff\u3130-\u318f]", value))
+        return has_hangul if language == "ko" else not has_hangul
+
+    bad_indices = [index for index, value in enumerate(original)
+                   if not correct_language(value)]
+    if not bad_indices:
+        return data
+
+    translated = _call(
+        "You are a precise bilingual business-contract question translator. "
+        "Translate each numbered input string into natural Korean if target_language=ko, "
+        "or natural English if target_language=en. "
+        "Return JSON exactly {\"translations\": [strings]} in the same order and count. "
+        "Preserve numeric figures, percentages, USD amounts, legal entity names, "
+        "proper nouns, and meaning. Do not answer questions, add facts, interpret a "
+        "jurisdiction, or change any commercial term. "
+        "For target_language=ko every output must contain Korean writing; "
+        "English labels and names may remain unchanged within Korean sentences.",
+        {"target_language": language, "texts": [original[i] for i in bad_indices]},
+        env=env, opener=opener,
+    )
+    outputs = translated.get("translations")
+    if (not isinstance(outputs, list) or len(outputs) != len(bad_indices)
+            or not all(isinstance(value, str) and value.strip() and
+                       correct_language(value) for value in outputs)):
+        raise RuntimeError("Contract AI could not produce questions in the requested conversation language; no new analysis was saved.")
+    localized = list(original)
+    for index, value in zip(bad_indices, outputs):
+        localized[index] = value
+    data["questions"] = localized[:len(questions)]
+    for issue, message in zip(issues, localized[len(questions):]):
+        issue["message"] = message
+    return data
+
+
 def analyze_trade(messages, current_snapshot, reference_context, *, env, client=None):
     messages = messages[-30:]
     reference_context = reference_context or []
     latest_user_text = next((str(message.get("content") or "") for message in reversed(messages)
                              if message.get("role") == "user"), "")
-    response_language = conversation_response_language(latest_user_text)
+    response_language = (conversation_response_language(latest_user_text) if latest_user_text
+                         else (current_snapshot.get("language") or "en"))
     user_data = {
         "messages": messages,
         "current_snapshot": current_snapshot,
@@ -239,7 +286,8 @@ def analyze_trade(messages, current_snapshot, reference_context, *, env, client=
                     raise ValueError("Contract AI cited text not found in the user conversation.")
             else:
                 raise ValueError("Contract AI returned an unsupported source reference kind.")
-    return data
+    return _localize_contract_followups(data, response_language, env=env,
+                                          opener=client or urllib.request.urlopen)
 
 
 def generate_draft(snapshot, preferred_clauses, *, env, reference_context=None,
