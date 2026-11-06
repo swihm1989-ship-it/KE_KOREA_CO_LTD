@@ -27,6 +27,17 @@ class FakeResponse:
 
 
 class ContractServiceTests(unittest.TestCase):
+    def test_drafting_keeps_user_title_even_when_ai_returns_another_title(self):
+        snapshot = new_snapshot('contract-1', 'investment_commission', 'en')
+        snapshot['title'] = 'Example FI Agreement'
+        response = {'title': 'Investment Commission Agreement', 'issues': [],
+                    'clauses': [{'id': 'c1', 'title': 'Scope', 'order': 1,
+                                 'sentences': [{'id': 's1', 'text': 'The parties agree to the stated scope.',
+                                                'term_ids': [], 'source_refs': []}]}]}
+        result = generate_draft(snapshot, [], env={'OPENAI_API_KEY': 'test', 'OPENAI_MODEL': 'test'},
+                                client=self.opener_for(response))
+        self.assertEqual(result['title'], 'Example FI Agreement')
+
     def opener_for(self, value, captured=None):
         def opener(request, timeout):
             if captured is not None:

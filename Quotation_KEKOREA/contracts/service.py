@@ -157,6 +157,7 @@ def generate_draft(snapshot, preferred_clauses, *, env, reference_context=None, 
         "Draft a fair, commercially clear contract for KE KOREA without claiming legal validity. Use only confirmed business terms as definite facts; mark suggested or missing items clearly as placeholders/questions in issues, not invented contract terms. "
         "Output exactly one language matching language (ko=Korean only, en=English only), except proper company/product names. Use contract type to select relevant provisions. "
         "Never assume KE KOREA is the seller; use each party's explicit roles. Avoid excessive penalties, perpetual exclusivity, or one-sided liability. Do not invent governing law or dispute resolution. "
+        "Preserve the user's snapshot.title exactly; never add a contract type, prefix, suffix, or translation to it. "
         "Return JSON keys title, clauses, issues. clauses is an ordered array of {id,title,order,sentences}; each sentence is {id,text,term_ids,source_refs}. IDs must be unique stable-looking IDs. "
         "issues is an array of {severity,code,message}. Do not include reviewer notes in contract prose.",
         {"snapshot": snapshot, "preferred_clauses": preferred_clauses,
@@ -168,7 +169,7 @@ def generate_draft(snapshot, preferred_clauses, *, env, reference_context=None, 
     if not isinstance(data.get("issues", []), list):
         raise ValueError("Contract AI returned an invalid draft issue list.")
     result = deepcopy(snapshot)
-    result["title"] = data["title"]
+    result["title"] = snapshot.get("title") or data["title"]
     result["clauses"] = clauses
     result["issues"] = data.get("issues", [])
     for issue in result["issues"]:

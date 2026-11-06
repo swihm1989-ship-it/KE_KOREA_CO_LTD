@@ -26,12 +26,8 @@ from Quotation_KEKOREA.contracts.service import (
 )
 
 
-PAGE_TYPE = {
-    "계약서 만들기": "sale",
-    "커미션 계약서 만들기 · 준비 중": "trade_commission",
-}
 TYPE_LABELS = {
-    "sale": "원자재 매매 계약",
+    "sale": "매매 계약",
     "trade_commission": "Buyer–Seller 거래 중개 커미션 계약",
     "investment_commission": "투자 유치 커미션 계약",
 }
@@ -787,42 +783,35 @@ def render_contract_page(page, env):
     except (ValueError, ContractRepositoryError) as exc:
         st.error(str(exc))
         return
-    default_type = PAGE_TYPE[page]
-    contract_type = default_type
-    if page == "커미션 계약서 만들기 · 준비 중":
-        options = ["trade_commission", "investment_commission"]
-        contract_type = st.radio(
-            "커미션 계약 유형", options,
-            format_func=lambda value: TYPE_LABELS[value], horizontal=True,
-            key="contract_commission_type")
-
     st.markdown("### 새 계약")
     with st.form(f"contract_create_{page}"):
         title = st.text_input("계약 제목", value="")
+        contract_type = st.selectbox(
+            "계약 유형", list(TYPE_LABELS), index=None,
+            placeholder="계약 내용에 맞는 유형을 선택해 주세요",
+            format_func=lambda value: TYPE_LABELS[value],
+            key=f"contract_new_type_{page}",
+            help="필수 조건과 당사자 역할을 정하는 분류이며, 계약 제목에 추가되지 않습니다.")
         language = st.radio("계약서 출력 언어", ["ko", "en"],
                             format_func=lambda value: "한국어" if value == "ko" else "English",
                             horizontal=True, key=f"contract_new_language_{page}")
         create = st.form_submit_button("새 계약 시작")
     if create:
         try:
+            if contract_type is None:
+                raise ValueError("계약 유형을 선택해 주세요.")
             _new_contract(repo, title, contract_type, language)
             st.rerun()
         except (ValueError, ContractRepositoryError) as exc:
             st.error(str(exc))
 
     records = _records(repo)
-    records = [record for record in records
-               if record.get("contract_type") == default_type
-               or (default_type == "trade_commission"
-                   and record.get("contract_type") == "investment_commission")]
     if records:
         st.markdown("### 저장된 계약")
         options = {record["id"]: record for record in records}
         selected_id = st.selectbox(
             "열 계약 선택", list(options),
-            format_func=lambda value: f"{options[value]['title']} · "
-            f"{TYPE_LABELS.get(options[value]['contract_type'], options[value]['contract_type'])} · "
-            f"r{options[value]['current_revision']}",
+            format_func=lambda value: options[value]['title'],
             index=(list(options).index(st.session_state["contract_active_id"])
                    if st.session_state.get("contract_active_id") in options else 0),
             key=f"contract_open_select_{page}")
@@ -844,16 +833,41 @@ def render_contract_page(page, env):
     except (ValueError, ContractRepositoryError) as exc:
         st.error(str(exc))
         return
-    if snapshot.get("contract_type") != default_type and not (
-        default_type == "trade_commission" and snapshot.get("contract_type") == "investment_commission"
-    ):
-        st.info("현재 메뉴와 다른 유형의 계약이 열려 있습니다. 다른 계약을 열거나 메뉴를 이동하세요.")
-        return
     state_key = f"contract_snapshot_{active_id}"
-    st.markdown(f"## {TYPE_LABELS.get(snapshot['contract_type'], snapshot['contract_type'])}: "
-                f"{snapshot.get('title', 'Untitled contract')}")
+    st.markdown(f"## {snapshot.get('title', 'Untitled contract')}")
     st.caption(f"ID: {active_id} · Revision: {snapshot['revision']} · "
                f"언어: {'한국어' if snapshot['language'] == 'ko' else 'English'}")
+
+    with st.expander("계약 정보 수정"):
+        with st.form(f"contract_metadata_{active_id}_{snapshot['revision']}"):
+            edited_title = st.text_input("계약 제목 수정", value=snapshot.get("title", ""))
+            edited_type = st.selectbox(
+                "현재 계약 유형", list(TYPE_LABELS),
+                index=list(TYPE_LABELS).index(snapshot['contract_type']),
+                format_func=lambda value: TYPE_LABELS[value])
+            save_metadata = st.form_submit_button("계약 정보 저장")
+        if save_metadata:
+            try:
+                if not edited_title.strip():
+                    raise ValueError("계약 제목을 입력해 주세요.")
+                updated = deepcopy(snapshot)
+                updated['title'] = edited_title.strip()
+                updated['contract_type'] = edited_type
+                if edited_type != snapshot['contract_type'] and snapshot.get('clauses'):
+                    updated['issues'].append({
+                        'id': f"issue_{uuid4().hex}", 'severity': 'block',
+                        'code': 'contract_type_changed',
+                        'message': '계약 유형이 변경되었습니다. 기존 조항과 거래조건이 새 유형에 맞는지 검토하고 필요한 내용을 수정해 주세요.',
+                    })
+                if updated != snapshot:
+                    saved = _save_snapshot(repo, updated, "Updated contract title/type")
+                    st.session_state[state_key] = saved
+                    for key in ('contract_revisions', 'contract_pending_proposal',
+                                'contract_pending_terms', f'contract_pending_analysis_{active_id}'):
+                        st.session_state.pop(key, None)
+                    st.rerun()
+            except (ValueError, ContractRepositoryError) as exc:
+                st.error(str(exc))
 
     _contract_chat(repo, snapshot, state_key, env)
     st.markdown("### 거래조건표")

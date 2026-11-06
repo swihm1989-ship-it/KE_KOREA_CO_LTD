@@ -9,6 +9,15 @@ from Quotation_KEKOREA.contracts.models import new_snapshot
 
 
 class ContractExportTests(unittest.TestCase):
+    def test_export_headings_use_only_user_title(self):
+        snapshot = self.snapshot('en')
+        snapshot.update(contract_type='investment_commission', title='Example FI Agreement')
+        outputs = export_contract(snapshot)
+        document = Document(BytesIO(outputs['docx']['content']))
+        self.assertEqual(document.paragraphs[0].text, 'Example FI Agreement')
+        with fitz.open(stream=outputs['pdf']['content'], filetype='pdf') as pdf:
+            self.assertEqual(pdf[0].get_text(sort=True).splitlines()[0].strip(), 'Example FI Agreement')
+
     def snapshot(self, language):
         snapshot = new_snapshot("contract-1", "trade_commission", language)
         snapshot.update(title="Commission Agreement", revision=3)
