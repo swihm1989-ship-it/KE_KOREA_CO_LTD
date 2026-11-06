@@ -11,6 +11,28 @@ COMMISSION_TYPES = {'trade_commission', 'investment_commission'}
 BANK_FIELDS = ('BENEFICIARY', 'BANK_NAME', 'BRANCH', 'SWIFT', 'ACCOUNT_NUMBER', 'BANK_ADDRESS')
 DEADLINE = 'D+7 calendar days'
 
+
+def _custom_deadline(snapshot):
+    """Use a written custom deadline only when explicitly confirmed."""
+    raw = _confirmed(snapshot, 'payment_deadline')
+    match = re.fullmatch(r'D\+(\d{1,2})(?: calendar days)?', raw, flags=re.IGNORECASE)
+    if not match:
+        return DEADLINE
+    days = int(match.group(1))
+    return f'D+{days} calendar days' if 1 <= days <= 90 else DEADLINE
+
+
+def _negotiated_interest(snapshot):
+    """A user-confirmed commercial rate, not a legal-validity conclusion."""
+    value = _confirmed(snapshot, 'late_interest_rate')
+    if not value:
+        return None
+    match = re.fullmatch(r'(\d{1,2}(?:\.\d{1,2})?)\s*%', value)
+    if not match:
+        return None
+    rate = float(match.group(1))
+    return match.group(1) if 0 <= rate <= 30 else None
+
 GUIDANCE = """For investment or trade commission contracts, use these distilled reference themes as reference only.
 Do not copy reference clauses verbatim or inherit its parties, project, percentages, countries, bank details,
 monthly interest, protection periods, governing law, SIAC forum, guarantees or language requirements.
@@ -76,20 +98,27 @@ def _build(snapshot, bank):
     if not bank_ok:
         missing.append('수취인·통화와 일치하는 회사 계좌 6개 항목을 확인해 주세요. 현재 자동 계좌 설정은 KE KOREA의 USD 계좌만 지원합니다.')
     deadline = _confirmed(snapshot, 'payment_deadline')
-    if deadline and deadline not in {DEADLINE, 'D+7', '7 calendar days', '7일 이내'}:
-        missing.append('지급기한이 기본 D+7 달력일 조건과 다릅니다. 충돌을 해결해 주세요.')
+    custom_deadline = _custom_deadline(snapshot)
+    accepted_deadlines = {DEADLINE, 'D+7', '7 calendar days', '7일 이내', custom_deadline}
+    if deadline and deadline not in accepted_deadlines:
+        missing.append('지급기한 형식이 유효하지 않습니다. D+1~D+90의 달력일로 입력해 주세요.')
+    days = int(re.search(r'D\+(\d+)', custom_deadline).group(1))
+    rate = _negotiated_interest(snapshot)
     event = trigger or ('[확인할 지급 트리거]' if ko else '[payment trigger to be confirmed]')
     country = payer_country or ('[확인할 지급자 국가]' if ko else '[Payer country to be confirmed]')
     if ko:
         payment = (
             f'지급 트리거는 다음과 같다: {event}. 각 지급 일정 또는 분할 입금 건마다 약정 산식에 따라 발생한 수수료를 '
-            '해당 트리거 발생일(D)로부터 7일 이내(D+7, 달력일 기준)에 Telegraphic Transfer(TT)로 지정된 회사 계좌에 입금해야 한다. '
+            f'해당 트리거 발생일(D)로부터 {days}일 이내(D+{days}, 달력일 기준)에 Telegraphic Transfer(TT)로 지정된 회사 계좌에 입금해야 한다. '
             '실제 입금을 트리거로 정한 경우 계약 서명이나 미입금 투자 약정만으로는 입금이 발생한 것으로 보지 않는다. '
             '지급 완료는 송금 지시일이 아니라 수취 계좌에 지급할 금액이 실제 입금된 때로 한다. '
             '지급기한 및 연체에 관해서는 본 조항이 계약 내 상충 문구보다 우선한다. 변경은 양 당사자의 서면 합의로 한다.')
         interest = (
-            '양 당사자가 별도로 서면 합의하지 않는 한, 지급기한 다음 날부터 실제 완제일까지 미지급 원금에 대하여 일할 단리로 연체이자를 부과한다. '
-            f'연체이율은 지급자 국가({country})에서 이 커미션 지급의무에 법적으로 적용할 수 있는 최고 허용 이율로 하되, '
+            ('양 당사자가 서면으로 합의한 경우 미지급 원금에 대해 지급기한 다음 날부터 실제 완제일까지 '
+             f'연 {rate}%의 단리 연체이자를 일할 계산하여 부과한다. ' if rate is not None else
+             '양 당사자가 별도로 서면 합의하지 않는 한, 지급기한 다음 날부터 실제 완제일까지 미지급 원금에 대하여 일할 단리로 연체이자를 부과한다. ')
+            + (f'합의 이율의 법적 적용 가능성은 지급자 국가({country}) 및 준거법에 따라 서명 전 검토한다. ' if rate is not None else
+               f'연체이율은 지급자 국가({country})에서 이 커미션 지급의무에 법적으로 적용할 수 있는 최고 허용 이율로 하되, ') +
             '계약 준거법 및 집행에 적용되는 강행법규가 정하는 더 낮은 한도가 있으면 그 한도를 적용한다. '
             '금전대차의 최고금리를 커미션 연체이율로 당연히 간주하지 않으며, 적용 가능한 최고이율이 없거나 특정할 수 없으면 '
             '법적으로 인정되는 지연손해금만 청구하고, 법령이 허용하지 않는 이자 또는 벌과금은 부과하지 않는다.')
@@ -98,14 +127,17 @@ def _build(snapshot, bank):
         payment = (
             f'The payment Trigger is: {event}. For each scheduled payment or funding tranche, the commission earned '
             'under the agreed calculation shall reach the designated corporate account by Telegraphic Transfer (TT) '
-            'within seven (7) calendar days after that Trigger (D+7). Where actual receipt is the agreed Trigger, '
+            f'within {days} calendar days after that Trigger (D+{days}). Where actual receipt is the agreed Trigger, '
             'signing alone or an unfunded commitment is not receipt. Payment is completed on actual credit of the amount due, '
             'not on issuance of transfer instructions. These timing and late-payment provisions prevail over inconsistent '
             'wording elsewhere in this Agreement; variations require the written agreement of both Parties.')
         interest = (
-            'Unless varied by written agreement of both Parties, unpaid principal bears daily simple default interest '
-            'from the day following its due date until actual payment in full. The rate shall be the maximum rate '
-            f'lawfully applicable to this commission-payment obligation in the Payer country ({country}), '
+            ('Where the Parties agree in writing, unpaid principal shall bear daily simple default interest '
+             f'at {rate}% per annum from the day following the due date until actual payment in full. ' if rate is not None else
+             'Unless varied by written agreement of both Parties, unpaid principal bears daily simple default interest '
+             'from the day following its due date until actual payment in full. ')
+            + (f'The legal validity of this rate is subject to review under the Payer country ({country}) and governing law. ' if rate is not None else
+               f'The rate shall be the maximum rate lawfully applicable to this commission-payment obligation in the Payer country ({country}), ') +
             'subject to any lower mandatory limit under the governing law and applicable enforcement law. '
             'A lending-rate ceiling is not automatically a commission default rate. If no applicable maximum exists '
             'or can be determined, only default interest legally recoverable for this obligation may be claimed; '
@@ -143,6 +175,8 @@ def apply_payment_policy(snapshot, *, env):
                                                'value': DEADLINE, 'status': 'confirmed', 'source_refs': []})
     elif not str(deadline_term.get('value') or '').strip():
         deadline_term.update(value=DEADLINE, status='confirmed', source_refs=[])
+    # Preserve a user's explicitly confirmed custom payment period.
+    # Unconfirmed proposals must not be silently treated as agreed.
     return result
 
 

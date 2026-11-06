@@ -1078,22 +1078,76 @@ def render_contract_page(page, env):
 
     if snapshot.get("clauses"):
         if snapshot['contract_type'] in COMMISSION_TYPES:
-            with st.expander("기본 수수료 지급 조항", expanded=True):
-                st.caption("D+7은 트리거 발생일로부터 7일(달력일)입니다. 조건표의 트리거·통화·지급자·수취인과 연체이율 검토를 먼저 확인하세요. 다른 통화의 계좌를 추측하지 않습니다.")
-                for issue in payment_policy_issues(snapshot, env=env):
-                    st.warning(issue['message'])
-                if st.button("기본 지급 조항 적용 / 갱신",
-                             key=f"commission_policy_{active_id}_{snapshot['revision']}"):
+            with st.expander("수수료 지급조건 수정", expanded=False):
+                st.caption("상업조건을 수정하고 저장하면 계약서 지급 조항도 함께 갱신됩니다. 미검증 계좌·법률 정보는 임의로 확정하지 않습니다.")
+                from Quotation_KEKOREA.contracts.commission_policy import _confirmed, _custom_deadline, _negotiated_interest
+                import re as _payment_re
+                current_deadline = _custom_deadline(snapshot)
+                days = int(_payment_re.search(r'D\+(\d+)', current_deadline).group(1))
+                current_rate = _negotiated_interest(snapshot)
+                payer = next((p for p in snapshot.get('parties', [])
+                              if 'commission_payer' in p.get('roles', [])), {})
+                current_country = str(payer.get('country') or '')
+                current_trigger = _confirmed(snapshot, 'payment_trigger') or _confirmed(snapshot, 'success_trigger')
+                default_trigger = '실제 투자금 입금' if not current_trigger else current_trigger
+                with st.form(f"contract_payment_edit_{active_id}_{snapshot['revision']}"):
+                    trigger = st.text_input("커미션 지급 트리거", value=default_trigger,
+                                            help="예: 투자금이 지급자 계좌에 실제 입금된 날")
+                    payment_days = st.number_input("지급기한 (트리거 후 달력일)", min_value=1,
+                                                    max_value=90, value=days, step=1)
+                    chosen_rate = st.text_input("서면 합의 연체이율 (연 %, 선택)",
+                                                value=str(current_rate or ''),
+                                                help="예: 6 또는 6.5. 입력한 상업조건이며 법적 유효성은 별도 검토합니다.")
+                    payer_country = st.text_input("지급자 설립국가 (확인 전에는 미확정)", value=current_country)
+                    country_verified = st.checkbox("지급자 설립국가를 등록서류로 확인했습니다",
+                        value=payer.get('status') == 'confirmed' and bool(current_country))
+                    st.caption("계좌정보는 서버에 등록된 KE KOREA 명의 USD 계좌만 사용할 수 있습니다. "
+                               "계좌정보가 미검증이면 [수취 계좌 확인 필요]로 남깁니다.")
+                    save_payment = st.form_submit_button("지급조건 저장 및 조항 갱신", type="primary")
+                if save_payment:
                     try:
-                        updated = apply_payment_policy(snapshot, env=env)
-                        saved = _save_snapshot(repo, updated, "Applied standing commission payment policy")
+                        if not str(trigger).strip():
+                            raise ValueError("커미션 지급 트리거를 입력해 주세요.")
+                        cleaned = str(chosen_rate).strip().removesuffix('%').strip()
+                        if cleaned and not _payment_re.fullmatch(r'\d{1,2}(?:\.\d{1,2})?', cleaned):
+                            raise ValueError("연체이율은 0~30 범위의 숫자로 입력해 주세요.")
+                        if cleaned and not (0 <= float(cleaned) <= 30):
+                            raise ValueError("연체이율은 0~30% 범위로 입력해 주세요.")
+                        updated = deepcopy(snapshot)
+                        def set_term(key, value, status='confirmed'):
+                            term = next((x for x in updated.get('terms', []) if x.get('key') == key), None)
+                            if term is None:
+                                term = {'id': f'term_{uuid4().hex}', 'key': key,
+                                        'source_refs': [], 'status': status}
+                                updated.setdefault('terms', []).append(term)
+                            term.update(value=value, status=status, source_refs=[])
+                        set_term('payment_trigger', str(trigger).strip())
+                        set_term('payment_deadline', f'D+{int(payment_days)} calendar days')
+                        if cleaned:
+                            set_term('late_interest_rate', f'{cleaned}%')
+                        else:
+                            updated['terms'] = [t for t in updated.get('terms', [])
+                                                if t.get('key') != 'late_interest_rate']
+                        current_payer = next((p for p in updated.get('parties', [])
+                                              if 'commission_payer' in p.get('roles', [])), None)
+                        if current_payer is not None and str(payer_country).strip():
+                            current_payer['country'] = str(payer_country).strip()
+                            current_payer['status'] = 'confirmed' if country_verified else 'suggested'
+                        elif str(payer_country).strip():
+                            st.warning("지급자 역할이 지정되지 않아 국가를 저장하지 못했습니다. 상세 거래조건에서 지급자 역할을 등록해 주세요.")
+                        updated = apply_payment_policy(updated, env=env)
+                        saved = _save_snapshot(repo, updated, "Updated agreed payment conditions and regenerated clauses")
                         st.session_state[state_key] = saved
-                        for key in ('contract_revisions', 'contract_pending_proposal', 'contract_pending_terms',
-                                    f'contract_pending_analysis_{active_id}'):
-                            st.session_state.pop(key, None)
+                        for cache_key in ('contract_revisions', 'contract_pending_proposal',
+                                          'contract_pending_terms', f'contract_pending_analysis_{active_id}',
+                                          f'contract_rag_risk_{active_id}'):
+                            st.session_state.pop(cache_key, None)
                         st.rerun()
                     except (ValueError, ContractRepositoryError) as exc:
                         st.error(str(exc))
+                with st.expander("서명 전 확인할 항목", expanded=False):
+                    for issue in payment_policy_issues(snapshot, env=env):
+                        st.warning(issue['message'])
         _render_draft(repo, snapshot, state_key, env)
         # Contract RAG risk-review panel (read-only; user approval required)
         with st.expander("AI 핵심 위험 검토 · 필요할 때 실행", expanded=False):
