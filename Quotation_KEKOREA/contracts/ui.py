@@ -12,6 +12,7 @@ from Quotation_KEKOREA.contracts.editing import (
 from Quotation_KEKOREA.contracts.exports import export_contract
 from Quotation_KEKOREA.contracts.models import new_snapshot, validate_snapshot
 from Quotation_KEKOREA.contracts.library import search_library
+from Quotation_KEKOREA.contracts.review_summary import summarize_issues, unresolved_issues
 from Quotation_KEKOREA.contracts.library_ui import render_library_admin, show_library_sources
 from Quotation_KEKOREA.contracts.commission_policy import (
     COMMISSION_TYPES, apply_payment_policy, payment_policy_issues,
@@ -427,7 +428,7 @@ def _render_draft(repo, snapshot, state_key, env):
     st.caption(f"Revision {snapshot.get('revision')} · "
                + ("한국어" if snapshot["language"] == "ko" else "English"))
     if snapshot.get("issues"):
-        st.caption(f"미확정·검토 항목 {len(snapshot['issues'])}개는 계약서 본문 아래에서 확인할 수 있습니다.")
+        st.caption("초안은 바로 수정할 수 있습니다. 미확정 사항은 아래의 서명 전 확인 메뉴에서 검토합니다.")
     selected_key = f"contract_selected_sentence_{snapshot['contract_id']}"
     for clause in sorted(snapshot.get("clauses", []), key=lambda item: item.get("order", 0)):
         st.markdown(f"#### {clause.get('title', '')}")
@@ -489,7 +490,15 @@ def _render_draft(repo, snapshot, state_key, env):
                 st.write(annotation["instruction"])
 
     if snapshot.get("issues"):
-        with st.expander(f"검토 사항 ({len(snapshot['issues'])}개) · 필요할 때 열기", expanded=False):
+        unresolved = unresolved_issues(snapshot["issues"])
+        if unresolved:
+            st.markdown("#### 서명 전 확인사항")
+            st.caption(f"미확정 {len(unresolved)}건 · 계약서 초안 작성 및 문장 수정은 계속할 수 있습니다.")
+            with st.expander("핵심 확인 항목 보기", expanded=False):
+                for group in summarize_issues(snapshot["issues"]):
+                    st.markdown(f"**{group['label']}** · {group['count']}건")
+                    st.caption(group["guidance"])
+        with st.expander(f"상세 검토 및 확인 근거 입력 ({len(snapshot['issues'])}건)", expanded=False):
             reviewed_items = []
             for index, issue in enumerate(snapshot["issues"]):
                 if not isinstance(issue, dict):
@@ -547,9 +556,13 @@ def _export_panel(repo, snapshot, env):
     issues = validate_rules(snapshot, for_export=True, env=env)
     st.markdown("### 내보내기 검토")
     if issues:
-        st.warning("확인되지 않은 조건이나 충돌이 있어 검토용 파일 내보내기를 막았습니다.")
-        for issue in issues:
-            st.write(f"- {issue['message']}")
+        st.warning("서명 전 확인이 필요한 사항이 남아 있어 최종 파일 생성이 제한됩니다. 초안 수정은 계속할 수 있습니다.")
+        for group in summarize_issues(issues):
+            st.markdown(f"**{group['label']}** · {group['count']}건")
+            st.caption(group["guidance"])
+        with st.expander(f"최종 검증 항목 전체 보기 ({len(issues)}건)", expanded=False):
+            for issue in issues:
+                st.write(f"- {issue.get('message', '')}")
         return
     st.info("내보내기 검사를 통과해도 법적 유효성이나 집행 가능성을 보증하지 않습니다. 서명 전 법률 전문가 검토를 권장합니다.")
     if st.button("현재 확정 revision의 DOCX 및 PDF 생성", type="primary",

@@ -1,13 +1,13 @@
 # KE KOREA 무역 문서 생성 AI Agent 설계안
 
 작성일: 2026-10-30 (Asia/Seoul)  
-최종 갱신: 2026-11-05 (Asia/Seoul)
+최종 갱신: 2026-11-06 (Asia/Seoul)
 
 상태: Streamlit 배포, Supabase 카탈로그 조회, 비공개 직인 다운로드 및 초안 PDF 생성·다운로드를 확인했다. 모든 출력은 사용자 검토용 초안이며 실제 발주·발송은 자동 수행하지 않는다. 아래 초기 설계 기록보다 다음 현재 동작 및 변경 보호 기준을 우선한다.
 
 2026-11-05 업데이트: 통합 CI+PL 메뉴와 생성 경로를 제거했다. Commercial Invoice(CI)와 Packing List(PL)는 사이드바의 개별 메뉴에서 따로 생성한다.
 
-계약 자동화 기능의 구현 범위·설정·DB migration 및 검증 상태는 [README_CONTRACTS.md](README_CONTRACTS.md)를 참조한다. 계약 코드는 로컬에 추가되었으며, Supabase migration 적용과 운영 배포는 완료된 것으로 간주하지 않는다.
+계약 자동화 기능의 구현 범위·설정·DB migration 및 검증 상태는 [README_CONTRACTS.md](README_CONTRACTS.md)를 참조한다. 계약 코드는 GitHub `main`에 반영되었지만 Supabase migration 적용·운영 데이터 저장·실제 Streamlit 경로의 동작은 별도로 검증해야 한다.
 
 ## 현재 동작 및 변경 보호 기준 — 2026-11-02
 
@@ -530,3 +530,22 @@ In the CI menu, attach a PI image or PDF and request `Create CI from the attache
 회귀 테스트: `tests/test_pdf_inputs.py`, `tests/test_pdf_upload_ui.py`, `tests/test_ci_pi_import.py`, `tests/test_ci_pi_import_ui.py`. API 요청 형식은 가짜 응답으로 검증하고 실제 문서 생성·Streamlit 화면은 합성 자료로 검증합니다. 실제 고객 자료 외부 전송, 운영 앱 배포 및 실제 모델 OCR 정확도 검증은 이번 로컬 검증에 포함하지 않습니다.
 
 최종 로컬 검증: 전체 182개 테스트 통과(기존 164개 + 신규 18개, Streamlit AppTest 포함), 종료 코드 0. 모든 문서 메뉴의 PDF 전달, 혼합 첨부·파일 제한·메뉴 보관, PI 이미지/PDF의 CI 변환, 원본 금액 불일치 차단, 실제 CI PDF/XLSX/HTML의 은행·결제 값 제외를 확인했습니다. 기존 PDF/Excel/HTML 렌더러, 가격 정책 모듈, 거래처/제품 매칭, 작업 상태 보관, 의존성 목록은 변경하지 않았습니다. 운영 앱에는 아직 배포하지 않았습니다.
+
+### 2026-11-06 TASTE 계약서 UI 및 README 동기화
+
+- **현재 코드 기준:** `contracts/flow.py`는 반복 질문을 줄이고 초안 작성 요청에 따라 초안을 만든다. 질문 응답과 계약서 본문 언어는 별개로 관리한다.
+- **지급조건:** `contracts/commission_policy.py`와 UI에서 커미션 지급기한 및 서면합의 연체이율을 반영한다. 초기 D+7을 사용자가 변경할 수 있으며, 계좌 및 법률 검증의 미확정 상태는 유지한다.
+- **RAG:** 승인된 참고 조항 검색 결과를 위험 검토에 활용하지만, 자동 승인을 하지 않는다. 참고 자료는 거래 당사자·금액 등을 확정하는 근거로 자동 승격하지 않는다.
+- **TASTE 기반 검토 UI:** 계약서 본문 우선, 미확정 이슈 5개 이내 한국어 그룹, 원본 문제별 근거 입력은 접힌 고급 섹션, 최종 DOCX/PDF 내보내기 검증은 변경하지 않는다. 외부 디자인 의존성 없이 Streamlit 사용.
+- **검증 이력:** 사용자 로컬에서 2026-11-06 지급조건 수정까지 계약서 관련 74개 테스트 `OK`, 커밋 `f9e7d05`의 GitHub `main` 푸시 성공을 보고했다. 이번 TASTE 수정은 별도의 로컬 전체 테스트와 실제 배포 검증이 필요하다. 과거 테스트 수·실패 기록은 각 날짜의 이력으로 해석한다.
+- **문서 동기화:** 5개 README에 기능 변경·변경된 설명·제거한 기능을 함께 반영한다. `scripts/check_readme_sync.py` 및 `.githooks/pre-commit` 검사 포함. 자세한 계약 동작은 [README_CONTRACTS.md](README_CONTRACTS.md) 참조.
+
+### 2026-11-06 전체 테스트 실패 2건 수정
+
+- 계약 커미션 기본 7일 기한을 영문 `seven (7) calendar days`로 표기해 법률 문서의 기존 기본 문구와 테스트를 일치시켰습니다. 7일이 아닌 명시적 사용자 지급기한은 그대로 반영합니다.
+- 상품명 주석 확인(`Confirm product annotation` 및 `Double-check this product`)이 남은 PO/PI에서는 PDF/Excel 생성 버튼을 차단합니다. 체크박스 확인 후에만 생성을 허용합니다. 가격 자동 조회 및 상품명 원문 보존 규칙은 변경하지 않았습니다.
+- 회귀 검사: `tests/test_commission_policy.py`, `tests/test_product_matching_ui.py`; 전체 테스트는 아래 명령으로 다시 실행하여 실제 결과를 기록하세요. 완료 전에는 성공했다고 기록하지 않습니다.
+
+### 2026-11-06 CI 검토용 DRAFT 출력 회귀 보완
+
+PO/PI에서 확인이 필요한 상품 주석은 문서 생성 전에 확인해야 합니다. CI는 기존처럼 첨부 PI의 실제 거래가격를 유지하고 상품명 매칭이 미확정이면 경고 및 DRAFT 상태를 표시한 채 검토용 PDF/Excel 생성을 허용합니다. `test_review_ui.py::test_unconfirmed_ci_product_match_allows_draft_pdf`와 `test_product_matching_ui.py`의 동작을 함께 유지합니다. 실제 테스트 결과는 실행 후 기록하며, 최종 발행·전송을 자동 수행하지 않습니다.

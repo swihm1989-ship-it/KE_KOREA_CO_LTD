@@ -31,3 +31,17 @@
 - 페이지와 하단 묶음: `tests/test_pdf_pagination.py`
 - 비공개 직인: `tests/test_branding.py`
 - 카탈로그·API 오류 처리: `tests/test_supabase_catalog.py`
+
+## 2026-11-06 TASTE 계약서 UI 및 README 동기화 이후 README 자동 동기화 규칙
+
+기능을 추가·수정·삭제할 때 같은 커밋에서 다음 다섯 파일을 함께 점검하고 필요한 내용을 고친다.
+
+1. `../README.md` : 프로젝트 전체 기능/링크/배포 상태
+2. `README.md` : 설계·변경 이력·테스트 결과
+3. `README_CONTRACTS.md` : 계약 기능 실제 구현/제한사항
+4. `Team/README.md` : 팀 구현·연동·위험 사항
+5. `Presentation/README.md` : 시연할 수 있는 실제 기능과 검증 상태
+
+변경 전 코드 설명이 더 이상 맞지 않으면 그 설명을 최신 동작으로 대체하고, 제거된 기능은 현재 동작 목록에서 빼거나 역사 기록으로 명확히 옮긴다. **코드만 바꾸고 README 업데이트를 생략하지 않는다.** 운영 확인이 안 된 경우 '미확인'을 유지하며, 과거 회귀 실패를 현재 실패로 단정하지 않는다.
+
+`../scripts/check_readme_sync.py`는 스테이징된 프로젝트 실행 코드가 있으면 다섯 README가 같은 커밋에 모두 포함되는지 확인한다. `.githooks/pre-commit` 사용 시 로컬 커밋을 자동 검사한다. 이 검사는 문서의 진실성까지 보장하지 않으므로 사람의 리뷰와 테스트를 대체하지 않는다.

@@ -1,6 +1,6 @@
 # KE KOREA Quotation App — 팀 공유 안내
 
-**기준일: 2026-11-05**  
+**기준일: 2026-11-06**
 이 문서는 현재 저장소의 코드와 테스트를 기준으로 구현, 데이터 흐름, 오류 개선 내역 및 새 에이전트의 연동 원칙을 요약합니다. 기존 [README.md](../README.md)는 설계·변경·검증의 상세 기록이며, 실제 변경 시에는 [AGENTS.md](../AGENTS.md)의 보호 규칙과 코드를 우선 확인하세요. 이 문서는 배포 상태나 외부 서비스의 현재 가동을 보증하지 않습니다.
 
 ## 1. 한눈에 보기
@@ -166,3 +166,23 @@ uv run --with-requirements .\Quotation_KEKOREA\requirements.txt streamlit run .\
 - 유지해야 할 동작 및 수정 전 확인 절차: [AGENTS.md](../AGENTS.md)
 - SQL 스키마·시드 적용·검증: [supabase/README.md](../supabase/README.md)
 - 발표 스크립트: [Presentation/presentation_script_ko.md](../Presentation/presentation_script_ko.md)
+
+## 2026-11-06 TASTE 계약서 UI 및 README 동기화
+
+### 계약서 워크스페이스 운영 및 유지보수
+
+- 메뉴는 PO/PI/CI/PL과 **계약서 만들기**로 구분한다. 기존 견적서 계산과 가격 정책은 변경하지 않는다.
+- 자연어 거래 입력 → 반복 질문 제한 → 한국어/영어 초안 → 문장 선택/AI 수정 제안 → 명시적 승인/revision 기록 → 서명 전 최종 검증 → DOCX/PDF 출력의 흐름이다.
+- 검토 화면은 `contracts/review_summary.py`를 이용해 미확정 항목을 최대 다섯 개 한국어 주제로 표시한다. 원본 AI finding, 증빙/확인 입력과 `rules.py`의 수출 검증은 훼손하지 않는다.
+- 커미션 지급조건은 기본 D+7·TT에서 출발하지만 사용자가 지급기한과 서면합의 연체이율을 편집할 수 있다. 계좌/법률 정보는 AI가 임의 확정하지 않는다.
+- `contracts/library.py`, `review.py` 등의 승인된 샘플 검색(RAG)은 **계약서 관련** 기능이다. 상품·가격 매칭은 별도의 SKU/용량 규칙을 계속 사용하며, 위에서 설명한 '상품에 벡터 DB 미사용' 규칙과 충돌하지 않는다.
+- 과거 README에 적힌 테스트 실패·미배포 상태는 작성 시점의 기록이다. 사용자 로컬의 최근 계약 74개 테스트는 2026-11-06에 통과했으며, 새 UI 패치에 대한 전체 앱 테스트와 운영 환경 확인은 아직 필요하다.
+- 코드 변경·삭제 시 루트/프로젝트/계약/Team/Presentation README를 동일 변경에서 갱신한다. `scripts/check_readme_sync.py`의 staged guard를 통과시키고 기존 기능 설명이 남아 있지 않은지 확인한다.
+
+## 2026-11-06 회귀 테스트 보완
+
+상품 주석 확인 미완료 시 PO/PI PDF 및 Excel 생성 버튼을 차단하도록 연결했습니다. 실제 거래가격·가격근거·상품 원문은 수정하지 않습니다. 투자/무역 커미션 계약의 기본 7일 영문 문구는 `seven (7) calendar days`를 사용하며, 사용자 지정 기한은 그대로 유지합니다. `test_product_matching_ui.py`, `test_commission_policy.py` 및 전체 테스트 재실행 결과를 별도로 기록해야 합니다.
+
+## 2026-11-06 CI DRAFT 출력 보존
+
+PO/PI의 확인 전 생성 차단과 달리, CI는 첨부 PI 거래가격을 변경하지 않고 상품 매칭 미확정 경고 및 DRAFT 상태를 유지해 검토용 PDF/Excel 출력을 허용합니다. 관련 회귀 테스트는 `test_product_matching_ui.py`와 `test_review_ui.py`이며 둘 다 통과해야 합니다.

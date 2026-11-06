@@ -1,0 +1,3 @@
+#!/bin/sh
+# Verify five README files accompany application code changes.
+exec python scripts/check_readme_sync.py

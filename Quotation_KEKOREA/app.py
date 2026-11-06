@@ -884,7 +884,7 @@ if raw:
                                       ("promotion rule", "promotion quantity", "promotion command"))]
                               if expected_type in {"PO", "PI"} else [])
         sample_blockers = [issue for issue in result["blocking_issues"] if issue.startswith("Sample ")]
-        export_blocked = bool(pending_review_fields or financial_blockers or bank_blockers or seal_blockers or
+        export_blocked = bool((expected_type in {"PO", "PI"} and unconfirmed_product_matches) or pending_review_fields or financial_blockers or bank_blockers or seal_blockers or
                               promotion_blockers or sample_blockers or source_import_blockers or (packing_check and packing_check["issues"]) or not packing_image_confirmed)
         if sample_blockers:
             st.error("샘플 입력값을 확인해 주세요: " + "; ".join(sample_blockers))

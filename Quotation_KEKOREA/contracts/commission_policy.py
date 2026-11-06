@@ -127,7 +127,7 @@ def _build(snapshot, bank):
         payment = (
             f'The payment Trigger is: {event}. For each scheduled payment or funding tranche, the commission earned '
             'under the agreed calculation shall reach the designated corporate account by Telegraphic Transfer (TT) '
-            f'within {days} calendar days after that Trigger (D+{days}). Where actual receipt is the agreed Trigger, '
+            f'within {"seven (7)" if days == 7 else str(days)} calendar days after that Trigger (D+{days}). Where actual receipt is the agreed Trigger, '
             'signing alone or an unfunded commitment is not receipt. Payment is completed on actual credit of the amount due, '
             'not on issuance of transfer instructions. These timing and late-payment provisions prevail over inconsistent '
             'wording elsewhere in this Agreement; variations require the written agreement of both Parties.')
