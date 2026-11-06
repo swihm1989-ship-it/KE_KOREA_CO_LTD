@@ -24,7 +24,7 @@ class WorkspaceTests(unittest.TestCase):
             self.state[f'advanced_json_{name}'] = 'unfinished edit ' + page
             self.state[f'packing_{name}_confirmed_abc'] = True
             self.state[f'product_double_check_{name}_0'] = 'corrected product ' + page
-        self.work.activate(self.state, '계약서 만들기 · 준비 중')
+        self.work.activate(self.state, '계약서 만들기')
         for key in list(self.state):
             if key.startswith(('order_prompt_', 'advanced_json_', 'packing_', 'product_double_check_')):
                 del self.state[key]  # Streamlit removes widgets absent from a run.

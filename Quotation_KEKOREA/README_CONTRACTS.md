@@ -1,6 +1,10 @@
 # Contract workspace
 
-This document describes the contract-drafting feature added to the existing Streamlit application. The two existing sidebar labels remain unchanged; their screens now open the sale-contract and commission-contract workflows. The PI, PO, CI and PL workflows are not replaced by this feature.
+This document describes the contract-drafting feature added to the existing Streamlit application. The sidebar contains PI, PO, CI, PL and `계약서 만들기`. The contract label has no preparation suffix, and the separate commission-contract sidebar entry is removed. Commission implementation and stored records are retained. The PI, PO, CI and PL workflows are not replaced by this feature.
+
+Deployment troubleshooting: a screen asking for `CONTRACT_ACCESS_PASSWORD` or `CONTRACT_ACCESS_PASSWORD_HASH` is running a different version from this checkout, which has no password gate. On Streamlit Cloud, check the deployed repository, branch and main file (`Quotation_KEKOREA/app.py`) and reboot after updating the deployed source. If retaining that older gated version, configure its access password in the app's server Secrets. This message does not indicate a missing SQL migration. Live deployment has not been verified for this menu change.
+
+Menu verification (2026-11-06): the Streamlit navigation test passed with the five expected sidebar entries and preserved PI/PO/CI/PL state. The full requirements-based suite ran 233 tests with one failure, `test_annotations_load_prices_without_bypassing_product_confirmation`; that same failure was reproduced against the unchanged HEAD application. The minimal dependency command also encountered missing `python-docx`; use the complete requirements for contract tests.
 
 ## What it does
 

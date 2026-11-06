@@ -27,7 +27,7 @@ from Quotation_KEKOREA.contracts.service import (
 
 
 PAGE_TYPE = {
-    "계약서 만들기 · 준비 중": "sale",
+    "계약서 만들기": "sale",
     "커미션 계약서 만들기 · 준비 중": "trade_commission",
 }
 TYPE_LABELS = {

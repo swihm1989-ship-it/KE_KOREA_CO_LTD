@@ -36,7 +36,7 @@ class WorkspaceUiTests(unittest.TestCase):
     def test_document_menus_keep_distinct_prompts_drafts_and_download_state(self):
         self.run_app()
         original_menus = list(self.at.radio[0].options)
-        self.assertNotIn('CIPL 만들기', self.at.radio[0].options)
+        self.assertEqual(original_menus, ['PI 만들기', 'PO 만들기', 'CI 만들기', 'PL 만들기', '계약서 만들기'])
         for dtype in ('PI', 'PO', 'CI', 'PL'):
             page = dtype + ' 만들기'
             self.navigate(page)
@@ -50,14 +50,13 @@ class WorkspaceUiTests(unittest.TestCase):
             self.run_app()
             self.at.session_state['rendered_paths'] = {'pdf': dtype + '.pdf'}
             self.at.session_state['download_format'] = 'pdf'
-        self.navigate('계약서 만들기 · 준비 중')
+        self.navigate('계약서 만들기')
         self.assertFalse(any('계약 화면 접근 비밀번호' in item.value
                              for item in self.at.error))
         self.assertFalse(any(item.label == '계약 작업공간 비밀번호'
                              for item in self.at.text_input))
         self.assertTrue(any('비밀번호 없이 공개 접근됩니다' in item.value
                             for item in self.at.warning))
-        self.navigate('커미션 계약서 만들기 · 준비 중')
         self.assertEqual(list(self.at.radio[0].options), original_menus)
         for dtype in ('PI', 'PO', 'CI', 'PL'):
             self.navigate(dtype + ' 만들기')

@@ -368,7 +368,7 @@ with st.sidebar:
     st.markdown("### CONTRACT TEMPLATE MAKER")
     st.caption("KE KOREA CO. LTD · TRADE DOCUMENTS")
     st.markdown("---")
-    pages = ["PI 만들기", "PO 만들기", "CI 만들기", "PL 만들기", "계약서 만들기 · 준비 중", "커미션 계약서 만들기 · 준비 중"]
+    pages = ["PI 만들기", "PO 만들기", "CI 만들기", "PL 만들기", "계약서 만들기"]
     if "selected_document_page" in st.session_state and st.session_state["selected_document_page"] not in pages:
         st.session_state["selected_document_page"] = pages[0]
     page = st.radio("문서 종류", pages, label_visibility="collapsed", key="selected_document_page")
@@ -404,9 +404,9 @@ page_config = {
     "CI 만들기": ("CI", "Commercial Invoice", "통관 제출용 Commercial Invoice 초안을 만듭니다."),
     "PL 만들기": ("PL", "Packing List", "선적 포장 수량과 중량을 표시하는 Packing List 초안을 만듭니다."),
 }
-contract_pages = {"계약서 만들기 · 준비 중", "커미션 계약서 만들기 · 준비 중"}
+contract_pages = {"계약서 만들기"}
 if page not in page_config and page not in contract_pages:
-    st.markdown('<div class="ke-header"><div class="ke-eyebrow">Coming soon</div><h1>' + page.split(" ·")[0] + '</h1><p>이 메뉴는 준비 중입니다. 현재는 PI, PO, CI, PL 생성을 사용할 수 있습니다.</p></div>', unsafe_allow_html=True)
+    st.error("문서 메뉴를 다시 선택해 주세요.")
     st.stop()
 
 cloud_secrets = {}
