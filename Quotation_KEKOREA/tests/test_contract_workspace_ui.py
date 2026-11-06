@@ -100,7 +100,8 @@ class ContractWorkspaceUiTests(unittest.TestCase):
         next(item for item in self.at.button if item.label == '선택한 계약 열기').click()
         self.run_app()
         self.assertIn('## Example FI', [item.value for item in self.at.markdown])
-        self.assertTrue(any('투자 대상 프로젝트/법인' in str(item.value) for item in self.at.dataframe))
+        self.assertTrue(any('투자 대상 프로젝트/법인' in item.value['항목'].tolist()
+                            for item in self.at.dataframe if '항목' in item.value.columns))
 
     def test_existing_misclassified_contract_can_be_corrected_without_renaming(self):
         self.seed('existing', 'sale', 'Example FI Agreement')

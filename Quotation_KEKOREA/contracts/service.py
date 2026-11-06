@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from Quotation_KEKOREA.contracts.models import CONTRACT_TYPES, validate_snapshot
 from Quotation_KEKOREA.contracts.editing import find_sentence
+from Quotation_KEKOREA.contracts.commission_policy import drafting_guidance, apply_payment_policy
 
 
 def requested_language(text):
@@ -25,6 +26,16 @@ def language_conflict(text, selected_language):
 
 
 def _call(instructions, user_data, *, env, opener=urllib.request.urlopen, timeout=90):
+    snapshot = user_data.get('snapshot') or user_data.get('current_snapshot') or {}
+    instructions += '\n' + drafting_guidance(snapshot)
+    user_data = deepcopy(user_data)
+    for key in ('snapshot', 'current_snapshot'):
+        if key in user_data:
+            user_data[key].pop('commission_payment_policy', None)
+            user_data[key]['clauses'] = [
+                clause for clause in user_data[key].get('clauses', [])
+                if clause.get('id') not in {f'commission_payment_{i}' for i in range(3)}
+            ]
     api_key = str(env.get("OPENAI_API_KEY", ""))
     model = env.get("CONTRACT_OPENAI_MODEL") or env.get("OPENAI_MODEL")
     if not api_key or not model:
@@ -150,7 +161,8 @@ def analyze_trade(messages, current_snapshot, reference_context, *, env, client=
     return data
 
 
-def generate_draft(snapshot, preferred_clauses, *, env, reference_context=None, client=None):
+def generate_draft(snapshot, preferred_clauses, *, env, reference_context=None,
+                   transaction_messages=None, client=None):
     snapshot = validate_snapshot(snapshot)
     reference_context = reference_context or []
     data = _call(
@@ -159,9 +171,12 @@ def generate_draft(snapshot, preferred_clauses, *, env, reference_context=None, 
         "Never assume KE KOREA is the seller; use each party's explicit roles. Avoid excessive penalties, perpetual exclusivity, or one-sided liability. Do not invent governing law or dispute resolution. "
         "Preserve the user's snapshot.title exactly; never add a contract type, prefix, suffix, or translation to it. "
         "Return JSON keys title, clauses, issues. clauses is an ordered array of {id,title,order,sentences}; each sentence is {id,text,term_ids,source_refs}. IDs must be unique stable-looking IDs. "
+        "Use the user's transaction_messages for cautions and commercial context; distinguish these from reference document examples. "
+        "Reconcile material conflicts in issues and ask for missing terms. Do not silently discard user cautions. "
         "issues is an array of {severity,code,message}. Do not include reviewer notes in contract prose.",
         {"snapshot": snapshot, "preferred_clauses": preferred_clauses,
-         "reference_context": reference_context},
+         "reference_context": reference_context,
+         "transaction_messages": (transaction_messages or [])[-30:]},
         env=env, opener=client or urllib.request.urlopen)
     clauses = data.get("clauses")
     if not isinstance(data.get("title"), str) or not isinstance(clauses, list) or not clauses:
@@ -212,7 +227,13 @@ def generate_draft(snapshot, preferred_clauses, *, env, reference_context=None, 
                         raise ValueError("The draft cites text not found in the selected reference material.")
                 elif source_ref.get("kind") == "user":
                     if source_ref not in trusted_user_refs:
-                        raise ValueError("The draft cites user text that was not verified in the contract terms.")
+                        candidates = [message for message in (transaction_messages or [])[-30:]
+                                      if message.get('role') == 'user'
+                                      and (not source_ref.get('message_id')
+                                           or str(message.get('id')) == str(source_ref['message_id']))]
+                        if not any(quote_matches(source_ref.get('quote'), message.get('content'))
+                                   for message in candidates):
+                            raise ValueError("The draft cites user text that was not verified in the contract terms or conversation.")
                 elif source_ref.get("kind") != "ai":
                     raise ValueError("Contract AI returned an unsupported sentence source reference.")
     hangul = re.compile(r"[가-힣]")
@@ -230,10 +251,12 @@ def generate_draft(snapshot, preferred_clauses, *, env, reference_context=None, 
         raise ValueError("The English draft contains Korean text outside extracted party/term values. The current draft was kept unchanged.")
     if checked["language"] == "ko" and letters and korean_count / len(letters) < 0.45:
         raise ValueError("The Korean draft appears to contain substantial English prose. The current draft was kept unchanged.")
-    return checked
+    return apply_payment_policy(checked, env=env)
 
 
 def propose_revision(snapshot, sentence_id, instruction, *, env, client=None):
+    if sentence_id in {f'commission_payment_sentence_{i}' for i in range(3)}:
+        raise ValueError("기본 지급 조항은 조건표를 수정한 후 '기본 지급 조항 적용 / 갱신'으로 갱신해 주세요.")
     if not str(instruction or "").strip():
         raise ValueError("Enter a sentence-specific revision instruction.")
     sentence = find_sentence(snapshot, sentence_id)

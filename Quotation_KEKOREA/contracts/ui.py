@@ -11,6 +11,9 @@ from Quotation_KEKOREA.contracts.editing import (
 )
 from Quotation_KEKOREA.contracts.exports import export_contract
 from Quotation_KEKOREA.contracts.models import new_snapshot, validate_snapshot
+from Quotation_KEKOREA.contracts.commission_policy import (
+    COMMISSION_TYPES, apply_payment_policy, payment_policy_issues,
+)
 from Quotation_KEKOREA.contracts.references import (
     MAX_FILES_PER_REQUEST, candidate_clauses, extract_reference,
 )
@@ -86,6 +89,8 @@ def _term_rows(snapshot):
     terms = {term.get("key"): term for term in snapshot.get("terms", [])}
     keys = list(dict.fromkeys(list(TYPE_REQUIRED[snapshot["contract_type"]]) +
                               list(terms.keys())))
+    if snapshot['contract_type'] in COMMISSION_TYPES:
+        keys = list(dict.fromkeys(keys + ['payment_trigger', 'late_interest_legal_review', 'late_interest_source']))
     rows = []
     for key in keys:
         term = terms.get(key, {})
@@ -490,8 +495,8 @@ def _render_draft(repo, snapshot, state_key, env):
                 st.write(annotation["instruction"])
 
 
-def _export_panel(repo, snapshot):
-    issues = validate_rules(snapshot, for_export=True)
+def _export_panel(repo, snapshot, env):
+    issues = validate_rules(snapshot, for_export=True, env=env)
     st.markdown("### 내보내기 검토")
     if issues:
         st.warning("확인되지 않은 조건이나 충돌이 있어 검토용 파일 내보내기를 막았습니다.")
@@ -649,6 +654,8 @@ def _run_editor(repo, snapshot, state_key, env):
 
 def _contract_chat(repo, snapshot, state_key, env):
     st.markdown("### 거래 내용과 AI 분석")
+    if snapshot['contract_type'] in COMMISSION_TYPES:
+        st.caption("거래 조건과 주의사항을 입력하세요. 참고 계약의 구조를 응용해 양사 권리를 조정합니다. 각 트리거 D+7 달력일 이내 TT 지급을 적용하며, 연체이율은 지급자 국가와 준거법상 적용 가능성을 확인합니다.")
     st.caption("자연어 입력과 조건표가 함께 사용됩니다. 입력 자료와 선택한 참고 문구는 분석 버튼을 눌렀을 때만 OpenAI로 전송됩니다.")
     messages = repo.list_messages(snapshot["contract_id"])
     for message in messages:
@@ -912,6 +919,7 @@ def render_contract_page(page, env):
                 ]
                 draft = generate_draft(
                     snapshot, preferred, env=env, reference_context=reference_context,
+                    transaction_messages=repo.list_messages(active_id),
                 )
                 saved = _save_snapshot(repo, draft, "AI generated contract draft")
                 st.session_state[state_key] = saved
@@ -926,6 +934,23 @@ def render_contract_page(page, env):
         _proposal_panel(repo, snapshot, proposal, state_key)
 
     if snapshot.get("clauses"):
+        if snapshot['contract_type'] in COMMISSION_TYPES:
+            with st.expander("기본 수수료 지급 조항", expanded=True):
+                st.caption("D+7은 트리거 발생일로부터 7일(달력일)입니다. 조건표의 트리거·통화·지급자·수취인과 연체이율 검토를 먼저 확인하세요. 다른 통화의 계좌를 추측하지 않습니다.")
+                for issue in payment_policy_issues(snapshot, env=env):
+                    st.warning(issue['message'])
+                if st.button("기본 지급 조항 적용 / 갱신",
+                             key=f"commission_policy_{active_id}_{snapshot['revision']}"):
+                    try:
+                        updated = apply_payment_policy(snapshot, env=env)
+                        saved = _save_snapshot(repo, updated, "Applied standing commission payment policy")
+                        st.session_state[state_key] = saved
+                        for key in ('contract_revisions', 'contract_pending_proposal', 'contract_pending_terms',
+                                    f'contract_pending_analysis_{active_id}'):
+                            st.session_state.pop(key, None)
+                        st.rerun()
+                    except (ValueError, ContractRepositoryError) as exc:
+                        st.error(str(exc))
         _render_draft(repo, snapshot, state_key, env)
         revisions = st.session_state.get("contract_revisions")
         if not revisions:
@@ -949,7 +974,7 @@ def render_contract_page(page, env):
                 st.rerun()
             except (ValueError, RevisionConflict, ContractRepositoryError) as exc:
                 st.error(str(exc))
-        _export_panel(repo, snapshot)
+        _export_panel(repo, snapshot, env)
 
     st.markdown("### 저장·복사·삭제")
     copy_col, language_col, delete_col = st.columns(3)

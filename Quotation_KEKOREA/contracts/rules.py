@@ -1,5 +1,6 @@
 """Deterministic contract completeness checks; not legal advice."""
 from decimal import Decimal, InvalidOperation
+from Quotation_KEKOREA.contracts.commission_policy import payment_policy_issues
 
 
 COMMON_REQUIRED = (
@@ -34,6 +35,9 @@ LABELS = {
     "term_or_deal_scope": "적용 기간 또는 특정 거래 범위",
     "fundraiser": "유치 담당자", "project": "투자 대상 프로젝트/법인",
     "funding_type": "자금 형태",
+    "payment_trigger": "수수료 지급 트리거 (실제 입금 대상·계좌 포함)",
+    "late_interest_legal_review": "연체이율 적용 검토 (지급자 국가·준거법·커미션 채무)",
+    "late_interest_source": "연체이율 검토 근거 (법령·검토 문서 및 확인일)",
 }
 NOT_APPLICABLE = {"n/a", "na", "not applicable", "none", "해당 없음", "없음"}
 
@@ -42,7 +46,7 @@ def _term_map(snapshot):
     return {str(term.get("key")): term for term in snapshot.get("terms", [])}
 
 
-def validate_snapshot(snapshot, *, for_export=False):
+def validate_snapshot(snapshot, *, for_export=False, env=None):
     issues = []
     terms = _term_map(snapshot)
     required = list(COMMON_REQUIRED) + list(TYPE_REQUIRED.get(snapshot.get("contract_type"), ()))
@@ -101,6 +105,8 @@ def validate_snapshot(snapshot, *, for_export=False):
     if for_export and snapshot.get("pending_reconciliation"):
         issues.append({"severity": "block", "code": "pending_reconciliation",
                        "message": "조건 변경과 본문 조항의 대조가 적용 대기 중입니다."})
+    if for_export:
+        issues.extend(payment_policy_issues(snapshot, env=env))
     return issues
 
 
