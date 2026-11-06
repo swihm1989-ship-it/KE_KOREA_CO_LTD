@@ -537,22 +537,31 @@ def _render_draft(repo, snapshot, state_key, env):
     @media(max-width:640px) {.st-key-contract_document_surface {padding:.25rem;}
         .st-key-contract_document_paper {padding:1rem;}}
     </style>""", unsafe_allow_html=True)
+    # The AI risk-review panel is rendered BELOW this document. Surface its
+    # session-only edits here too, so they cannot be mistaken for saved clauses.
+    active_preview = st.session_state.get(f'contract_risk_preview_{contract_id}') or {}
+    preview_texts = (active_preview.get('sentences', {})
+                     if active_preview.get('revision') == revision else {})
     with st.container(key="contract_document_surface"):
         with st.container(key="contract_document_paper"):
             st.markdown(f"<h2>{escape(snapshot.get('title') or 'Contract')}</h2>", unsafe_allow_html=True)
             st.caption("DRAFT / 검토용 · 미확정 내용은 최종 합의가 아닙니다.")
+            if preview_texts:
+                st.info(f"AI 위험 검토 수정안 {len(preview_texts)}개를 아래 문장에 미리 반영했습니다. "
+                        "아직 저장된 계약서가 아닙니다. 아래 'AI 핵심 위험 검토'에서 "
+                        "'선택한 수정안 비교·승인'을 완료해야 새 revision으로 저장됩니다.")
             for clause in sorted(snapshot.get('clauses', []), key=lambda item: item.get('order', 0)):
                 st.markdown(f"<h4>{escape(clause.get('title', ''))}</h4>", unsafe_allow_html=True)
                 for sentence in clause.get('sentences', []):
                     sentence_id = sentence['id']
-                    preview = st.session_state.get(f'contract_risk_preview_{contract_id}') or {}
-                    preview_texts = preview.get('sentences', {}) if preview.get('revision') == revision else {}
                     displayed_text = preview_texts.get(sentence_id, sentence['text'])
                     is_open = sentence_id in opened
                     # A stable two-column row, even before the note is opened.
                     # Keeps document text aligned with a Word-style comment gutter.
                     text_col, note_col = st.columns([7, 3], gap="medium", vertical_alignment="top")
                     with text_col:
+                        if sentence_id in preview_texts:
+                            st.caption("✎ AI 추천 수정안 미리보기 · 확정 저장 전")
                         if st.button(displayed_text, key=f"contract_sentence_{contract_id}_{sentence_id}",
                                      help="클릭해 이 문장의 메모를 열거나 선택합니다.",
                                      type='primary' if is_open else 'secondary', use_container_width=True):
@@ -631,6 +640,22 @@ def _note_row(snapshot, sentence_id, instruction, saved_notes):
             'proposal': None, 'status': 'note'}
 
 
+def _restore_previous_revision_note(contract_id, revision, sentence_id, instruction):
+    """Explicitly recover a previous note without silently approving old text."""
+    buffer_key = f'contract_note_buffer_{contract_id}_{revision}'
+    st.session_state.setdefault(buffer_key, {})[sentence_id] = str(instruction).strip()
+    widget_key = f'contract_note_{contract_id}_{revision}_{sentence_id}'
+    # Streamlit on_click runs before widgets are created on the next rerun.
+    st.session_state[widget_key] = str(instruction).strip()
+    open_key = f'contract_open_notes_{contract_id}_{revision}'
+    opened = st.session_state.setdefault(open_key, [])
+    if sentence_id not in opened:
+        opened.append(sentence_id)
+    proposal = st.session_state.get('contract_pending_proposal') or {}
+    if proposal.get('contract_id') == contract_id and proposal.get('note_ids'):
+        st.session_state.pop('contract_pending_proposal', None)
+
+
 def _batch_request_panel(repo, snapshot, state_key, env, pending, buffers):
     saved_notes = {row['sentence_id']: row for row in pending['notes']}
     instructions = {sentence_id: row['instruction'] for sentence_id, row in saved_notes.items()}
@@ -641,14 +666,39 @@ def _batch_request_panel(repo, snapshot, state_key, env, pending, buffers):
     st.caption(f"현재 revision에 요청할 메모 {len(notes)}개 · 여러 문장에 메모를 작성한 뒤 한 번에 요청하세요.")
     if pending['excluded']:
         with st.expander(f"이전·중복·제외 메모 ({len(pending['excluded'])})", expanded=False):
+            valid_ids = {s.get('id') for c in snapshot.get('clauses', [])
+                         for s in c.get('sentences', [])}
+            restored_ids = set()
             for item in pending['excluded']:
-                st.caption(f"{item['note'].get('sentence_id')} · {item['reason']}")
-                st.write(item['note'].get('instruction', ''))
+                old = item['note']
+                sentence_id = old.get('sentence_id')
+                st.caption(f"{sentence_id} · {item['reason']}")
+                st.write(old.get('instruction', ''))
+                # Only same-contract, existing-sentence, non-consumed old notes
+                # may be copied. The user must explicitly request restoration.
+                recoverable = (old.get('contract_id') == snapshot['contract_id']
+                               and old.get('base_revision') != snapshot['revision']
+                               and old.get('status') == 'note'
+                               and sentence_id in valid_ids
+                               and sentence_id not in restored_ids
+                               and sentence_id not in instructions
+                               and old.get('id') not in snapshot.get('applied_note_ids', [])
+                               and str(old.get('instruction') or '').strip())
+                if recoverable:
+                    restored_ids.add(sentence_id)
+                    st.button('이 메모를 현재 revision에서 다시 사용',
+                              key=f"contract_restore_note_{snapshot['contract_id']}_{snapshot['revision']}_{sentence_id}",
+                              on_click=_restore_previous_revision_note,
+                              args=(snapshot['contract_id'], snapshot['revision'],
+                                    sentence_id, old['instruction']))
     st.caption("버튼을 누르면 메모를 저장하고 AI에 한 번에 전달합니다. 본문은 수정안 비교·승인 후에 변경됩니다.")
     consent = st.session_state.get(f"contract_ai_consent_{snapshot['contract_id']}", False)
     existing_proposal = st.session_state.get('contract_pending_proposal') or {}
     other_proposal = (existing_proposal.get('contract_id') == snapshot['contract_id']
                       and not existing_proposal.get('note_ids'))
+    if not notes:
+        st.info('현재 revision에 적용할 수정 메모가 없습니다. 문장 옆에 새 메모를 작성하거나, '
+                '위의 이전 메모를 펼쳐 현재 revision으로 다시 가져오세요.')
     if notes and not consent:
         st.caption('BOX 1의 AI 전송 동의를 선택해야 수정 요청을 보낼 수 있습니다.')
     if notes and other_proposal:
@@ -682,7 +732,7 @@ def _review_panel(repo, snapshot, state_key, issues):
     cards = review_cards(issues, language=language)
     if not cards and not snapshot.get('issues'):
         return
-    with st.expander("서명 전 검토 · 필요한 항목만 확인", expanded=False):
+    with st.expander("고급 검토 기록 · 확정 근거 확인 (선택)", expanded=False):
         st.caption("분류는 작업 안내입니다. TBD 유지는 미확정을 보존하며 최종 검증을 해제하지 않습니다.")
         for card in cards:
             st.markdown(f"**{card['kind']} · {card['summary']}**")
@@ -746,15 +796,16 @@ def _review_panel(repo, snapshot, state_key, issues):
 
 def _export_panel(repo, snapshot, env):
     issues = validate_rules(snapshot, for_export=True, env=env)
-    _review_panel(repo, snapshot, f"contract_snapshot_{snapshot['contract_id']}", issues)
     st.markdown("#### 문서 다운로드")
-    st.caption("DRAFT는 미확정을 표시한 검토용입니다. FINAL은 기존 최종 검증을 통과해야 생성할 수 있습니다.")
+    st.caption("검토용 DRAFT PDF/Word는 미확정 정보가 있어도 만들 수 있습니다. "
+               "FINAL은 필수 조건을 실제로 확인해야 생성됩니다. 검토 목록을 숨겨도 최종 검증 결과는 달라지지 않습니다.")
     draft_col, final_col = st.columns(2)
     for column, mode, title in ((draft_col, 'draft', '검토용 초안'), (final_col, 'final', '최종 계약서')):
         with column:
             st.markdown(f"**{'DRAFT / 검토용' if mode == 'draft' else 'FINAL / 최종 검증'}**")
             if mode == 'final' and issues:
-                st.caption("필수 확인이 남아 있습니다. 위 검토 메뉴에서 수정 위치를 확인하세요.")
+                st.caption(f"최종 확인이 필요한 항목 {len(issues)}건. BOX 2에서 실제 조건을 입력·확정하고, "
+                           "필요하면 아래 '고급 검토 기록'에서 AI 쟁점 근거를 확인하세요.")
             for extension in ('pdf', 'docx'):
                 if st.button(f"{title} {extension.upper()}",
                              disabled=bool(issues) if mode == 'final' else False,
@@ -793,6 +844,9 @@ def _export_panel(repo, snapshot, env):
                                            mime=_contract_mime(item['format']), key=f"contract_redownload_{item['id']}")
                     except ContractRepositoryError as exc:
                         st.error(str(exc))
+    # Optional audit/reconciliation controls are still reachable, but never
+    # interrupt DRAFT download or masquerade as the FINAL export validator.
+    _review_panel(repo, snapshot, f"contract_snapshot_{snapshot['contract_id']}", issues)
 
 
 def _contract_mime(extension):

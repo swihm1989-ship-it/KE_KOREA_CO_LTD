@@ -7,3 +7,7 @@
 !/Quotation_KEKOREA/.env.example
 /Quotation_KEKOREA/**/__pycache__/
 /tmp/
+
+.uv-cache/
+__pycache__/
+*.pyc
