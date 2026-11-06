@@ -26,7 +26,7 @@ from Quotation_KEKOREA.contracts.rules import (
     LABELS, TYPE_REQUIRED, apply_analysis, validate_snapshot as validate_rules,
 )
 from Quotation_KEKOREA.contracts.service import (
-    analyze_trade, extract_reference_page, generate_draft, language_conflict,
+    analyze_trade, conversation_response_language, extract_reference_page, generate_draft, language_conflict,
     propose_revision, propose_term_revision,
 )
 
@@ -773,13 +773,21 @@ def _contract_chat(repo, snapshot, state_key, env):
             else:
                 saved = _save_snapshot(repo, updated, "AI extracted candidate contract terms")
                 st.session_state[state_key] = saved
-            response = (f"거래조건을 분석했습니다. 조건 후보 {len(analysis.get('terms', []))}개, "
-                        f"확인할 질문 {len(analysis.get('questions', []))}개입니다.")
+            response_language = conversation_response_language(prompt)
+            if response_language == "en":
+                response = (f"Trade terms analyzed: {len(analysis.get('terms', []))} candidates, "
+                            f"{len(analysis.get('questions', []))} questions to clarify.")
+            else:
+                response = (f"거래조건을 분석했습니다. 조건 후보 {len(analysis.get('terms', []))}개, "
+                            f"확인할 질문 {len(analysis.get('questions', []))}개입니다.")
             if analysis.get("questions"):
-                response += "\n\n확인할 사항:\n" + "\n".join(
+                response += ("\n\nQuestions to clarify:\n" if response_language == "en"
+                             else "\n\n확인할 사항:\n") + "\n".join(
                     f"- {question}" for question in analysis["questions"][:5])
             if snapshot.get("clauses"):
-                response += "\n\n기존 계약 내용은 자동 덮어쓰지 않았습니다. 아래 분석 후보를 검토해 적용하세요."
+                response += ("\n\nThe existing draft was not overwritten. Review the analysis candidates below before applying them."
+                             if response_language == "en"
+                             else "\n\n기존 계약 내용은 자동 덮어쓰지 않았습니다. 아래 분석 후보를 검토해 적용하세요.")
             repo.add_message(snapshot["contract_id"], "assistant", response)
             st.rerun()
         except (ValueError, RuntimeError, ContractRepositoryError) as exc:
