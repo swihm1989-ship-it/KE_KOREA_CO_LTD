@@ -1,0 +1,104 @@
+"""Sample administration is separate from public contract drafting."""
+import hashlib
+import hmac
+import json
+
+import streamlit as st
+
+from Quotation_KEKOREA.contracts.library import (
+    publish_sample, read_manifest, register_sample, set_sample_active,
+)
+from Quotation_KEKOREA.contracts.repository import ContractRepositoryError
+
+
+def show_library_sources(sources):
+    if not sources:
+        return
+    with st.expander('이번 계약에 참고한 공통 샘플', expanded=False):
+        st.caption('검토된 참고 메모입니다. 현재 거래 조건과 지급 정책이 우선하며, 원문 조건이나 법적 유효성을 자동 적용하지 않습니다.')
+        for source in sources:
+            st.write(f"{source['title']} · {source['locator']} · v{source['revision']}")
+            st.caption(source['topic'])
+            st.write(source['text'])
+
+
+def render_library_admin(repo, env):
+    with st.expander('공통 샘플 라이브러리 관리', expanded=False):
+        token = str(env.get('CONTRACT_LIBRARY_ADMIN_TOKEN') or '')
+        if not token:
+            st.caption('샘플 등록·원문 열람·승인은 서버의 별도 관리 키 설정 후 사용할 수 있습니다. 계약 작성에는 관리 키가 필요하지 않습니다.')
+            return
+        fingerprint = hashlib.sha256(token.encode()).hexdigest()
+        if st.session_state.get('_sample_admin_session') != fingerprint:
+            with st.form('library_admin_login'):
+                candidate = st.text_input('샘플 관리 키', type='password', key='_sample_admin_password')
+                login = st.form_submit_button('관리 시작')
+            if login:
+                if hmac.compare_digest(candidate, token):
+                    st.session_state['_sample_admin_session'] = fingerprint
+                    st.rerun()
+                st.error('샘플 관리 키를 확인해 주세요.')
+            return
+        st.session_state.pop('_sample_admin_password', None)
+        if st.button('샘플 관리 종료', key='library_admin_logout'):
+            st.session_state.pop('_sample_admin_session', None)
+            st.rerun()
+        st.caption('원본과 추출 내용은 관리자 전용입니다. 검색에는 승인한 익명화 참고 메모만 사용됩니다.')
+        with st.form('library_upload'):
+            uploaded = st.file_uploader('새 공통 샘플 (PDF/DOCX/HWP5)', type=['pdf', 'docx', 'hwp'])
+            title = st.text_input('공개 참고 제목', help='기존 거래처나 개인 이름을 넣지 마세요.')
+            kinds = st.multiselect('참고할 계약 유형', ['sale', 'trade_commission', 'investment_commission'])
+            language = st.selectbox('샘플 언어', ['ko', 'en'])
+            register = st.form_submit_button('비공개 원본 등록 (승인 대기)')
+        try:
+            if register:
+                if not uploaded or not title.strip() or not kinds:
+                    raise ValueError('파일·공개 제목·계약 유형을 입력해 주세요.')
+                register_sample(repo, uploaded.getvalue(), uploaded.name, title=title.strip(),
+                                contract_types=kinds, language=language)
+                st.success('원본을 검증해 저장했습니다. 참고 메모 승인 전에는 AI 검색에 사용되지 않습니다.')
+                st.rerun()
+            records = repo.list_library_records()
+            managed = []
+            for record in records:
+                try:
+                    managed.append((record, read_manifest(record)))
+                except ValueError:
+                    continue
+            if not managed:
+                st.info('등록된 공통 샘플이 없습니다.')
+                return
+            by_id = {record['id']: (record, manifest) for record, manifest in managed}
+            selected = st.selectbox('관리할 샘플', list(by_id),
+                                    format_func=lambda value: by_id[value][1].title)
+            record = repo.get_library_record(selected)
+            manifest = read_manifest(record)
+            st.write(f"승인: {manifest.approved} · 활성: {manifest.active} · 버전: {manifest.revision}")
+            with st.expander('관리자용 원문 텍스트와 출처'):
+                st.text(record.get('extracted_text') or '텍스트 추출 결과가 없습니다.')
+                st.dataframe([{'location': loc.get('locator'), 'text': loc.get('text')}
+                              for loc in record['source_locations'] if loc.get('locator')], hide_index=True)
+            initial = [{'locator': c.locator, 'topic': c.topic, 'text': c.text} for c in manifest.chunks]
+            if not initial:
+                first = next((loc for loc in record['source_locations'] if loc.get('locator')), {})
+                initial = [{'locator': first.get('locator', ''), 'topic': '', 'text': ''}]
+            with st.form(f'library_review_{selected}_{manifest.revision}'):
+                reviewed = st.text_area('검토된 참고 메모 JSON', value=json.dumps(initial, ensure_ascii=False, indent=2),
+                                        height=260, help='locator=위 원문 위치, topic=주제, text=새로 작성한 익명화 참고 메모')
+                confirmation = st.checkbox('거래처·개인정보·계좌·기존 금액과 비율을 제거하고 참고용으로 새로 작성한 메모임을 확인합니다.')
+                approve = st.form_submit_button('메모 승인 및 검색 인덱스 갱신')
+            if approve:
+                if not confirmation:
+                    raise ValueError('참고 메모의 익명화와 검토 여부를 확인해 주세요.')
+                chunks = json.loads(reviewed)
+                if not isinstance(chunks, list):
+                    raise ValueError('참고 메모는 JSON 배열이어야 합니다.')
+                result = publish_sample(repo, selected, chunks, env=env)
+                for message in result['notices']:
+                    st.warning(message)
+                st.success('메모가 승인되었습니다. 다음 계약 분석부터 참고 검색에 포함됩니다.')
+            if st.button('검색에서 제외' if manifest.active else '검색에 다시 포함', key=f'library_toggle_{selected}'):
+                set_sample_active(repo, selected, not manifest.active)
+                st.rerun()
+        except (ValueError, RuntimeError, ContractRepositoryError) as exc:
+            st.error(str(exc))

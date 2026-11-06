@@ -30,6 +30,8 @@ class ContractReferenceTests(unittest.TestCase):
         self.assertEqual(len(candidate_clauses(result)), 1)
 
     def test_encrypted_or_unsupported_documents_are_not_silently_accepted(self):
+        with self.assertRaisesRegex(ValueError, 'HWP5'):
+            extract_reference(b'not a compound document', 'example.hwp')
         with self.assertRaisesRegex(ValueError, "PDF or DOCX"):
             extract_reference(b"anything", "example.doc")
         with self.assertRaisesRegex(ValueError, "damaged"):

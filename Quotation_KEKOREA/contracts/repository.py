@@ -126,6 +126,36 @@ class ContractRepository:
                             query=[("select", "id,contract_id,filename,content_hash,extraction_status,extracted_text,created_at"),
                                    ("order", "created_at.desc"), ("limit", "100")]) or []
 
+    def list_library_records(self, approved_only=False):
+        query = [('select', 'id,filename,content_hash,storage_path,extraction_status,source_locations,created_at'),
+                 ('contract_id', 'is.null'), ('order', 'created_at.desc'), ('limit', '500')]
+        if approved_only:
+            query.append(('extraction_status', 'eq.library_approved'))
+        return self.request('GET', 'kekorea_contract_references', query=query) or []
+
+    def get_library_record(self, reference_id):
+        rows = self.request('GET', 'kekorea_contract_references', query=[
+            ('select', '*'), ('id', f'eq.{reference_id}'), ('contract_id', 'is.null')]) or []
+        return rows[0] if rows else None
+
+    def update_library_record(self, reference_id, payload, *, expected_revision=None):
+        query = [('id', f'eq.{reference_id}'), ('contract_id', 'is.null')]
+        if expected_revision is not None:
+            query.append(('source_locations->0->manifest->>revision', f'eq.{expected_revision}'))
+        rows = self.request('PATCH', 'kekorea_contract_references', payload=payload,
+                            query=query, headers={'Prefer': 'return=representation'})
+        if not rows:
+            raise ContractRepositoryError('The shared sample changed or is unavailable. Reload before editing.')
+
+    def private_bucket(self, bucket):
+        request = urllib.request.Request(f'{self.base_url}/storage/v1/bucket/{urllib.parse.quote(bucket, safe="")}',
+                                         headers={'apikey': self.key, 'Authorization': f'Bearer {self.key}'})
+        try:
+            with self.opener(request, timeout=self.timeout) as response:
+                return json.loads(response.read().decode('utf-8'))
+        except (urllib.error.URLError, TimeoutError, ValueError):
+            raise ContractRepositoryError('Could not verify the private sample bucket.') from None
+
     def delete_reference(self, reference_id):
         self.request("DELETE", "kekorea_contract_references",
                      query=[("id", f"eq.{reference_id}")])

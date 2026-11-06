@@ -11,6 +11,8 @@ from Quotation_KEKOREA.contracts.editing import (
 )
 from Quotation_KEKOREA.contracts.exports import export_contract
 from Quotation_KEKOREA.contracts.models import new_snapshot, validate_snapshot
+from Quotation_KEKOREA.contracts.library import search_library
+from Quotation_KEKOREA.contracts.library_ui import render_library_admin, show_library_sources
 from Quotation_KEKOREA.contracts.commission_policy import (
     COMMISSION_TYPES, apply_payment_policy, payment_policy_issues,
 )
@@ -663,6 +665,8 @@ def _contract_chat(repo, snapshot, state_key, env):
             st.write(message["content"])
     prompt = st.text_area("거래 내용 / 추가 조건 / 답변", height=120,
                           key=f"contract_prompt_{snapshot['contract_id']}")
+    use_library = st.checkbox('승인된 공통 샘플에서 관련 조항 자동 참고', value=True,
+                              key=f"contract_use_library_{snapshot['contract_id']}")
     refs = repo.contract_references(snapshot["contract_id"])
     selected_refs = []
     if refs:
@@ -671,7 +675,7 @@ def _contract_chat(repo, snapshot, state_key, env):
             options=[row["id"] for row in refs],
             format_func=lambda value: next(row["filename"] for row in refs if row["id"] == value),
             key=f"contract_context_refs_{snapshot['contract_id']}")
-    consent = st.checkbox("입력한 거래 내용과 위에서 선택한 참고 문구를 설정된 OpenAI API로 전송하는 데 동의합니다.",
+    consent = st.checkbox("입력한 거래 내용과 선택한 참고 문구·승인된 샘플 메모를 설정된 OpenAI API로 전송하는 데 동의합니다.",
                           key=f"contract_ai_consent_{snapshot['contract_id']}")
     if st.button("거래 내용 분석 및 조건 정리",
                  disabled=not prompt.strip() or not consent,
@@ -681,11 +685,18 @@ def _contract_chat(repo, snapshot, state_key, env):
             selected_context = [{"id": row["id"], "filename": row["filename"],
                                  "extracted_text": (row.get("extracted_text") or "")[:12000]}
                                 for row in refs if row["id"] in selected_refs]
+            library_result = {'references': [], 'sources': [], 'notices': []}
+            if use_library:
+                library_result = search_library(repo, snapshot, prompt, env=env)
+                selected_context += library_result['references']
+                for message in library_result['notices']:
+                    st.warning(message)
             prior_messages = messages + [{"role": "user", "content": prompt.strip()}]
             analysis = analyze_trade(prior_messages, snapshot, selected_context, env=env)
             if analysis["contract_type"] != snapshot["contract_type"]:
                 raise ValueError("AI가 다른 계약 유형으로 분류했습니다. 새 계약 유형을 선택한 뒤 다시 분석해 주세요.")
             updated = apply_analysis(snapshot, analysis)
+            updated['library_sources'] = library_result['sources']
             updated["reference_ids"] = sorted(set(
                 updated.get("reference_ids", []) + selected_refs
             ))
@@ -790,6 +801,7 @@ def render_contract_page(page, env):
     except (ValueError, ContractRepositoryError) as exc:
         st.error(str(exc))
         return
+    render_library_admin(repo, env)
     st.markdown("### 새 계약")
     with st.form(f"contract_create_{page}"):
         title = st.text_input("계약 제목", value="")
@@ -877,6 +889,7 @@ def render_contract_page(page, env):
                 st.error(str(exc))
 
     _contract_chat(repo, snapshot, state_key, env)
+    show_library_sources(snapshot.get('library_sources', []))
     st.markdown("### 거래조건표")
     _run_editor(repo, snapshot, state_key, env)
 
@@ -917,10 +930,17 @@ def render_contract_page(page, env):
                     }
                     for reference in refs if reference["id"] in selected_reference_ids
                 ]
+                library_result = {'references': [], 'sources': [], 'notices': []}
+                if st.session_state.get(f'contract_use_library_{active_id}', True):
+                    library_result = search_library(repo, snapshot, prompt_value or snapshot.get('title', ''), env=env)
+                    reference_context += library_result['references']
+                    for message in library_result['notices']:
+                        st.warning(message)
                 draft = generate_draft(
                     snapshot, preferred, env=env, reference_context=reference_context,
                     transaction_messages=repo.list_messages(active_id),
                 )
+                draft['library_sources'] = library_result['sources']
                 saved = _save_snapshot(repo, draft, "AI generated contract draft")
                 st.session_state[state_key] = saved
                 st.success(f"초안을 revision {saved['revision']}로 저장했습니다.")

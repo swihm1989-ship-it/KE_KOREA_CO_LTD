@@ -19,6 +19,35 @@ def extract_reference(file_bytes, filename, *, vision_client=None):
     name = str(filename or "")
     suffix = name.lower().rsplit(".", 1)[-1] if "." in name else ""
     digest = hashlib.sha256(file_bytes).hexdigest()
+    if suffix == 'hwp':
+        import subprocess
+        import sys
+        import tempfile
+        from pathlib import Path
+        if not file_bytes.startswith(bytes.fromhex('d0cf11e0a1b11ae1')):
+            raise ValueError('Only valid HWP5 compound documents are supported.')
+        with tempfile.TemporaryDirectory(prefix='kekorea-hwp-') as folder:
+            source = Path(folder) / 'source.hwp'
+            output = Path(folder) / 'extracted.txt'
+            source.write_bytes(file_bytes)
+            try:
+                subprocess.run([sys.executable, '-c', 'from hwp5.hwp5txt import main; main()', '--loglevel', 'ERROR',
+                                '--output', str(output), str(source)],
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                               check=True, timeout=30)
+                if not output.exists():
+                    raise ValueError('HWP extraction did not produce text.')
+                if output.stat().st_size > 30 * 1024 * 1024:
+                    raise ValueError('HWP extracted text exceeds the processing limit.')
+                text = output.read_text(encoding='utf-8').strip()
+            except (subprocess.SubprocessError, OSError, UnicodeError):
+                raise ValueError('Could not extract this HWP5 file; encrypted, unsupported or damaged files require a DOCX/PDF conversion.') from None
+        locations = [{'locator': f'HWP paragraph {i}', 'text': line.strip()}
+                     for i, line in enumerate(text.splitlines(), 1) if line.strip()]
+        if not locations:
+            raise ValueError('The HWP contains no readable text; it was not indexed.')
+        return {'filename': name, 'content_hash': digest, 'extraction_status': 'extracted',
+                'extracted_text': text, 'source_locations': locations, 'scanned_pages': []}
     if suffix == "pdf":
         try:
             import fitz
@@ -83,7 +112,7 @@ def extract_reference(file_bytes, filename, *, vision_client=None):
                 "source_locations": paragraphs, "scanned_pages": []}
     if suffix == "doc":
         raise ValueError("Legacy .doc files are not supported. Save the document as PDF or DOCX.")
-    raise ValueError("Upload PDF or DOCX reference contracts only.")
+    raise ValueError("Upload PDF, DOCX or HWP5 reference contracts only.")
 
 
 def candidate_clauses(reference):
