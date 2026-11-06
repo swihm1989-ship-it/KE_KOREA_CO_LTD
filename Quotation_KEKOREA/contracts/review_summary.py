@@ -77,3 +77,52 @@ def summarize_issues(issues, *, max_groups=5):
             'count': sum(row['count'] for row in excess),
         }]
     return groups
+
+
+def review_cards(issues, *, language='ko'):
+    """Deduplicate presentation only; use conservative labels, not invented translations.
+
+    A card retains indices into the original findings. Classification never changes
+    severity, confirmation, resolution, or any export gate.
+    """
+    from Quotation_KEKOREA.contracts.rules import LABELS
+    korean = language != 'en'
+    kinds = {
+        'required': '필수 확인' if korean else 'Required confirmation',
+        'recommended': '권장 확인' if korean else 'Recommended review',
+        'legal': '법률 검토 권장' if korean else 'Legal review recommended',
+        'tbd': '초안에 TBD 허용' if korean else 'TBD allowed in draft',
+    }
+    english = {'parties': 'Parties and signing authority', 'amounts': 'Amounts, commission and payment',
+               'scope': 'Transaction scope and property', 'law': 'Law, tax and dispute resolution',
+               'terms': 'Terms requiring confirmation'}
+    labels = {key: label for key, label, _ in _CATEGORIES}
+    grouped = OrderedDict()
+    for index, raw in enumerate(issues or []):
+        issue = raw if isinstance(raw, dict) else {'message': str(raw)}
+        if not unresolved_issues([issue]):
+            continue
+        category = _category(issue)
+        key = str(issue.get('key') or '')
+        text = (key + ' ' + str(issue.get('code') or '') + ' ' + str(issue.get('message') or '')).casefold()
+        if any(word in text for word in ('address', 'representative', 'legal id', 'legal_id', '주소', '서명권자')):
+            kind = 'tbd'
+        elif category == 'law' or any(word in text for word in ('interest', 'tax', 'governing', 'arbitrat', 'legal_review', '연체', '준거법', '세금')):
+            kind = 'legal'
+        elif issue.get('severity') == 'confirm':
+            kind = 'recommended'
+        else:
+            kind = 'required'
+        identity = (kind, category, key)
+        if identity not in grouped:
+            label = LABELS.get(key) if korean else None
+            summary = label or (labels[category] if korean else english[category])
+            grouped[identity] = {
+                'kind': kinds[kind], 'summary': summary,
+                'category': category, 'field_key': key,
+                'target': ('law' if kind == 'legal' else 'parties' if category == 'parties' else 'terms'),
+                'count': 0, 'indices': [],
+            }
+        grouped[identity]['count'] += 1
+        grouped[identity]['indices'].append(index)
+    return list(grouped.values())

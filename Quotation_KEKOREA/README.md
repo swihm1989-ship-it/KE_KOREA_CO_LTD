@@ -9,6 +9,10 @@
 
 계약 자동화 기능의 구현 범위·설정·DB migration 및 검증 상태는 [README_CONTRACTS.md](README_CONTRACTS.md)를 참조한다. 계약 코드는 GitHub `main`에 반영되었지만 Supabase migration 적용·운영 데이터 저장·실제 Streamlit 경로의 동작은 별도로 검증해야 한다.
 
+현재 계약서 화면은 **BOX 1 계약조건 입력·AI 대화, BOX 2 상세조건 수동 입력, BOX 3 문서형 미리보기**로 구성한다. BOX 2의 확정/AI 제안/확인 필요/TBD 유지는 기존 confirmed/suggested/missing 상태에 대응하며, 조건 변경은 기존 본문 영향 검토·승인 절차를 따른다. BOX 3에서 문장을 클릭해 메모를 저장한 다음 `최종 수정 요청`으로 여러 메모의 제안을 함께 비교한다. 승인 전에는 본문이 바뀌지 않고, 승인한 변경은 기존 revision RPC 한 번으로 저장한다.
+
+계약서 출력은 검토용 DRAFT와 최종 계약서로 구분한다. DRAFT는 실제 조항이 필요하며 미확정 상태의 본문에 `[확인 필요]`/`[TBD / UNCONFIRMED]` 표시와 미확정 부록을 붙인다. PDF에는 매 페이지 DRAFT 워터마크, DOCX에는 반복 DRAFT 머리글을 넣고 서명 페이지를 생성하지 않는다. 최종 PDF/DOCX는 기존 `validate_rules(..., for_export=True)`를 통과해야 한다. 두 경로 모두 기존 비공개 Storage·revision·내보내기 기록을 사용하며 경로의 `exports/draft/`와 `exports/final/`로 구분한다.
+
 ## 현재 동작 및 변경 보호 기준 — 2026-11-02
 
 배포 앱: https://ke-korea.streamlit.app/ (사용자가 2026-11-03 확인한 현재 주소). 이전 `kekoreacoltdgit-69eu27cywmml3jfwtdsappb.streamlit.app` 주소는 접속 확인 시 404였다.
@@ -536,16 +540,24 @@ In the CI menu, attach a PI image or PDF and request `Create CI from the attache
 - **현재 코드 기준:** `contracts/flow.py`는 반복 질문을 줄이고 초안 작성 요청에 따라 초안을 만든다. 질문 응답과 계약서 본문 언어는 별개로 관리한다.
 - **지급조건:** `contracts/commission_policy.py`와 UI에서 커미션 지급기한 및 서면합의 연체이율을 반영한다. 초기 D+7을 사용자가 변경할 수 있으며, 계좌 및 법률 검증의 미확정 상태는 유지한다.
 - **RAG:** 승인된 참고 조항 검색 결과를 위험 검토에 활용하지만, 자동 승인을 하지 않는다. 참고 자료는 거래 당사자·금액 등을 확정하는 근거로 자동 승격하지 않는다.
-- **TASTE 기반 검토 UI:** 계약서 본문 우선, 미확정 이슈 5개 이내 한국어 그룹, 원본 문제별 근거 입력은 접힌 고급 섹션, 최종 DOCX/PDF 내보내기 검증은 변경하지 않는다. 외부 디자인 의존성 없이 Streamlit 사용.
-- **검증 이력:** 사용자 로컬에서 2026-11-06 지급조건 수정까지 계약서 관련 74개 테스트 `OK`, 커밋 `f9e7d05`의 GitHub `main` 푸시 성공을 보고했다. 이번 TASTE 수정은 별도의 로컬 전체 테스트와 실제 배포 검증이 필요하다. 과거 테스트 수·실패 기록은 각 날짜의 이력으로 해석한다.
+- **TASTE 기반 검토 UI:** 기존 KE KOREA 색상을 유지한 회색 작업 배경·흰색 문서형 미리보기와 3개 작업 박스를 사용한다. 미확정 이슈는 화면에서 중복을 묶고 필수 확인/권장 확인/법률 검토 권장/초안에 TBD 허용으로 안내한다. 원문과 항목별 근거는 접힌 메뉴에 보존한다. 최종 검증 엔진은 변경하지 않는다.
+- **검증 이력:** 이번 작업 시작 시 로컬과 원격 `main`은 `3991930`으로 일치했고 기존 296개 테스트가 통과했다. 아래 이전 테스트 수·실패 기록은 당시 이력이다. 이번 계약 UI 변경은 운영 배포하지 않았으며, 로컬 테스트와 실제 운영 검증을 구분한다.
 - **문서 동기화:** 5개 README에 기능 변경·변경된 설명·제거한 기능을 함께 반영한다. `scripts/check_readme_sync.py` 및 `.githooks/pre-commit` 검사 포함. 자세한 계약 동작은 [README_CONTRACTS.md](README_CONTRACTS.md) 참조.
 
 ### 2026-11-06 전체 테스트 실패 2건 수정
 
 - 계약 커미션 기본 7일 기한을 영문 `seven (7) calendar days`로 표기해 법률 문서의 기존 기본 문구와 테스트를 일치시켰습니다. 7일이 아닌 명시적 사용자 지급기한은 그대로 반영합니다.
 - 상품명 주석 확인(`Confirm product annotation` 및 `Double-check this product`)이 남은 PO/PI에서는 PDF/Excel 생성 버튼을 차단합니다. 체크박스 확인 후에만 생성을 허용합니다. 가격 자동 조회 및 상품명 원문 보존 규칙은 변경하지 않았습니다.
-- 회귀 검사: `tests/test_commission_policy.py`, `tests/test_product_matching_ui.py`; 전체 테스트는 아래 명령으로 다시 실행하여 실제 결과를 기록하세요. 완료 전에는 성공했다고 기록하지 않습니다.
+- 회귀 검사: `tests/test_commission_policy.py`, `tests/test_product_matching_ui.py`. 이번 UI 작업 시작 전 전체 296개 테스트에서 이 보호 동작을 포함해 통과했다.
 
 ### 2026-11-06 CI 검토용 DRAFT 출력 회귀 보완
 
-PO/PI에서 확인이 필요한 상품 주석은 문서 생성 전에 확인해야 합니다. CI는 기존처럼 첨부 PI의 실제 거래가격를 유지하고 상품명 매칭이 미확정이면 경고 및 DRAFT 상태를 표시한 채 검토용 PDF/Excel 생성을 허용합니다. `test_review_ui.py::test_unconfirmed_ci_product_match_allows_draft_pdf`와 `test_product_matching_ui.py`의 동작을 함께 유지합니다. 실제 테스트 결과는 실행 후 기록하며, 최종 발행·전송을 자동 수행하지 않습니다.
+PO/PI에서 확인이 필요한 상품 주석은 문서 생성 전에 확인해야 합니다. CI는 기존처럼 첨부 PI의 실제 거래가격을 유지하고 상품명 매칭이 미확정이면 경고 및 DRAFT 상태를 표시한 채 검토용 PDF/Excel 생성을 허용합니다. `test_review_ui.py::test_unconfirmed_ci_product_match_allows_draft_pdf`와 `test_product_matching_ui.py`의 동작을 함께 유지합니다. 해당 거래 문서 코드는 이번 계약 UI 작업에서 수정하지 않았으며, 최종 발행·전송을 자동 수행하지 않습니다.
+
+### 계약 UI 전용 조정 계층과 제한
+
+`contracts/workspace.py`는 현재 계약·revision·sentence ID에 맞는 최신 메모만 수집하고 기존 `propose_revision()` 제안을 하나로 합친다. 같은 대상에 서로 다른 수정값이 있으면 전체 요청을 차단하며, 기존 `apply_proposal()`로 저장 전 적용 가능성을 검사한다. 서로 다른 문장 간의 법률적·의미적 충돌을 자동 판정하는 엔진은 추가하지 않았다. 여러 메모를 승인할 때 사용자가 금액·기한·역할의 일관성을 별도로 확인해야 한다. 일부 변경만 승인한 경우 나머지 메모는 이전 revision의 기록으로 남고 재검토 후 다시 저장해야 한다.
+
+`contracts/draft_exports.py`는 최종 렌더러를 변경하지 않는 별도 검토용 출력 경로다. 미확정이 있으면 본문 전체를 미승인으로 표시하고 원문 근거를 부록에 보존한다. `contracts/rules.py`, `commission_policy.py`, `service.py`, `editing.py`, 저장 스키마와 PO/PI/CI/PL·ECLADO 코드는 보존했다. 로컬 PDF 다중 페이지·혼합 언어 렌더링을 확인했으나 실제 브라우저의 반응형·시각 검수와 Word 렌더링, 운영 DB/API/배포 검증은 미완료다. Windows 브라우저 URL 확인 제한으로 컴퓨터 제어가 중단됐다.
+
+최종 로컬 검증(2026-11-06): 요구사항 전체 의존성으로 `python -m unittest discover -s Quotation_KEKOREA/tests -v`를 실행해 **320개 통과, 실패 0개, 종료 코드 0**(89.580초)을 확인했다. 기존 296개를 삭제·수정하지 않고 신규 24개를 추가했다. 신규 검증은 3박스 순서, 수동 입력 상태, AI 후보의 기존 초안 보존, 문장 메모 재호출·분리, 일괄 승인과 충돌, 미확정 재개, 빈 revision 방지, DRAFT 저장 실패 정리, FINAL 차단/정상 생성, 혼합 언어 PDF를 포함한다. `git diff --check`도 통과했다. 기존 `use_container_width` 및 `fitz` 경고는 테스트 실패와 구분한다.
