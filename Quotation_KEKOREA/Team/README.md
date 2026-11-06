@@ -132,7 +132,34 @@ Render Free는 절전 후 재기동될 수 있고 영구 디스크가 없습니�
 - 구현 설정·테스트 명령·운영 전 확인사항은 [README_CONTRACTS.md](../README_CONTRACTS.md)에 기록했습니다. 새 테이블/Storage 버킷은 [계약 migration](../supabase/migrations/202611050001_contracts.sql) 적용 전에는 운영에서 사용할 수 없습니다.
 - **현재 상태:** 코드와 합성 데이터 로컬 테스트는 추가됐지만 Supabase migration 적용, 실제 비밀 설정, 실제 DB 권한/RLS 검증, 앱 배포 및 운영 문서 시각 검증은 완료되지 않았습니다. 이를 배포 완료로 표현하지 마세요.
 
-## 7. 관련 문서
+## 7. 계약서 목록 오류 수정 및 인수인계 (2026-11-06)
+
+### 목적 및 영향
+
+- **문제:** 저장된 계약이 하나 이상 있을 때 `render_contract_page()`의 삭제 확인 분기가 정의되지 않은 `options` 변수를 참조하여 `NameError`를 발생시킬 수 있었습니다. 이 오류가 나면 계약 목록과 대화 History 확인도 중단됩니다.
+- **수정:** `records`에서 ID를 문자열로 정규화한 `options` 사전을 생성합니다. 삭제 요청 ID가 실제 목록에 포함되는 경우에만 계약 제목과 확인창을 표시합니다. 메뉴 구성, 견적서 가격 계산, 계약 revision 및 Supabase 데이터 구조는 변경하지 않습니다.
+- **대화 History:** `repo.list_messages(contract_id)`에서 계약별 대화를 읽어 `st.chat_message`에 표시하는 기존 기능을 유지합니다. 화면이 열리지 않던 원인을 제거한 것이며, 과거 메시지가 실제 DB에 존재하는지나 운영 서버에서 정상 노출되는지는 별도 검증이 필요합니다.
+- **삭제 흐름:** 목록의 X → 확인/취소. 실제 삭제는 기존 Supabase RPC 및 Storage 처리 경로를 사용합니다. 확인 없이 삭제하지 않습니다. 실제 DB·파일을 대상으로 파괴적 테스트를 수행하지 않습니다.
+
+### 적용 및 테스트
+
+```powershell
+# 저장소 최상위 폴더에서, 수정 패치 적용 후
+uv run --with-requirements .\Quotation_KEKOREA\requirements.txt python -m unittest Quotation_KEKOREA.tests.test_contract_workspace_ui
+uv run --with-requirements .\Quotation_KEKOREA\requirements.txt python -m unittest discover -s .\Quotation_KEKOREA\tests
+git diff --check
+uv run --with-requirements .\Quotation_KEKOREA\requirements.txt streamlit run .\Quotation_KEKOREA\app.py
+```
+
+화면에서 (1) 저장 계약 2건 조회 (2) 삭제 취소 (3) 삭제 확인 (합성·테스트 저장소만) (4) 다른 계약을 열 때 History가 섞이지 않는지 확인합니다. 전체 테스트는 이전부터 알려진 `test_annotations_load_prices_without_bypassing_product_confirmation` 실패 가능성도 따로 기록하고, 새 실패가 발생하면 배포하지 않습니다.
+
+**검증 상태:** 이번 변경은 GitHub 연결의 읽기 권한으로 원인을 조사했습니다. 연결 앱에 쓰기 권한이 없어 원격 저장을 시도할 때 HTTP 403이 발생했고, 현재 세션에서 전체 저장소 의존성을 이용한 테스트와 실제 서비스 실행은 완료하지 못했습니다. 따라서 이 항목을 운영 적용·전체 테스트 통과로 해석하지 마세요. 실제 테스트 결과와 배포 상태를 확인한 담당자가 이 항목을 갱신해야 합니다.
+
+### 보안 및 운영 확인
+
+계약 화면은 비밀번호 없이 공개 접근됩니다. 민감 계약/개인정보 저장은 접근 제어가 마련되기 전까지 피해야 합니다. Supabase migration, Secrets, RLS, 실제 계약·파일 삭제 및 PDF/DOCX 시각 검증은 별개입니다. 배포 후 앱에서 확인하지 않고 단순 GitHub 반영을 운영 성공으로 표시하지 않습니다.
+
+## 8. 관련 문서
 
 - 상세 설계·기능 변경 이력: [README.md](../README.md)
 - 계약 자동화 구현·설정·미검증 항목: [README_CONTRACTS.md](../README_CONTRACTS.md)

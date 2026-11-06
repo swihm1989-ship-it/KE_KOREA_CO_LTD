@@ -872,6 +872,7 @@ def render_contract_page(page, env):
 
     records = _records(repo)
     if records:
+        options = {str(record["id"]): record for record in records}
         st.markdown("### 저장된 계약")
         for record in records:
             contract_id = str(record["id"])

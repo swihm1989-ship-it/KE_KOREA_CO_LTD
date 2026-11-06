@@ -110,6 +110,15 @@ class ContractWorkspaceUiTests(unittest.TestCase):
         self.assertTrue(any('투자 대상 프로젝트/법인' in item.value['항목'].tolist()
                             for item in self.at.dataframe if '항목' in item.value.columns))
 
+    def test_saved_contract_list_renders_without_undefined_options(self):
+        self.seed('first', 'sale', 'First contract')
+        self.seed('second', 'trade_commission', 'Second contract')
+        self.run_app()
+        labels = [item.label for item in self.at.button]
+        self.assertIn('First contract', labels)
+        self.assertIn('Second contract', labels)
+        self.assertEqual(labels.count('X'), 2)
+
     def test_contract_delete_requires_confirmation(self):
         self.seed('delete-me', 'sale', 'Delete this contract')
         self.run_app()

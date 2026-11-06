@@ -28,6 +28,15 @@ class LibraryAdminUiTests(unittest.TestCase):
         self.at.run(timeout=15)
         self.assertFalse(self.at.exception)
         self.assertFalse(any('PRIVATE' in item.value for item in self.at.text))
+        next(item for item in self.at.text_input if item.label == '샘플 관리 키').set_value('example-admin')
+        next(item for item in self.at.button if item.label == '관리 시작').click()
+        self.at.run(timeout=15)
+        self.assertFalse(self.at.exception)
+        self.assertTrue(any('PRIVATE' in item.value for item in self.at.text))
+        next(item for item in self.at.button if item.label == '샘플 관리 종료').click()
+        self.at.run(timeout=15)
+        self.assertFalse(self.at.exception)
+        self.assertFalse(any('PRIVATE' in item.value for item in self.at.text))
 
 
 class LibraryDraftIntegrationTests(unittest.TestCase):
@@ -75,9 +84,13 @@ class LibraryDraftIntegrationTests(unittest.TestCase):
             at.session_state['contract_active_id'] = 'contract'
             at.run(timeout=15)
             self.assertFalse(at.exception)
-            next(item for item in at.text_area if item.label == '거래 내용 / 추가 조건 / 답변').set_value('inspection process')
-            at.checkbox(key='contract_ai_consent_contract').check()
-            next(item for item in at.button if item.label == '거래 내용 분석 및 조건 정리').click()
+            # next(item for item in at.text_area if item.label == '거래 내용 / 추가 조건 / 답변').set_value('inspection process')
+            # at.checkbox(key='contract_ai_consent_contract').check()
+            # next(item for item in at.button if item.label == '거래 내용 분석 및 조건 정리').click()
+            at.checkbox(key='contract_ai_consent_contract').check().run(timeout=15)
+            at.chat_input(key='contract_prompt_contract').set_value(
+    'inspection process'
+).run(timeout=15)
             at.run(timeout=15)
             self.assertFalse(at.exception)
             next(item for item in at.button if item.label == '현재 조건으로 계약서 초안 만들기').click()
@@ -89,12 +102,4 @@ class LibraryDraftIntegrationTests(unittest.TestCase):
         self.assertEqual(saved['title'], 'Example Supply')
         self.assertEqual(saved['library_sources'][0]['title'], 'Generic inspection reference')
         self.assertTrue(saved['clauses'][0]['sentences'][0]['source_refs'][0]['document_id'].startswith('library:'))
-        next(item for item in self.at.text_input if item.label == '샘플 관리 키').set_value('example-admin')
-        next(item for item in self.at.button if item.label == '관리 시작').click()
-        self.at.run(timeout=15)
-        self.assertFalse(self.at.exception)
-        self.assertTrue(any('PRIVATE' in item.value for item in self.at.text))
-        next(item for item in self.at.button if item.label == '샘플 관리 종료').click()
-        self.at.run(timeout=15)
-        self.assertFalse(self.at.exception)
-        self.assertFalse(any('PRIVATE' in item.value for item in self.at.text))
+        
