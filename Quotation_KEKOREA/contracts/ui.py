@@ -29,6 +29,7 @@ from Quotation_KEKOREA.contracts.service import (
     analyze_trade, conversation_response_language, extract_reference_page, generate_draft, language_conflict,
     propose_revision, propose_term_revision,
 )
+from Quotation_KEKOREA.contracts.flow import should_generate_draft, select_new_questions
 
 
 TYPE_LABELS = {
@@ -710,7 +711,8 @@ def _contract_chat(repo, snapshot, state_key, env):
     st.markdown("### 거래 내용과 AI 분석")
     if snapshot['contract_type'] in COMMISSION_TYPES:
         st.caption("거래 조건과 주의사항을 입력하세요. 참고 계약의 구조를 응용해 양사 권리를 조정합니다. 각 트리거 D+7 달력일 이내 TT 지급을 적용하며, 연체이율은 지급자 국가와 준거법상 적용 가능성을 확인합니다.")
-    st.caption("이전 대화는 채팅창에서 확인할 수 있습니다. 메시지를 입력하면 조건 분석이 진행되며, 입력 자료와 선택한 참고 문구는 동의 후 전송됩니다.")
+    st.caption("원하는 계약조건을 입력한 뒤 '계약서 초안을 작성해줘'라고 요청하세요. "
+               "반복 질문 대신 초안을 먼저 만들고, 문장 클릭으로 수정할 수 있습니다.")
     messages = repo.list_messages(snapshot["contract_id"])
     # Recent messages form the conversation; earlier records stay available on demand.
     older_messages, recent_messages = _chat_history_window(messages)
@@ -761,11 +763,29 @@ def _contract_chat(repo, snapshot, state_key, env):
                 analysis = analyze_trade(prior_messages, snapshot, selected_context, env=env)
             if analysis["contract_type"] != snapshot["contract_type"]:
                 raise ValueError("AI가 다른 계약 유형으로 분류했습니다. 새 계약 유형을 선택한 뒤 다시 분석해 주세요.")
+            # First conversation response can ask up to two questions; after the
+            # user's next message generate the draft instead of asking again.
+            make_draft = should_generate_draft(
+                prompt, prior_messages, has_clauses=bool(snapshot.get("clauses")))
+            analysis["questions"] = ([] if make_draft else
+                                     select_new_questions(analysis.get("questions", []), prior_messages))
             updated = apply_analysis(snapshot, analysis)
             updated['library_sources'] = library_result['sources']
             updated["reference_ids"] = sorted(set(
                 updated.get("reference_ids", []) + selected_refs
             ))
+            made_draft = False
+            if make_draft:
+                preferred = [clause for clause in repo.list_preferred_clauses()
+                             if clause.get("active")
+                             and updated["contract_type"] in clause.get("contract_types", [])
+                             and clause.get("language") == updated["language"]]
+                with st.spinner("확인되지 않은 항목을 표시하고 계약서 초안을 작성합니다..."):
+                    updated = generate_draft(
+                        updated, preferred, env=env, reference_context=selected_context,
+                        transaction_messages=prior_messages)
+                updated["library_sources"] = library_result["sources"]
+                made_draft = True
             if snapshot.get("clauses"):
                 st.session_state[f"contract_pending_analysis_{snapshot['contract_id']}"] = {
                     "snapshot": updated,
@@ -777,6 +797,13 @@ def _contract_chat(repo, snapshot, state_key, env):
                 saved = _save_snapshot(repo, updated, "AI extracted candidate contract terms")
                 st.session_state[state_key] = saved
             response_language = conversation_response_language(prompt)
+            if made_draft:
+                response = ("Draft generated. Review the contract below and click individual sentences to request edits."
+                            if response_language == "en" else
+                            "계약서 초안을 작성했습니다. 아래 본문을 검토하고 수정할 문장을 클릭해 명령해 주세요. "
+                            "미확정 사항은 검토 항목으로 남겨두었습니다.")
+                repo.add_message(snapshot["contract_id"], "assistant", response)
+                st.rerun()
             if response_language == "en":
                 response = (f"Trade terms analyzed: {len(analysis.get('terms', []))} candidates, "
                             f"{len(analysis.get('questions', []))} questions to clarify.")
@@ -863,8 +890,8 @@ def _contract_chat(repo, snapshot, state_key, env):
                 except (ValueError, RuntimeError, ContractRepositoryError) as exc:
                     st.error(str(exc))
     questions = snapshot.get("questions", [])
-    if questions:
-        with st.expander("AI 확인 질문", expanded=True):
+    if questions and not snapshot.get("clauses"):
+        with st.expander("초안 작성 전 확인할 핵심 질문 (선택)", expanded=False):
             for question in questions:
                 st.write(f"- {question}")
 

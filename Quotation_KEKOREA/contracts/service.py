@@ -224,7 +224,12 @@ def analyze_trade(messages, current_snapshot, reference_context, *, env, client=
         "en means natural English only. Korean or mixed Korean-English user messages MUST receive Korean questions. "
         "English-only user messages MUST receive English questions. "
         "The contract document language in current_snapshot.language is separate; "
-        "do not use it to determine the chat language.",
+        "do not use it to determine the chat language. "
+        "Ask NO MORE THAN TWO essential, non-overlapping questions across the entire conversation. "
+        "Never repeat a question already asked or answered in messages; if an answer is provisional, "
+        "record it as suggested instead of asking again. After a user answers follow-ups, "
+        "return zero more questions. Lack of a bank account, registered address, or legal opinion "
+        "should be recorded as a missing item for signature, not prevent an initial draft.",
         user_data, env=env, opener=client or urllib.request.urlopen)
     if data.get("contract_type") not in CONTRACT_TYPES:
         raise ValueError("Contract AI did not return a supported contract type.")
@@ -301,7 +306,10 @@ def generate_draft(snapshot, preferred_clauses, *, env, reference_context=None,
         "Preserve the user's snapshot.title exactly; never add a contract type, prefix, suffix, or translation to it. "
         "Return JSON keys title, clauses, issues. clauses is an ordered array of {id,title,order,sentences}; each sentence is {id,text,term_ids,source_refs}. IDs must be unique stable-looking IDs. "
         "Use the user's transaction_messages for cautions and commercial context; distinguish these from reference document examples. "
-        "Reconcile material conflicts in issues and ask for missing terms. Do not silently discard user cautions. "
+        "Reconcile material conflicts in issues but do not ask questions before writing the draft. "
+        "Use explicit placeholders such as [서명 전 확인] or [TO CONFIRM] for unresolved facts; "
+        "do not invent or falsely certify missing terms. Draft the full usable clause structure first. "
+        "Do not silently discard user cautions. "
         "issues is an array of objects with non-empty string code and message, and severity exactly one of block, confirm, or info. "
         "Do not include reviewer notes in contract prose.",
         {"snapshot": snapshot, "preferred_clauses": preferred_clauses,

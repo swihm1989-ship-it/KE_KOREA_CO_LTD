@@ -89,13 +89,13 @@ class LibraryDraftIntegrationTests(unittest.TestCase):
             # next(item for item in at.button if item.label == '거래 내용 분석 및 조건 정리').click()
             at.checkbox(key='contract_ai_consent_contract').check().run(timeout=15)
             at.chat_input(key='contract_prompt_contract').set_value(
-    'inspection process'
+    'Please draft a contract with an inspection process'
 ).run(timeout=15)
             at.run(timeout=15)
             self.assertFalse(at.exception)
-            next(item for item in at.button if item.label == '현재 조건으로 계약서 초안 만들기').click()
-            at.run(timeout=15)
-            self.assertFalse(at.exception)
+            # An explicit draft request now generates the draft during chat processing.
+            # The manual generate button is intentionally disabled after clauses exist.
+            self.assertTrue(repo.load_contract('contract')[-1]['snapshot']['clauses'])
         self.assertEqual(len(captured), 2)
         self.assertNotIn('PRIVATE', json.dumps(captured))
         saved = repo.load_contract('contract')[-1]['snapshot']
