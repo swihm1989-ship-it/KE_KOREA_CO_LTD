@@ -166,6 +166,50 @@ class ContractServiceTests(unittest.TestCase):
                              client=failing_opener)
         self.assertEqual(json.dumps(snapshot, sort_keys=True), original)
 
+    def test_api_error_detail_identifies_bad_request_without_exposing_api_key(self):
+        snapshot = new_snapshot("contract-1", "trade_commission", "en")
+        body = json.dumps({"error": {
+            "type": "invalid_request_error",
+            "code": "model_not_found",
+            "param": "model",
+            "message": "Token test-key rejected because the requested model is unavailable.",
+        }}).encode()
+
+        def failing_opener(request, timeout):
+            raise urllib.error.HTTPError(
+                request.full_url, 400, "Bad Request", {}, BytesIO(body))
+
+        with self.assertRaises(RuntimeError) as raised:
+            generate_draft(
+                snapshot, [],
+                env={"OPENAI_API_KEY": "test-key", "OPENAI_MODEL": "bad-model"},
+                client=failing_opener,
+            )
+        message = str(raised.exception)
+        self.assertIn("HTTP 400", message)
+        self.assertIn("code=model_not_found", message)
+        self.assertIn("param=model", message)
+        self.assertIn(
+            "Token [redacted] rejected because the requested model is unavailable.",
+            message,
+        )
+        self.assertIn("existing draft was not changed", message)
+        self.assertNotIn("test-key", message)
+
+    def test_api_error_detail_handles_invalid_json_body(self):
+        snapshot = new_snapshot("contract-1", "trade_commission", "en")
+
+        def failing_opener(request, timeout):
+            raise urllib.error.HTTPError(
+                request.full_url, 400, "Bad Request", {}, BytesIO(b"not-json"))
+
+        with self.assertRaisesRegex(RuntimeError, r"HTTP 400.*existing draft was not changed"):
+            generate_draft(
+                snapshot, [],
+                env={"OPENAI_API_KEY": "test-key", "OPENAI_MODEL": "test-model"},
+                client=failing_opener,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -25,6 +25,27 @@ def language_conflict(text, selected_language):
     return requested is not None and requested != selected_language
 
 
+def _http_error_detail(exc, api_key=""):
+    try:
+        body = json.loads(exc.read(8192).decode("utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return ""
+    finally:
+        exc.close()
+    error = body.get("error") if isinstance(body, dict) else None
+    if not isinstance(error, dict):
+        return ""
+    details = []
+    for field in ("code", "param", "message"):
+        value = error.get(field)
+        if isinstance(value, str) and value.strip():
+            value = " ".join(value.split())
+            if api_key:
+                value = value.replace(api_key, "[redacted]")
+            details.append(f"{field}={value[:300]}")
+    return f"; OpenAI error: {', '.join(details)}" if details else ""
+
+
 def _call(instructions, user_data, *, env, opener=urllib.request.urlopen, timeout=90):
     snapshot = user_data.get('snapshot') or user_data.get('current_snapshot') or {}
     instructions += '\n' + drafting_guidance(snapshot)
@@ -65,7 +86,11 @@ def _call(instructions, user_data, *, env, opener=urllib.request.urlopen, timeou
                 raise RuntimeError("Contract AI response exceeded the size limit; the existing draft was not changed.")
             result = json.loads(raw.decode("utf-8"))
     except urllib.error.HTTPError as exc:
-        raise RuntimeError(f"Contract AI request failed (HTTP {exc.code}); the existing draft was not changed.") from None
+        detail = _http_error_detail(exc, api_key)
+        raise RuntimeError(
+            f"Contract AI request failed (HTTP {exc.code}){detail}; "
+            "the existing draft was not changed."
+        ) from None
     except (urllib.error.URLError, TimeoutError):
         raise RuntimeError("Contract AI could not be reached; the existing draft was not changed.") from None
     except (UnicodeDecodeError, json.JSONDecodeError):
@@ -424,7 +449,8 @@ def extract_reference_page(image_bytes, page_number, *, env, client=None):
                  for part in output.get("content", []) if part.get("type") == "output_text"]
         parsed = json.loads("".join(texts))
     except urllib.error.HTTPError as exc:
-        raise RuntimeError(f"Reference page analysis failed (HTTP {exc.code}).") from None
+        detail = _http_error_detail(exc, api_key)
+        raise RuntimeError(f"Reference page analysis failed (HTTP {exc.code}){detail}.") from None
     except (urllib.error.URLError, TimeoutError):
         raise RuntimeError("Reference page analysis could not reach the AI service.") from None
     except (UnicodeDecodeError, json.JSONDecodeError, TypeError):
