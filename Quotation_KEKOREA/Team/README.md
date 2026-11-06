@@ -124,9 +124,18 @@ Render Free는 절전 후 재기동될 수 있고 영구 디스크가 없습니�
 - 변경 커밋 `54a6fdd` (**Remove combined CI and PL workflow**)는 Render 배포 `dep-dbm3rll9fdbs73bp7gg0`에 성공했고, `https://ke-korea-quotation.onrender.com/`에서 메뉴 구성을 확인했습니다. 이 확인은 실제 거래 추출 및 PDF/Excel 파일 생성까지 수행한 배포 검증은 아닙니다.
 - 변경 관련 CI/PL·사이드바·업로드·포장 워크플로 집중 테스트 **50개 통과**. 전체 테스트는 **203개 중 202개 통과, 1개 실패**였으며, 실패는 PO 상품 Double-check UI 기대값 관련으로 CIPL 제거 변경 경로와 무관합니다. 전체 테스트가 모두 통과한 것으로 간주하지 마세요.
 
+### 계약 자동화 추가 (로컬 구현)
+
+- 기존 사이드바의 두 계약 메뉴 라벨과 메뉴 목록은 그대로 두고, 해당 메뉴를 매매계약/커미션 계약 UI에 연결했습니다. PI/PO/CI/PL 코드는 계약 저장소와 분리되어 있습니다.
+- 자연어 거래 분석, 당사자·조건표, 한국어/영어 초안, 문장별 메모·수정안·revision 복구, 참고 PDF/DOCX 및 사용자 승인 선호 조항, DOCX/PDF 내보내기를 `Quotation_KEKOREA/contracts/`에 분리했습니다.
+- 계약 접근은 `CONTRACT_ACCESS_PASSWORD` 또는 PBKDF2-SHA256 해시 Secret으로 제한합니다. 계약 데이터와 파일은 서버 `SUPABASE_SECRET_KEY` 및 비공개 Storage를 사용하도록 구성했습니다. 스캔 PDF OCR은 별도 동의를 요구합니다.
+- 구현 설정·테스트 명령·운영 전 확인사항은 [README_CONTRACTS.md](../README_CONTRACTS.md)에 기록했습니다. 새 테이블/Storage 버킷은 [계약 migration](../supabase/migrations/202611050001_contracts.sql) 적용 전에는 운영에서 사용할 수 없습니다.
+- **현재 상태:** 코드와 합성 데이터 로컬 테스트는 추가됐지만 Supabase migration 적용, 실제 비밀 설정, 실제 DB 권한/RLS 검증, 앱 배포 및 운영 문서 시각 검증은 완료되지 않았습니다. 이를 배포 완료로 표현하지 마세요.
+
 ## 7. 관련 문서
 
 - 상세 설계·기능 변경 이력: [README.md](../README.md)
+- 계약 자동화 구현·설정·미검증 항목: [README_CONTRACTS.md](../README_CONTRACTS.md)
 - 유지해야 할 동작 및 수정 전 확인 절차: [AGENTS.md](../AGENTS.md)
 - SQL 스키마·시드 적용·검증: [supabase/README.md](../supabase/README.md)
 - 발표 스크립트: [Presentation/presentation_script_ko.md](../Presentation/presentation_script_ko.md)

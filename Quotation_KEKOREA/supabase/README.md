@@ -1,5 +1,11 @@
 # ECLADO catalog SQL package
 
+## Contract workspace migration
+
+The contract workflow has a separate schema migration: [202611050001_contracts.sql](migrations/202611050001_contracts.sql). Review and apply it manually in the intended Supabase project before enabling contract persistence. It creates private contract tables and a private Storage bucket; it does not change catalog tables or load contract data. Configure `SUPABASE_SECRET_KEY` only as a server-side secret. Verify RLS, table grants, RPC execution grants and bucket privacy in the live project; this migration has not yet been applied or remotely verified.
+
+See [the contract workspace setup guide](../README_CONTRACTS.md) for all application secrets, local tests and current rollout limits.
+
 Target project: `jusozufdsnpdxezxptfp`  
 Project URL: https://jusozufdsnpdxezxptfp.supabase.co  
 Status: The app now has a server-side Supabase REST catalog reader. The remote database contents and live credentials have not been verified from this workspace. Run the migration and seed only if the expected tables/data are not already present.

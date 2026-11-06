@@ -16,9 +16,10 @@ def load_env(path=None, secrets=None):
                 continue
             key, value = line.split("=", 1)
             values[key.strip()] = value.strip().strip('"').strip("'")
-    values.update({k: v for k, v in os.environ.items() if k.startswith(("OPENAI_", "SUPABASE_", "KEKOREA_"))})
+    values.update({k: v for k, v in os.environ.items()
+                   if k.startswith(("OPENAI_", "SUPABASE_", "KEKOREA_", "CONTRACT_"))})
     for key, value in (secrets or {}).items():
-        if key.startswith(("OPENAI_", "SUPABASE_", "KEKOREA_")) and value is not None:
+        if key.startswith(("OPENAI_", "SUPABASE_", "KEKOREA_", "CONTRACT_")) and value is not None:
             values[key] = str(value)
     return values
 

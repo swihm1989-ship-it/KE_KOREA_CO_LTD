@@ -404,8 +404,26 @@ page_config = {
     "CI 만들기": ("CI", "Commercial Invoice", "통관 제출용 Commercial Invoice 초안을 만듭니다."),
     "PL 만들기": ("PL", "Packing List", "선적 포장 수량과 중량을 표시하는 Packing List 초안을 만듭니다."),
 }
-if page not in page_config:
+contract_pages = {"계약서 만들기 · 준비 중", "커미션 계약서 만들기 · 준비 중"}
+if page not in page_config and page not in contract_pages:
     st.markdown('<div class="ke-header"><div class="ke-eyebrow">Coming soon</div><h1>' + page.split(" ·")[0] + '</h1><p>이 메뉴는 준비 중입니다. 현재는 PI, PO, CI, PL 생성을 사용할 수 있습니다.</p></div>', unsafe_allow_html=True)
+    st.stop()
+
+cloud_secrets = {}
+try:
+    for key in ("OPENAI_API_KEY", "OPENAI_MODEL", "SUPABASE_URL", "SUPABASE_PUBLISHABLE_KEY", "SUPABASE_SECRET_KEY",
+                "KEKOREA_USD_BENEFICIARY", "KEKOREA_USD_BANK_NAME", "KEKOREA_USD_BRANCH",
+                "KEKOREA_USD_SWIFT", "KEKOREA_USD_ACCOUNT_NUMBER", "KEKOREA_USD_BANK_ADDRESS",
+                "KEKOREA_COMPANY_SEAL_BASE64", "CONTRACT_OPENAI_MODEL",
+                "CONTRACT_ACCESS_PASSWORD", "CONTRACT_ACCESS_PASSWORD_HASH"):
+        if key in st.secrets:
+            cloud_secrets[key] = st.secrets[key]
+except Exception:
+    pass
+runtime_env = load_env(secrets=cloud_secrets)
+if page in contract_pages:
+    from Quotation_KEKOREA.contracts.ui import render_contract_page
+    render_contract_page(page, runtime_env)
     st.stop()
 
 expected_type, title, description = page_config[page]
@@ -415,17 +433,6 @@ st.warning("생성된 파일은 검토용 초안입니다. 발행·주문 전 �
 st.info("주문 내용을 직접 입력하거나 바이어 주문서 이미지를 첨부하세요. Extract를 누르면 입력 문구와 이미지가 설정된 OpenAI API로 전송됩니다.")
 st.caption("한국어·영어·중국어·인도네시아어 입력을 지원합니다. 문서는 영문으로 작성되며, 중국어 회사명과 주소는 원문 뒤에 영문 번역을 괄호로 표시합니다.")
 
-cloud_secrets = {}
-try:
-    for key in ("OPENAI_API_KEY", "OPENAI_MODEL", "SUPABASE_URL", "SUPABASE_PUBLISHABLE_KEY", "SUPABASE_SECRET_KEY",
-                "KEKOREA_USD_BENEFICIARY", "KEKOREA_USD_BANK_NAME", "KEKOREA_USD_BRANCH",
-                "KEKOREA_USD_SWIFT", "KEKOREA_USD_ACCOUNT_NUMBER", "KEKOREA_USD_BANK_ADDRESS",
-                "KEKOREA_COMPANY_SEAL_BASE64"):
-        if key in st.secrets:
-            cloud_secrets[key] = st.secrets[key]
-except Exception:
-    pass
-runtime_env = load_env(secrets=cloud_secrets)
 if not runtime_env.get("OPENAI_API_KEY"):
     st.error("OPENAI_API_KEY is missing. Set it in local .env or Streamlit Cloud Settings > Secrets.")
 

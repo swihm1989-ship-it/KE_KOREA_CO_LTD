@@ -7,6 +7,8 @@
 
 2026-11-05 업데이트: 통합 CI+PL 메뉴와 생성 경로를 제거했다. Commercial Invoice(CI)와 Packing List(PL)는 사이드바의 개별 메뉴에서 따로 생성한다.
 
+계약 자동화 기능의 구현 범위·설정·DB migration 및 검증 상태는 [README_CONTRACTS.md](README_CONTRACTS.md)를 참조한다. 계약 코드는 로컬에 추가되었으며, Supabase migration 적용과 운영 배포는 완료된 것으로 간주하지 않는다.
+
 ## 현재 동작 및 변경 보호 기준 — 2026-11-02
 
 배포 앱: https://ke-korea.streamlit.app/ (사용자가 2026-11-03 확인한 현재 주소). 이전 `kekoreacoltdgit-69eu27cywmml3jfwtdsappb.streamlit.app` 주소는 접속 확인 시 404였다.
