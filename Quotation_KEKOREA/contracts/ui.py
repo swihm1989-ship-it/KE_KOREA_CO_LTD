@@ -13,6 +13,7 @@ from Quotation_KEKOREA.contracts.editing import (
 from Quotation_KEKOREA.contracts.exports import export_contract
 from Quotation_KEKOREA.contracts.draft_exports import export_draft
 from Quotation_KEKOREA.contracts.workspace import collect_notes, propose_notes_revision
+from Quotation_KEKOREA.contracts.risk_review_ui import render_risk_review
 from Quotation_KEKOREA.contracts.models import new_snapshot, validate_snapshot
 from Quotation_KEKOREA.contracts.library import search_library
 from Quotation_KEKOREA.contracts.review_summary import review_cards
@@ -544,12 +545,15 @@ def _render_draft(repo, snapshot, state_key, env):
                 st.markdown(f"<h4>{escape(clause.get('title', ''))}</h4>", unsafe_allow_html=True)
                 for sentence in clause.get('sentences', []):
                     sentence_id = sentence['id']
+                    preview = st.session_state.get(f'contract_risk_preview_{contract_id}') or {}
+                    preview_texts = preview.get('sentences', {}) if preview.get('revision') == revision else {}
+                    displayed_text = preview_texts.get(sentence_id, sentence['text'])
                     is_open = sentence_id in opened
                     # A stable two-column row, even before the note is opened.
                     # Keeps document text aligned with a Word-style comment gutter.
                     text_col, note_col = st.columns([7, 3], gap="medium", vertical_alignment="top")
                     with text_col:
-                        if st.button(sentence['text'], key=f"contract_sentence_{contract_id}_{sentence_id}",
+                        if st.button(displayed_text, key=f"contract_sentence_{contract_id}_{sentence_id}",
                                      help="클릭해 이 문장의 메모를 열거나 선택합니다.",
                                      type='primary' if is_open else 'secondary', use_container_width=True):
                             if sentence_id not in opened:
@@ -1369,58 +1373,7 @@ def render_contract_page(page, env):
         if proposal and proposal.get('contract_id') == active_id:
             _proposal_panel(repo, snapshot, proposal, state_key)
         if snapshot.get('clauses'):
-            # Contract RAG risk-review panel (read-only; user approval required)
-            with st.expander("AI 핵심 위험 검토 · 필요할 때 실행", expanded=False):
-                st.caption("승인된 기존 조항을 검색하여 현재 초안의 중요한 위험만 최대 5개 검토합니다. "
-                           "AI 제안은 자동 적용되지 않으며 법률 자문을 대체하지 않습니다.")
-                review_key = f"contract_rag_risk_{active_id}"
-                review_state = st.session_state.get(review_key)
-                if review_state and review_state.get("revision") != snapshot["revision"]:
-                    st.session_state.pop(review_key, None)
-                    review_state = None
-                if st.button("현재 초안의 핵심 위험 3~5개 검토", key=f"rag_review_run_{active_id}_{snapshot['revision']}"):
-                    try:
-                        from Quotation_KEKOREA.contracts.review import review_contract
-                        parts = []
-                        for clause in snapshot.get("clauses", []):
-                            parts.extend(str(s.get("text") or "") for s in clause.get("sentences", []))
-                        query = " ".join(parts)[:6000]
-                        result = search_library(repo, snapshot, query, env=env)
-                        findings = review_contract(snapshot, result.get("sources", []), env=env)
-                        st.session_state[review_key] = {
-                            "revision": snapshot["revision"], "findings": findings,
-                            "sources": result.get("sources", []), "notices": result.get("notices", []),
-                        }
-                        st.rerun()
-                    except (ValueError, RuntimeError, ContractRepositoryError) as exc:
-                        st.error(str(exc))
-                if review_state:
-                    for notice in review_state.get("notices", []):
-                        st.caption(notice)
-                    findings = review_state.get("findings", [])
-                    if not findings:
-                        st.success("현재 초안에서 우선 표시할 핵심 위험을 발견하지 못했습니다. 법률 검토가 불필요하다는 뜻은 아닙니다.")
-                    for index, finding in enumerate(findings, 1):
-                        severity = {"high": "높음", "medium": "보통", "low": "낮음"}.get(finding["severity"], "검토")
-                        st.markdown(f"**{index}. [{severity}] {finding['title']}**")
-                        st.write(f"이유: {finding['reason']}")
-                        st.write(f"수정 제안: {finding['suggestion']}")
-                        sentence_id = finding["sentence_id"]
-                        sentence_text = next((s.get("text", "") for clause in snapshot["clauses"]
-                                              for s in clause.get("sentences", [])
-                                              if s.get("id") == sentence_id), "")
-                        with st.expander("검토 대상 조항 및 근거", expanded=False):
-                            st.caption(f"문장 ID: {sentence_id}")
-                            st.write(sentence_text)
-                            for source_id in finding.get("source_ids", []):
-                                source = next((x for x in review_state.get("sources", [])
-                                               if x.get("id") == source_id), None)
-                                if source:
-                                    st.caption(f"참고: {source.get('title', '')} · {source.get('locator', '')}")
-                        if st.button("이 조항을 선택하여 수정 메모 작성", key=f"rag_select_{active_id}_{snapshot['revision']}_{index}"):
-                            st.session_state[f"contract_selected_sentence_{active_id}"] = sentence_id
-                            st.info("선택했습니다. 위의 계약서 조항에서 수정 메모를 입력하세요. AI가 자동으로 계약서를 변경하지는 않습니다.")
-                        st.divider()
+            render_risk_review(repo, snapshot, state_key, env)
             with st.expander("Revision 기록 및 복원", expanded=False):
                 revisions = st.session_state.get("contract_revisions")
                 if not revisions:
