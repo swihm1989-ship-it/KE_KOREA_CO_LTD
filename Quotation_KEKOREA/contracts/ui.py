@@ -696,16 +696,30 @@ def _run_editor(repo, snapshot, state_key, env):
             st.error(str(exc))
 
 
+def _chat_history_window(messages, *, recent_limit=20):
+    """Return older and recent chat messages without mutating persisted history."""
+    if recent_limit < 1:
+        raise ValueError("recent_limit must be positive")
+    return messages[:-recent_limit], messages[-recent_limit:]
+
+
 def _contract_chat(repo, snapshot, state_key, env):
     st.markdown("### 거래 내용과 AI 분석")
     if snapshot['contract_type'] in COMMISSION_TYPES:
         st.caption("거래 조건과 주의사항을 입력하세요. 참고 계약의 구조를 응용해 양사 권리를 조정합니다. 각 트리거 D+7 달력일 이내 TT 지급을 적용하며, 연체이율은 지급자 국가와 준거법상 적용 가능성을 확인합니다.")
     st.caption("이전 대화는 채팅창에서 확인할 수 있습니다. 메시지를 입력하면 조건 분석이 진행되며, 입력 자료와 선택한 참고 문구는 동의 후 전송됩니다.")
     messages = repo.list_messages(snapshot["contract_id"])
+    # Recent messages form the conversation; earlier records stay available on demand.
+    older_messages, recent_messages = _chat_history_window(messages)
+    if older_messages:
+        with st.expander(f"이전 대화 {len(older_messages)}개 보기", expanded=False):
+            for message in older_messages:
+                with st.chat_message(message["role"]):
+                    st.write(message["content"])
     with st.container(height=420, border=True):
-        if not messages:
+        if not recent_messages:
             st.caption("대화를 시작해 거래 조건과 확인 사항을 입력하세요.")
-        for message in messages:
+        for message in recent_messages:
             with st.chat_message(message["role"]):
                 st.write(message["content"])
     use_library = st.checkbox('승인된 공통 샘플에서 관련 조항 자동 참고', value=True,
@@ -728,6 +742,8 @@ def _contract_chat(repo, snapshot, state_key, env):
     if prompt and prompt.strip():
         try:
             repo.add_message(snapshot["contract_id"], "user", prompt.strip())
+            with st.chat_message("user"):
+                st.write(prompt.strip())
             selected_context = [{"id": row["id"], "filename": row["filename"],
                                  "extracted_text": (row.get("extracted_text") or "")[:12000]}
                                 for row in refs if row["id"] in selected_refs]
@@ -738,7 +754,8 @@ def _contract_chat(repo, snapshot, state_key, env):
                 for message in library_result['notices']:
                     st.warning(message)
             prior_messages = messages + [{"role": "user", "content": prompt.strip()}]
-            analysis = analyze_trade(prior_messages, snapshot, selected_context, env=env)
+            with st.spinner("AI가 거래조건을 분석하고 있습니다..."):
+                analysis = analyze_trade(prior_messages, snapshot, selected_context, env=env)
             if analysis["contract_type"] != snapshot["contract_type"]:
                 raise ValueError("AI가 다른 계약 유형으로 분류했습니다. 새 계약 유형을 선택한 뒤 다시 분석해 주세요.")
             updated = apply_analysis(snapshot, analysis)
@@ -756,9 +773,14 @@ def _contract_chat(repo, snapshot, state_key, env):
             else:
                 saved = _save_snapshot(repo, updated, "AI extracted candidate contract terms")
                 st.session_state[state_key] = saved
-            repo.add_message(snapshot["contract_id"], "assistant",
-                             f"조건 분석 완료: {len(analysis.get('terms', []))}개 조건 후보, "
-                             f"{len(analysis.get('questions', []))}개 확인 질문.")
+            response = (f"거래조건을 분석했습니다. 조건 후보 {len(analysis.get('terms', []))}개, "
+                        f"확인할 질문 {len(analysis.get('questions', []))}개입니다.")
+            if analysis.get("questions"):
+                response += "\n\n확인할 사항:\n" + "\n".join(
+                    f"- {question}" for question in analysis["questions"][:5])
+            if snapshot.get("clauses"):
+                response += "\n\n기존 계약 내용은 자동 덮어쓰지 않았습니다. 아래 분석 후보를 검토해 적용하세요."
+            repo.add_message(snapshot["contract_id"], "assistant", response)
             st.rerun()
         except (ValueError, RuntimeError, ContractRepositoryError) as exc:
             st.error(str(exc))

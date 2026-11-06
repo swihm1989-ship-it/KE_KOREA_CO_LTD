@@ -119,6 +119,16 @@ class ContractWorkspaceUiTests(unittest.TestCase):
         self.assertIn('Second contract', labels)
         self.assertEqual(labels.count('X'), 2)
 
+    def test_contract_chat_history_keeps_older_messages_collapsed(self):
+        from Quotation_KEKOREA.contracts.ui import _chat_history_window
+        messages = [{"role": "user", "content": str(i)} for i in range(25)]
+        older, recent = _chat_history_window(messages)
+        self.assertEqual(len(older), 5)
+        self.assertEqual(len(recent), 20)
+        self.assertEqual(recent[0]["content"], "5")
+        self.assertEqual(recent[-1]["content"], "24")
+        self.assertEqual(len(messages), 25)
+
     def test_contract_delete_requires_confirmation(self):
         self.seed('delete-me', 'sale', 'Delete this contract')
         self.run_app()
