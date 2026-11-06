@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 from streamlit.testing.v1 import AppTest
 
+import Quotation_KEKOREA.contracts.ui
 from Quotation_KEKOREA.contracts.models import new_snapshot
 
 
@@ -39,6 +40,13 @@ class MemoryContracts:
 
     def contract_references(self, contract_id):
         return []
+
+    def list_exports(self, contract_id):
+        return []
+
+    def delete_contract(self, contract_id):
+        self.records.pop(contract_id, None)
+        self.revisions.pop(contract_id, None)
 
     def list_preferred_clauses(self):
         return []
@@ -94,14 +102,34 @@ class ContractWorkspaceUiTests(unittest.TestCase):
         self.seed('investment', 'investment_commission', 'Example FI')
         self.seed('trade', 'trade_commission', 'Example Referral')
         self.run_app()
-        selector = next(item for item in self.at.selectbox if item.label == '열 계약 선택')
-        self.assertEqual(selector.options, ['Example Supply', 'Example FI', 'Example Referral'])
-        selector.set_value('investment')
-        next(item for item in self.at.button if item.label == '선택한 계약 열기').click()
+        titles = {item.label for item in self.at.button}
+        self.assertTrue({'Example Supply', 'Example FI', 'Example Referral'}.issubset(titles))
+        next(item for item in self.at.button if item.label == 'Example FI').click()
         self.run_app()
         self.assertIn('## Example FI', [item.value for item in self.at.markdown])
         self.assertTrue(any('투자 대상 프로젝트/법인' in item.value['항목'].tolist()
                             for item in self.at.dataframe if '항목' in item.value.columns))
+
+    def test_contract_delete_requires_confirmation(self):
+        self.seed('delete-me', 'sale', 'Delete this contract')
+        self.run_app()
+        next(item for item in self.at.button if item.label == 'X').click()
+        self.run_app()
+        self.assertTrue(any('정말 삭제하시겠습니까?' in item.value
+                            for item in self.at.warning))
+        self.assertIn('delete-me', self.repo.records)
+        next(item for item in self.at.button if item.label == '확인').click()
+        self.run_app()
+        self.assertNotIn('delete-me', self.repo.records)
+
+    def test_contract_delete_can_be_cancelled(self):
+        self.seed('keep-me', 'sale', 'Keep this contract')
+        self.run_app()
+        next(item for item in self.at.button if item.label == 'X').click()
+        self.run_app()
+        next(item for item in self.at.button if item.label == '취소').click()
+        self.run_app()
+        self.assertIn('keep-me', self.repo.records)
 
     def test_existing_misclassified_contract_can_be_corrected_without_renaming(self):
         self.seed('existing', 'sale', 'Example FI Agreement')

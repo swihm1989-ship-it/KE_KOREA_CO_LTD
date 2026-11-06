@@ -57,6 +57,48 @@ def _records(repo):
         return []
 
 
+def _delete_contract(repo, contract_id):
+    for reference in repo.contract_references(contract_id):
+        if reference.get("storage_path"):
+            repo.delete_private_file("kekorea-contracts", reference["storage_path"])
+    for output in repo.list_exports(contract_id):
+        repo.delete_private_file("kekorea-contracts", output["storage_path"])
+    repo.delete_contract(contract_id)
+
+
+def _render_contract_delete_confirmation(repo, contract_id, title):
+    with st.container(border=True):
+        st.warning(f"정말 삭제하시겠습니까?\n\n**{title}** 계약과 연결된 기록 및 비공개 파일이 삭제됩니다.")
+    confirm_col, cancel_col = st.columns(2)
+    if confirm_col.button("확인", key=f"contract_delete_confirm_{contract_id}",
+                          type="primary"):
+        try:
+            _delete_contract(repo, contract_id)
+            st.session_state.pop("contract_delete_pending_id", None)
+            st.session_state.pop(f"contract_snapshot_{contract_id}", None)
+            st.session_state.pop(f"contract_pending_analysis_{contract_id}", None)
+            if st.session_state.get("contract_active_id") == contract_id:
+                st.session_state.pop("contract_active_id", None)
+            for key in (
+                f"contract_prompt_{contract_id}",
+                f"contract_ai_consent_{contract_id}",
+                f"contract_context_refs_{contract_id}",
+                f"contract_use_library_{contract_id}",
+                f"contract_pending_analysis_{contract_id}",
+            ):
+                st.session_state.pop(key, None)
+            for key in ("contract_revisions", "contract_pending_proposal",
+                        "contract_pending_terms", "contract_pending_proposal_key"):
+                st.session_state.pop(key, None)
+            st.success("계약과 연결 기록을 삭제했습니다.")
+            st.rerun()
+        except ContractRepositoryError as exc:
+            st.error(f"삭제가 완전히 확인되지 않았습니다. 다시 확인해 주세요. {exc}")
+    if cancel_col.button("취소", key=f"contract_delete_cancel_{contract_id}"):
+        st.session_state.pop("contract_delete_pending_id", None)
+        st.rerun()
+
+
 def _save_snapshot(repo, snapshot, summary, *, expected_revision=None):
     previous_revision = (int(expected_revision) if expected_revision is not None
                          else int(snapshot.get("revision", 1)))
@@ -658,13 +700,14 @@ def _contract_chat(repo, snapshot, state_key, env):
     st.markdown("### 거래 내용과 AI 분석")
     if snapshot['contract_type'] in COMMISSION_TYPES:
         st.caption("거래 조건과 주의사항을 입력하세요. 참고 계약의 구조를 응용해 양사 권리를 조정합니다. 각 트리거 D+7 달력일 이내 TT 지급을 적용하며, 연체이율은 지급자 국가와 준거법상 적용 가능성을 확인합니다.")
-    st.caption("자연어 입력과 조건표가 함께 사용됩니다. 입력 자료와 선택한 참고 문구는 분석 버튼을 눌렀을 때만 OpenAI로 전송됩니다.")
+    st.caption("이전 대화는 채팅창에서 확인할 수 있습니다. 메시지를 입력하면 조건 분석이 진행되며, 입력 자료와 선택한 참고 문구는 동의 후 전송됩니다.")
     messages = repo.list_messages(snapshot["contract_id"])
-    for message in messages:
-        with st.chat_message(message["role"]):
-            st.write(message["content"])
-    prompt = st.text_area("거래 내용 / 추가 조건 / 답변", height=120,
-                          key=f"contract_prompt_{snapshot['contract_id']}")
+    with st.container(height=420, border=True):
+        if not messages:
+            st.caption("대화를 시작해 거래 조건과 확인 사항을 입력하세요.")
+        for message in messages:
+            with st.chat_message(message["role"]):
+                st.write(message["content"])
     use_library = st.checkbox('승인된 공통 샘플에서 관련 조항 자동 참고', value=True,
                               key=f"contract_use_library_{snapshot['contract_id']}")
     refs = repo.contract_references(snapshot["contract_id"])
@@ -677,9 +720,12 @@ def _contract_chat(repo, snapshot, state_key, env):
             key=f"contract_context_refs_{snapshot['contract_id']}")
     consent = st.checkbox("입력한 거래 내용과 선택한 참고 문구·승인된 샘플 메모를 설정된 OpenAI API로 전송하는 데 동의합니다.",
                           key=f"contract_ai_consent_{snapshot['contract_id']}")
-    if st.button("거래 내용 분석 및 조건 정리",
-                 disabled=not prompt.strip() or not consent,
-                 key=f"contract_analyze_{snapshot['contract_id']}"):
+    prompt = st.chat_input(
+        "거래 내용, 추가 조건 또는 답변을 입력하세요",
+        key=f"contract_prompt_{snapshot['contract_id']}",
+        disabled=not consent,
+    )
+    if prompt and prompt.strip():
         try:
             repo.add_message(snapshot["contract_id"], "user", prompt.strip())
             selected_context = [{"id": row["id"], "filename": row["filename"],
@@ -827,21 +873,30 @@ def render_contract_page(page, env):
     records = _records(repo)
     if records:
         st.markdown("### 저장된 계약")
-        options = {record["id"]: record for record in records}
-        selected_id = st.selectbox(
-            "열 계약 선택", list(options),
-            format_func=lambda value: options[value]['title'],
-            index=(list(options).index(st.session_state["contract_active_id"])
-                   if st.session_state.get("contract_active_id") in options else 0),
-            key=f"contract_open_select_{page}")
-        if st.button("선택한 계약 열기", key=f"contract_open_{page}"):
-            st.session_state["contract_active_id"] = selected_id
-            st.session_state.pop(f"contract_snapshot_{selected_id}", None)
-            try:
-                _ensure_active_snapshot(repo, selected_id)
+        for record in records:
+            contract_id = str(record["id"])
+            title_col, delete_col = st.columns([12, 1])
+            if title_col.button(
+                record["title"], key=f"contract_open_{page}_{contract_id}",
+                use_container_width=True,
+            ):
+                st.session_state["contract_active_id"] = contract_id
+                st.session_state.pop(f"contract_snapshot_{contract_id}", None)
+                try:
+                    _ensure_active_snapshot(repo, contract_id)
+                    st.rerun()
+                except (ValueError, ContractRepositoryError) as exc:
+                    st.error(str(exc))
+            if delete_col.button("X", key=f"contract_delete_{contract_id}",
+                                 help=f"{record['title']} 삭제"):
+                st.session_state["contract_delete_pending_id"] = contract_id
                 st.rerun()
-            except (ValueError, ContractRepositoryError) as exc:
-                st.error(str(exc))
+        pending_delete_id = st.session_state.get("contract_delete_pending_id")
+        if pending_delete_id in options:
+            _render_contract_delete_confirmation(
+                repo, pending_delete_id, options[pending_delete_id]["title"])
+        elif pending_delete_id:
+            st.session_state.pop("contract_delete_pending_id", None)
 
     active_id = st.session_state.get("contract_active_id")
     if not active_id:
@@ -897,7 +952,12 @@ def render_contract_page(page, env):
     preferred = [clause for clause in repo.list_preferred_clauses()
                  if clause.get("active") and snapshot["contract_type"] in clause.get("contract_types", [])
                  and clause.get("language") == snapshot["language"]]
-    prompt_value = st.session_state.get(f"contract_prompt_{active_id}", "")
+    conversation_messages = repo.list_messages(active_id)
+    prompt_value = next(
+        (str(message.get("content") or "") for message in reversed(conversation_messages)
+         if message.get("role") == "user"),
+        "",
+    )
     has_language_conflict = language_conflict(prompt_value, snapshot["language"])
     use_selected_language = True
     if has_language_conflict:
@@ -997,7 +1057,7 @@ def render_contract_page(page, env):
         _export_panel(repo, snapshot, env)
 
     st.markdown("### 저장·복사·삭제")
-    copy_col, language_col, delete_col = st.columns(3)
+    copy_col, language_col = st.columns(2)
     if copy_col.button("거래 조건 초기화 후 새 계약으로 복사",
                        key=f"contract_copy_{active_id}"):
         try:
@@ -1030,20 +1090,3 @@ def render_contract_page(page, env):
             st.rerun()
         except (ValueError, ContractRepositoryError) as exc:
             st.error(str(exc))
-    delete_confirm = delete_col.checkbox("영구 계약 기록/비공개 파일 삭제를 확인",
-                                        key=f"contract_delete_confirm_{active_id}")
-    if delete_col.button("계약 삭제", disabled=not delete_confirm,
-                         key=f"contract_delete_{active_id}"):
-        try:
-            for reference in repo.contract_references(active_id):
-                if reference.get("storage_path"):
-                    repo.delete_private_file("kekorea-contracts", reference["storage_path"])
-            for output in repo.list_exports(active_id):
-                repo.delete_private_file("kekorea-contracts", output["storage_path"])
-            repo.delete_contract(active_id)
-            st.session_state.pop(state_key, None)
-            st.session_state.pop("contract_active_id", None)
-            st.success("계약 기록 및 연결된 비공개 파일 삭제 요청을 완료했습니다. Supabase 백업 보존 정책에 따른 잔여 백업은 별도 적용될 수 있습니다.")
-            st.rerun()
-        except ContractRepositoryError as exc:
-            st.error(f"삭제가 완전히 확인되지 않았습니다. 다시 확인해 주세요. {exc}")
