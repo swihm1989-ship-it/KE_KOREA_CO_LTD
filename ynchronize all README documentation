@@ -1,0 +1,15 @@
+.githooks/pre-commit
+Quotation_KEKOREA/AGENTS.md
+Quotation_KEKOREA/Presentation/README.md
+Quotation_KEKOREA/README.md
+Quotation_KEKOREA/README_CONTRACTS.md
+Quotation_KEKOREA/Team/README.md
+Quotation_KEKOREA/app.py
+Quotation_KEKOREA/contracts/commission_policy.py
+Quotation_KEKOREA/contracts/review_summary.py
+Quotation_KEKOREA/contracts/ui.py
+Quotation_KEKOREA/tests/test_contract_review_summary.py
+Quotation_KEKOREA/tests/test_readme_sync_guard.py
+README.md
+scripts/__pycache__/check_readme_sync.cpython-312.pyc
+scripts/check_readme_sync.py
