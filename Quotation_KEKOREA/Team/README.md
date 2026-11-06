@@ -190,3 +190,6 @@ uv run --with-requirements .\Quotation_KEKOREA\requirements.txt streamlit run .\
 ## 2026-11-06 CI DRAFT 출력 보존
 
 PO/PI의 확인 전 생성 차단과 달리, CI는 첨부 PI 거래가격을 변경하지 않고 상품 매칭 미확정 경고 및 DRAFT 상태를 유지해 검토용 PDF/Excel 출력을 허용합니다. 관련 회귀 테스트는 `test_product_matching_ui.py`와 `test_review_ui.py`이며 둘 다 통과해야 합니다.
+
+### 계약서 UX 업데이트 (2026-11-06)
+BOX 3 문장/댓글은 고정된 두 열로 렌더링하여 클릭 전후에 레이아웃이 이동하지 않는다. 수정 전후 비교·수동 승인·revision 동작은 동일하다. 기존 거래 문서 영역 및 위험 통제는 수정하지 않았다.

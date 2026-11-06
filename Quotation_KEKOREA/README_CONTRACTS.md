@@ -106,3 +106,6 @@ The default 7-calendar-day English payment clause prints `seven (7) calendar day
 ## 2026-11-06 CI regression scope
 
 The document-export safeguard is document-specific: PO/PI product-annotation confirmation blocks PDF/Excel generation; a CI preserving attached-PI transaction prices may produce an explicitly marked DRAFT with unresolved product matching warnings. This CI rule does not relax contract-export validation or change commission clauses.
+
+### 2026-11-06 문장 옆 인라인 메모 UI 보완
+BOX 3에서는 문장과 우측 메모 영역이 모든 행에 고정 배치된다. 문장을 누르면 해당 행 오른쪽에 입력란이 열리며 다른 메모가 자동으로 닫히지 않는다. 메모 버퍼·일괄 AI 요청·검토와 승인 동작은 그대로 유지한다. 운영 브라우저 시각 QA는 별도 검증이 필요하다.
