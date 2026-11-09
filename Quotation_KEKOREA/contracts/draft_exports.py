@@ -48,7 +48,12 @@ def export_draft(snapshot, *, formats=('docx', 'pdf'), env=None):
             raw_text = sentence['text']
             already_marked = ('[서명 전 확인]' in raw_text or '[확인 필요]' in raw_text
                               or '[TBD' in raw_text or '[TO CONFIRM]' in raw_text)
-            prefix = ('[확인 필요] ' if korean else '[TBD / UNCONFIRMED] ') if unresolved and not already_marked else ''
+            # A populated but unapproved candidate remains in the TBD appendix,
+            # rather than being redundantly marked on every prose sentence.
+            # A genuinely missing linked value still gets an inline warning.
+            missing_linked = any(term is None or not str(term.get('value') or '').strip()
+                                 for term in linked)
+            prefix = ('[확인 필요] ' if korean else '[TBD / UNCONFIRMED] ') if missing_linked and not already_marked else ''
             lines.append((prefix + raw_text, False))
     lines.append(('미확정 사항 부록 / TBD' if korean else 'Unresolved items / TBD', True))
     if cards:

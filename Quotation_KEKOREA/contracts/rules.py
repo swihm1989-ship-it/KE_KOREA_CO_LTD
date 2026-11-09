@@ -102,6 +102,20 @@ def validate_snapshot(snapshot, *, for_export=False, env=None):
                 and (issue.get("severity") == "block"
                      or (issue.get("severity") == "confirm" and not issue.get("confirmed")))):
             issues.append(issue)
+    if for_export:
+        # Final files must not silently certify text still containing explicit
+        # placeholders. DRAFT files remain available with review annotations.
+        import re
+        unresolved_pattern = re.compile(
+            r'\[(?:서명\s*전\s*확인|확인\s*필요|TBD(?:\s*/[^\]]*)?|TO\s*CONFIRM|'
+            r'TO\s*BE\s*CONFIRMED|PENDING\s*CONFIRMATION)\]', re.IGNORECASE)
+        for clause in snapshot.get('clauses', []):
+            for sentence in clause.get('sentences', []):
+                if unresolved_pattern.search(str(sentence.get('text') or '')):
+                    issues.append({'severity': 'block', 'code': 'unresolved_clause_placeholder',
+                                   'key': str(sentence.get('id') or ''),
+                                   'message': '최종 계약서 본문에 미확정 표시가 남아 있습니다: '
+                                              + str(sentence.get('text') or '')[:140]})
     if for_export and snapshot.get("pending_reconciliation"):
         issues.append({"severity": "block", "code": "pending_reconciliation",
                        "message": "조건 변경과 본문 조항의 대조가 적용 대기 중입니다."})
