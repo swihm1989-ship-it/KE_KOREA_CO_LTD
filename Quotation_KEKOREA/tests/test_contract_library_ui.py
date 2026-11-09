@@ -67,7 +67,25 @@ class LibraryDraftIntegrationTests(unittest.TestCase):
                 raise urllib.error.URLError('synthetic offline test')
             data = json.loads(json.loads(request.data)['input'][0]['content'])
             captured.append(data)
-            if 'current_snapshot' in data:
+            if data.get('drafting_task') == 'audit':
+                response = {'checks': [
+                    {'topic': topic['key'], 'status': 'complete',
+                     'clause_ids': ['c1' if topic['key'] == 'inspection' else 'c_' + topic['key']],
+                     'missing_elements': [], 'reason': 'Covered in the supplied test draft.',
+                     'evidence': [
+                         {'element': element,
+                          'sentence_id': 's1' if topic['key'] == 'inspection' else 's_' + topic['key'],
+                          'quote': ('The parties shall confirm objective inspection criteria.'
+                                    if topic['key'] == 'inspection' else ' '.join(topic['elements'].values()))}
+                         for element in topic['elements']]}
+                    for topic in data['drafting_plan']['topics']],
+                    'clause_checks': [
+                        {'clause_id': clause['id'], 'status': 'complete',
+                         'reason': 'Reviewed synthetic clause.',
+                         'evidence': [{'sentence_id': clause['sentences'][0]['id'],
+                                       'quote': clause['sentences'][0]['text']}]}
+                        for clause in data['snapshot']['clauses']]}
+            elif 'current_snapshot' in data:
                 response = dict(contract_type='sale', parties=[], terms=[], questions=[], issues=[])
             else:
                 reference = data['reference_context'][0]
@@ -76,6 +94,14 @@ class LibraryDraftIntegrationTests(unittest.TestCase):
                         {'id': 's1', 'text': 'The parties shall confirm objective inspection criteria.', 'term_ids': [],
                          'source_refs': [{'kind': 'reference', 'document_id': reference['id'],
                                          'quote': reference['extracted_text']}]}]}]}
+                for topic in data['drafting_plan']['topics']:
+                    if topic['key'] != 'inspection':
+                        response['clauses'].append({
+                            'id': 'c_' + topic['key'], 'title': topic['key'],
+                            'order': len(response['clauses']) + 1,
+                            'sentences': [{'id': 's_' + topic['key'],
+                                           'text': ' '.join(topic['elements'].values()),
+                                           'term_ids': [], 'source_refs': []}]})
             return service_fixtures.FakeResponse(response)
         with patch('Quotation_KEKOREA.contracts.ui._repository', return_value=repo), \
              patch('urllib.request.urlopen', side_effect=opener):
@@ -96,10 +122,11 @@ class LibraryDraftIntegrationTests(unittest.TestCase):
             # An explicit draft request now generates the draft during chat processing.
             # The manual generate button is intentionally disabled after clauses exist.
             self.assertTrue(repo.load_contract('contract')[-1]['snapshot']['clauses'])
-        self.assertEqual(len(captured), 2)
+        self.assertEqual(len(captured), 3)
+        self.assertEqual([row.get('drafting_task') for row in captured], [None, 'draft', 'audit'])
         self.assertNotIn('PRIVATE', json.dumps(captured))
         saved = repo.load_contract('contract')[-1]['snapshot']
         self.assertEqual(saved['title'], 'Example Supply')
         self.assertEqual(saved['library_sources'][0]['title'], 'Generic inspection reference')
         self.assertTrue(saved['clauses'][0]['sentences'][0]['source_refs'][0]['document_id'].startswith('library:'))
-        
+

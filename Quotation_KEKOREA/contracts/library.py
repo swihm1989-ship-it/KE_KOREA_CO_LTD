@@ -206,8 +206,9 @@ def _tokens(text):
                          for i in range(max(0, len(word)-1))}
 
 
-def search_library(repo, snapshot, query, *, env, embedder=None, limit=6):
-    records = repo.list_library_records(approved_only=True)
+def search_library(repo, snapshot, query, *, env, embedder=None, limit=6,
+                   records=None, keyword_only=False):
+    records = repo.list_library_records(approved_only=True) if records is None else records
     candidates, notices = [], []
     if len(records) >= 500:
         notices.append('샘플 검색 한도에 도달했습니다. 전체 검색을 위해 DB 인덱스 확장이 필요합니다.')
@@ -226,13 +227,14 @@ def search_library(repo, snapshot, query, *, env, embedder=None, limit=6):
     vector = None
     model = env.get('CONTRACT_LIBRARY_EMBEDDING_MODEL') or DEFAULT_MODEL
     try:
-        if not embedder and not env.get('OPENAI_API_KEY'):
+        if keyword_only or (not embedder and not env.get('OPENAI_API_KEY')):
             raise ValueError('Not configured')
         vector = (embedder or embed_texts)([query], env=env)[0]
         if not vector or any(not math.isfinite(v) for v in vector) or not any(vector):
             raise ValueError('Invalid query vector')
     except (RuntimeError, ValueError, IndexError):
-        notices.append('의미 검색을 사용할 수 없어 키워드로 참고 조항을 검색했습니다.')
+        if not keyword_only:
+            notices.append('의미 검색을 사용할 수 없어 키워드로 참고 조항을 검색했습니다.')
     query_tokens = _tokens(query)
     ranked = []
     for reference_id, manifest, chunk in candidates:
@@ -265,3 +267,17 @@ def search_library(repo, snapshot, query, *, env, embedder=None, limit=6):
                                              and m.embedding_model == model for _,m,c in candidates)
     return {'references': references, 'sources': sources, 'mode': 'hybrid' if has_vectors else 'keyword',
             'notices': list(dict.fromkeys(notices))}
+
+
+def search_library_topics(repo, snapshot, topics, *, env):
+    """One approved-record read; local per-topic search adds no embedding API calls."""
+    records = repo.list_library_records(approved_only=True)
+    references, sources = {}, {}
+    for topic in topics:
+        result = search_library(repo, snapshot, topic['query'], env=env, records=records,
+                                keyword_only=True, limit=3)
+        for reference in result['references']:
+            references[reference['id']] = reference
+        for source in result['sources']:
+            sources[source['id']] = source
+    return {'references': list(references.values()), 'sources': list(sources.values())}

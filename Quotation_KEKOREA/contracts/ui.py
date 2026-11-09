@@ -33,10 +33,11 @@ from Quotation_KEKOREA.contracts.rules import (
     LABELS, TYPE_REQUIRED, apply_analysis, validate_snapshot as validate_rules,
 )
 from Quotation_KEKOREA.contracts.service import (
-    analyze_trade, conversation_response_language, extract_reference_page, generate_draft, language_conflict,
+    analyze_trade, conversation_response_language, extract_reference_page, language_conflict,
     propose_revision, propose_term_revision,
 )
 from Quotation_KEKOREA.contracts.flow import should_generate_draft, select_new_questions
+from Quotation_KEKOREA.contracts.drafting import generate_reviewed_draft as generate_draft
 
 
 TYPE_LABELS = {
@@ -1166,7 +1167,8 @@ def _contract_chat(repo, snapshot, state_key, env):
             with st.chat_message("user"):
                 st.write(prompt.strip())
             selected_context = [{"id": row["id"], "filename": row["filename"],
-                                 "extracted_text": (row.get("extracted_text") or "")[:12000]}
+                                 "extracted_text": row.get("extracted_text") or "",
+                                 "source_locations": row.get("source_locations") or []}
                                 for row in refs if row["id"] in selected_refs]
             library_result = {'references': [], 'sources': [], 'notices': []}
             if use_library:
@@ -1176,7 +1178,9 @@ def _contract_chat(repo, snapshot, state_key, env):
                     st.warning(message)
             prior_messages = messages + [{"role": "user", "content": prompt.strip()}]
             with st.spinner("AI가 거래조건을 분석하고 있습니다..."):
-                analysis = analyze_trade(prior_messages, snapshot, selected_context, env=env)
+                analysis = analyze_trade(prior_messages, snapshot, [
+                    {**ref, 'extracted_text': ref['extracted_text'][:12000], 'source_locations': []}
+                    for ref in selected_context], env=env)
             if analysis["contract_type"] != snapshot["contract_type"]:
                 raise ValueError("AI가 다른 계약 유형으로 분류했습니다. 새 계약 유형을 선택한 뒤 다시 분석해 주세요.")
             # First conversation response can ask up to two questions; after the
@@ -1199,8 +1203,8 @@ def _contract_chat(repo, snapshot, state_key, env):
                 with st.spinner("확인되지 않은 항목을 표시하고 계약서 초안을 작성합니다..."):
                     updated = generate_draft(
                         updated, preferred, env=env, reference_context=selected_context,
-                        transaction_messages=prior_messages)
-                updated["library_sources"] = library_result["sources"]
+                        transaction_messages=prior_messages, repo=repo, use_library=use_library,
+                        initial_library_sources=library_result['sources'])
                 made_draft = True
             if snapshot.get("clauses"):
                 st.session_state[f"contract_pending_analysis_{snapshot['contract_id']}"] = {
@@ -1468,7 +1472,8 @@ def render_contract_page(page, env):
                         {
                             "id": reference["id"],
                             "filename": reference["filename"],
-                            "extracted_text": (reference.get("extracted_text") or "")[:12000],
+                            "extracted_text": reference.get("extracted_text") or "",
+                            "source_locations": reference.get("source_locations") or [],
                         }
                         for reference in refs if reference["id"] in selected_reference_ids
                     ]
@@ -1481,8 +1486,9 @@ def render_contract_page(page, env):
                     draft = generate_draft(
                         snapshot, preferred, env=env, reference_context=reference_context,
                         transaction_messages=repo.list_messages(active_id),
+                        repo=repo, use_library=st.session_state.get(f'contract_use_library_{active_id}', True),
+                        initial_library_sources=library_result['sources'],
                     )
-                    draft['library_sources'] = library_result['sources']
                     saved = _save_snapshot(repo, draft, "AI generated contract draft")
                     st.session_state[state_key] = saved
                     st.success(f"초안을 revision {saved['revision']}로 저장했습니다.")

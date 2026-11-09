@@ -1,284 +1,236 @@
-# KE KOREA Quotation App — 팀 공유 안내
+# KE KOREA — 팀 공유 및 구현 안내
 
-**기준일: 2026-11-06**
-이 문서는 현재 저장소의 코드와 테스트를 기준으로 구현, 데이터 흐름, 오류 개선 내역 및 새 에이전트의 연동 원칙을 요약합니다. 기존 [README.md](../README.md)는 설계·변경·검증의 상세 기록이며, 실제 변경 시에는 [AGENTS.md](../AGENTS.md)의 보호 규칙과 코드를 우선 확인하세요. 이 문서는 배포 상태나 외부 서비스의 현재 가동을 보증하지 않습니다.
+기준일: **2026-11-09**. 저장소 코드·SQL·의존성·로컬 테스트 기록을 기준으로 작성했습니다. 코드 구현, 실제 DB 적용, 로컬 실행, 운영 배포는 서로 구분합니다. 이 문서는 현재 구조를 설명하며 과거 변경 이력은 [프로젝트 README](../README.md)를 참고하세요.
 
-## 1. 한눈에 보기
+## 1. 먼저 알아야 할 구현 현황
 
-Streamlit 앱에서 사용자가 PO(구매주문서), PI(견적/Proforma Invoice), CI(Commercial Invoice), PL(Packing List)을 각각 선택하고 텍스트 또는 이미지/PDF를 입력하면, 추출된 거래 초안을 검토·수정한 뒤 PDF/Excel 파일로 다운로드합니다. CI와 PL은 별도 메뉴와 별도 문서로 생성합니다.
+| 기능/기술 | 현재 구현 | 근거 및 설명 |
+| --- | --- | --- |
+| 사용자 화면 | Streamlit | [app.py](../app.py), [contracts/ui.py](../contracts/ui.py). React/Next.js 앱이 아님 |
+| AI 추출·작성 | OpenAI Responses API 직접 호출 | Python `urllib.request`로 요청하고 JSON을 검증. [extractor.py](../agent/extractor.py), [service.py](../contracts/service.py) |
+| LangChain / LangGraph | 사용하지 않음 | 의존성·실행 코드에 없음. 로더·검색·체인·상태 전이를 직접 구현 |
+| MCP | 앱 런타임에 구현되지 않음 | MCP 서버/클라이언트, 도구 등록·발견 및 MCP를 통한 DB 호출 없음. 개발 환경에서 제공되는 도구와 배포 앱의 기능은 별개 |
+| 에이전트 오케스트레이션 | Python 함수와 규칙 모듈 | 거래 문서의 비동기 작업 관리와 계약 초안의 순차 파이프라인. 여러 자율 에이전트의 협업 시스템은 아님 |
+| 장기 저장소 | Supabase PostgreSQL + Storage | 계약·대화·revision·메모·참고자료·출력 기록 영속 저장. 아래 저장소 표 참고 |
+| 공통 지식 재사용/RAG | 승인된 참고 메모 검색 후 프롬프트에 전달 | 임베딩/키워드 혼합 검색과 신규 초안용 조항별 키워드 검색. [library.py](../contracts/library.py) |
+| 벡터 저장 방식 | JSONB manifest 안의 숫자 배열 | 기본 512차원 임베딩. pgvector 인덱스·FAISS·Chroma·Pinecone 미사용 |
+| 자동학습 / fine-tuning | 구현되지 않음 | 계약 저장이나 파일 업로드만으로 모델 가중치를 학습하지 않음 |
+| 외부 실행 | 사용자 검토용 문서 생성 | 실제 발주·송신·이메일·전자서명·결제 자동 실행 없음 |
+
+## 2. 기능별 폴더 지도
 
 ```text
-사용자 입력·첨부 → 파일 검증/PDF 페이지 처리 → OpenAI 구조화 추출
- → 근거·누락·충돌 검토 → 제품/거래처 확인 및 가격 조회
- → Decimal 기반 계산·필수 검토 → PDF/Excel 초안 다운로드
+KE_KOREA_CO_LTD/
+├─ Quotation_KEKOREA/
+│  ├─ app.py                 # 앱 진입점·메뉴·거래 문서 연결
+│  ├─ agent/                 # PO/PI/CI/PL 추출·상품/가격·계산·PDF/Excel
+│  ├─ contracts/             # 계약 작성·검색·검토·수정·저장·PDF/DOCX
+│  ├─ tests/                 # 공식 회귀 테스트와 Streamlit AppTest
+│  ├─ supabase/              # DB 마이그레이션·가격 SQL·적용 안내
+│  ├─ scripts/               # 샘플 등록·회사 정보·직인·가격 시드 관리
+│  ├─ assets/                # 공개 로고 등 문서 자산
+│  ├─ private/               # Git 제외 비공개 자료·설정용 자료
+│  ├─ outputs/               # Git 제외 생성물; 영속 저장소로 보장하지 않음
+│  ├─ Team/                  # 이 문서
+│  └─ Presentation/          # 발표용 README 및 기존 발표 스크립트
+├─ archive/bugfixes/         # 과거 수정 패키지; 실행 앱과 구분
+├─ archive/backups/          # 과거 소스·문서 백업
+├─ logs/tests/               # 테스트 실행 기록
+├─ logs/preview/             # 로컬 임시 서버 로그
+├─ docs/superpowers/plans/   # 구현 계획·작업 범위 기록
+├─ scripts/                 # README 동기화 검사
+└─ render.yaml              # Render 배포 설정
 ```
 
-**자동 발주·송장 발행·이메일 발송은 하지 않습니다.** 결과는 검토용 초안이고, 문서 번호 발급이나 영구적인 배송/재고 시스템 연동도 구현 범위가 아닙니다.
+과거 폴더의 이전/현재 위치는 [보관함 안내](../../archive/README.md)와 [이동 명세](../../archive/move_manifest_2026-11-09.json)에 있습니다. `archive`의 보조 테스트는 과거 수정본과 함께 보존한 기록물입니다. 현재 테스트는 `Quotation_KEKOREA/tests`에서 실행합니다. 과거 적용 스크립트는 당시 경로·코드 형태를 가정하므로 현재 소스에 재실행하지 마세요.
 
-## 2. 기능과 안전 장치
+## 3. 계약서 에이전트 구현
 
-### 입력과 정보 추출
+### 3.1 화면과 역할
 
-- 텍스트와 PNG/JPG/JPEG/WEBP/PDF를 지원합니다. 최대 5개, 파일당 10 MB, 합계 20 MB입니다.
-- 사용자가 추출을 실행할 때 첨부 파일과 요청 문맥을 OpenAI Responses API에 전송하고 정해진 구조의 JSON 초안을 받습니다. 근거 인용, 미확인 필드, 충돌 정보를 함께 검토합니다.
-- PDF는 PyMuPDF로 모든 페이지를 처리합니다. 페이지에 텍스트가 충분하면 텍스트도 추출하고, 텍스트가 적은 페이지는 이미지로 렌더링해 스캔 문서 인식에 보탭니다. 원본 PDF도 추출 요청에 포함합니다.
-- 추출은 후보 초안을 만들 뿐입니다. 문서 내용은 지시로 실행하지 않으며, 필수 정보나 가격 근거가 부족하면 사용자가 확인할 때까지 내보내기를 막습니다.
+- **BOX 1:** 거래 설명·참고자료 선택·AI 전송 동의·조건 분석·초안 생성.
+- **BOX 2:** 조건 및 당사자 직접 입력·상태 확인·본문 조건 후보 추출·지급조건 관리.
+- **BOX 3:** 문장별 미리보기·메모·위험 검토·수정안 비교/승인·DRAFT/FINAL 다운로드.
+- 계약 유형은 `sale`, `trade_commission`, `investment_commission`; 출력 언어는 한국어/영어입니다. 한국어·영어·인도네시아어 조건 이름은 표준 키로 정규화하지만 인도네시아어 계약서 출력 모드를 제공하는 것은 아닙니다.
+- [flow.py](../contracts/flow.py)는 초안 요청 의도와 초기 질문 수를 제어합니다. LangGraph 상태 그래프가 아닙니다.
 
-### 상품·가격 식별
+### 3.2 거래조건과 본문은 별도 데이터
 
-- [product_matching.py](../agent/product_matching.py)는 이름, SKU/코드, 용량·단위·입수량 등 식별 근거를 정규화해 유사 후보를 찾습니다. 유사도만으로 가격을 확정하지 않으며, SKU·제품 변형·용량 충돌은 자동 매칭을 막습니다.
-- 유일하고 호환되는 후보가 90% 이상이면 가격 후보를 불러오되 **Double-check/확인**을 거쳐야 합니다. 68% 이상~90% 미만은 후보만 제시하고 자동 가격을 붙이지 않습니다. 그보다 낮거나 충돌하면 미확정으로 둡니다.
-- 사용자는 미확정 제품명을 직접 입력할 수 있습니다. 해당 이름은 초안/출력에 보존하고, 카탈로그로 확인되지 않은 제품에는 카탈로그 가격을 임의로 적용하지 않습니다.
-- 현재는 외부 벡터 DB/임베딩을 사용하지 않습니다. 작은 카탈로그의 SKU·용량 제약을 보존하는 결정론적 비교를 우선합니다. 향후 벡터 검색은 후보 제안에만 보조적으로 사용하고 가격 확정 근거를 대체하지 않아야 합니다.
-- [pricing.py](../agent/pricing.py)는 문서 역할, 거래처, 제품 식별 및 통화를 함께 확인합니다. PO는 원본 문서의 판매자·통화·가격과 무관하게 제품명/용량을 대조해 ECLADO의 검증된 KRW 매입가를 적용하고 가격 기준도 주문 수량 단위(예: PCS)로 정규화하며, 일치가 불확실하거나 가격이 없으면 해당 행을 검토 대상으로 남깁니다. PI는 Dear Glow 판매가격을 사용합니다. CI는 반드시 첨부 PI의 거래가격을 보존하며, PI가 없으면 카탈로그 가격으로 대체하지 않고 생성을 막습니다. CI와 PL은 제품명·용량 매칭 및 Double-check만 수행하고 ECLADO 카탈로그 단가는 적용하지 않습니다. PL은 가격 없는 포장명세서로 유지됩니다. Supabase 오류나 잘못된 자격 증명에 오래된 가격을 성공처럼 적용하지 않습니다.
+[models.py](../contracts/models.py)의 snapshot은 `parties`, `terms`, `clauses`, `issues`, `reference_ids`, `omissions`, `revision` 등을 보관합니다.
 
-### 문서 계산·검토·출력
+- 조건 상태: `suggested`는 미승인 후보, `confirmed`는 사용자 확정, `missing`은 미정입니다. AI 추출은 자동 확정하지 않습니다.
+- 본문에 숫자가 있다고 조건표가 자동 확정되는 것은 아닙니다. [clause_terms.py](../contracts/clause_terms.py)로 본문 근거를 다시 추출해 후보를 채우고 사용자가 확인합니다.
+- [normalize_terms.py](../contracts/normalize_terms.py)는 조건 이름의 명시적 별칭을 정규화하고 수치·통화·단위·Incoterm 문맥을 비교합니다. 단가와 총액, 수량과 단위, 인도조건과 통지/일정 문구를 구분합니다.
+- 기존 값과 충돌하는 후보는 조용히 덮어쓰지 않습니다. `4`와 `5`는 다르며 `5`와 `5.00`은 같은 수치일 수 있습니다. `$`만으로 USD를 확정하지 않습니다.
 
-- [trade_documents.py](../agent/trade_documents.py)는 수량·단가·통화·금액 계산을 Decimal로 수행합니다. 비어 있는 수량과 명시적 0은 다릅니다. 명시된 0 수량은 행과 0 금액으로 유지합니다.
-- [promotions.py](../agent/promotions.py)는 PI/PO 기존 행에 명시된 Buy-N-Get-M 행사를 적용합니다. 유상 수량·FOC 수량·출고 수량을 나누며, 증정분에 금액을 중복 부과하지 않습니다.
-- 샘플 PI 행은 거래별 수동 입력이며 카탈로그 가격·일반 할인·행사로 덮어쓰지 않습니다.
-- [packing_review.py](../agent/packing_review.py)는 공급처 포장 합계와 계산 합계를 비교합니다. 단위는 구분하고, 사용자가 승인하기 전에는 합계를 수정하지 않으며 컨테이너 정보를 추측하지 않습니다.
-- [ci_import.py](../agent/ci_import.py)는 첨부 PI에서 CI 초안을 준비할 때 가격·수량 근거를 보존하고 은행/결제 정보를 제외합니다. 원문 행에 할인 표기가 없으면 누락 할인율을 0%로 처리하고, 할인 표기가 있으나 값이 누락된 경우는 재확인합니다. CI에 PI가 첨부되지 않으면 transaction price를 임의로 채우지 않고 차단합니다. CI/PL 상품은 ECLADO 이름·용량만 확인하며 PL에 가격은 적용하지 않습니다.
-- 필수 누락, 근거 없는 값, 미확정 제품 및 계산 충돌은 검토 화면에서 해결해야 합니다. PI에만 KE KOREA 은행정보를 출력합니다.
-- [renderers.py](../agent/renderers.py)와 [pi_pdf.py](../agent/pi_pdf.py)는 PDF/Excel 문서와 레이아웃을 생성합니다. HTML 렌더러도 코드에 있으나 앱 다운로드 선택지는 PDF/Excel입니다.
+### 3.3 신규 초안 품질 파이프라인
 
-## 3. 코드 구조 및 데이터 경계
+```mermaid
+flowchart LR
+  A[거래조건 정리] --> B[조항 목차와 작성 기준]
+  B --> C[선택 자료와 승인 메모에서 주제별 검색]
+  C --> D[상세 초안 작성]
+  D --> E[누락·충돌·문장 근거 검사]
+  E --> F{보완 필요}
+  F -->|예| G[해당 조항만 1회 보완 후 재검사]
+  F -->|아니오| H[기존 화면에서 사용자 검토]
+  G --> H
+```
 
-| 위치 | 책임 |
+[새 drafting.py](../contracts/drafting.py)는 기존 두 생성 진입점에서 호출합니다. 화면·버튼·대화 흐름·저장/승인 절차는 유지합니다.
+
+- 기본 작성 기준은 매매계약 13개, 커미션 계약 12개 주제입니다. 업무 범위·지급·기간·해지·책임·불가항력·비밀유지·통지·준거법·분쟁 해결·일반 조항과 유형별 인도/검수 또는 커미션 범위를 포함합니다. 명시적으로 승인된 준거법·분쟁 해결 제외 결정은 존중합니다.
+- 불가항력은 사건 요건, 통지, 영향 완화, 이행 재개, 장기화 시 처리를 확인합니다. 다른 조항도 조건·의무·절차·효과를 작성하도록 지시하며 문장 길이만으로 품질을 평가하지 않습니다.
+- 선택 첨부자료 전체에서 문단/페이지를 연결한 구간을 검색합니다. 주제별 최대 3개 새 구간, 발췌 합계 최대 100,000자입니다. 거래조건 분석의 기존 앞 12,000자 제한과 상세 작성용 검색은 별도입니다. 원문 전체를 모델에 무제한 전송하는 방식은 아닙니다.
+- 모든 계획 주제의 구성요소와 실제 생성된 모든 조항에 검사 결과를 요구합니다. 문장 ID·인용 문구가 실제 본문에 존재하는지 확인합니다. 이 검증은 의미/법적 정당성의 결정적 증명이 아닙니다.
+- 문제가 있으면 해당 조항만 1회 보완하고 다시 검사합니다. 무관한 조항·기존 문장 ID·확정 조건·보호된 커미션 지급 조항을 보존합니다. 남은 문제는 미확정 검토 항목으로 전달합니다.
+- 내부 생성/검사 호출은 통상 2회, 최대 4회입니다. 요청별 타임아웃 최대 60초, 경과시간 예산 180초를 적용합니다. 네트워크 제한은 UI의 즉시 취소 타이머가 아닙니다. 기존 거래조건 분석과 기존 검색/임베딩 호출은 이 횟수에 별도입니다.
+- 잘못된 응답·허위 인용·범위 밖 수정·시간 초과는 중간 초안을 저장하지 않습니다. 이미 조항이 저장된 계약은 자동 재작성하지 않습니다. 모델을 자동 변경하지 않습니다.
+
+### 3.4 수정·위험 검토·승인
+
+| 기능 | 구현 및 경계 |
 | --- | --- |
-| [app.py](../app.py) | Streamlit 메뉴/UI, 추출·검토·내보내기 연결, Supabase 로딩, 세션 작업 관리 |
-| [agent/attachments.py](../agent/attachments.py), [agent/extractor.py](../agent/extractor.py) | 파일 제한·PDF 전처리·OpenAI 입력 및 구조화 추출 |
-| [agent/product_matching.py](../agent/product_matching.py), [agent/pricing.py](../agent/pricing.py) | 제품 후보와 역할·통화별 카탈로그 가격 |
-| [agent/counterparties.py](../agent/counterparties.py), [agent/workflow_state.py](../agent/workflow_state.py) | 거래처 보완 정보 및 메뉴별 브라우저 세션 상태 |
-| [agent/trade_documents.py](../agent/trade_documents.py), [agent/promotions.py](../agent/promotions.py), [agent/packing.py](../agent/packing.py), [agent/packing_review.py](../agent/packing_review.py) | 금액·행사·포장 계산 및 승인 |
-| [agent/ci_import.py](../agent/ci_import.py), [agent/review_fields.py](../agent/review_fields.py) | PI→CI 준비 및 필수 항목 검토 |
-| [agent/renderers.py](../agent/renderers.py), [agent/pi_pdf.py](../agent/pi_pdf.py), [agent/branding.py](../agent/branding.py), [agent/seal_storage.py](../agent/seal_storage.py) | 문서 파일·브랜드·비공개 회사 직인 |
-| [supabase/migrations/](../supabase/migrations/), [supabase/README.md](../supabase/README.md) | Supabase 테이블, 접근 정책, 적용 및 검증 안내 |
-| [tests/](../tests/) | 매칭·가격·계산·UI 상태·첨부·PDF·출력 회귀 테스트 |
+| 문장별 수정 | [editing.py](../contracts/editing.py), [service.py](../contracts/service.py): 기존 문장 ID와 원문을 기준으로 수정안을 검증 |
+| 메모 일괄 수정 | [workspace.py](../contracts/workspace.py): 계약·문장·base revision이 유효한 메모만 모음 |
+| AI 핵심 위험 검토 | [review.py](../contracts/review.py), [risk_review_workspace.py](../contracts/risk_review_workspace.py): 전체를 최대 10문장 단위로 검토, 묶음당 최대 5개 소견, 결과는 5건씩 표시 |
+| 위험별 추천안 | 균형형·권리 보호형·보수적 협의형 3안; 편집 가능한 변수와 미리보기. 적용 버튼은 영구 저장 승인이 아님 |
+| 통합 최종 수정 요청 | [final_merge.py](../contracts/final_merge.py): 메모와 위험 추천안의 같은 문장 충돌을 검사한 뒤 비교·승인 경로로 전달 |
+| revision 저장 | [repository.py](../contracts/repository.py)와 DB RPC: 기대 revision 확인·행 잠금·새 snapshot 저장으로 동시 수정 충돌 방지 |
+| 이전 메모 복구 | 이전 revision 메모는 자동 재적용하지 않음. 현재 계약/문장의 유효성을 확인하고 명시적으로 가져옴 |
+| 지급 정책 | [commission_policy.py](../contracts/commission_policy.py): 트리거·지급기한·계좌·검토 근거를 분리. 기본 D+7 제안과 사용자가 합의한 조건을 구분하며 보호 조항은 조건표 경로로 갱신 |
 
-Supabase 가격 테이블은 제품, 수입 스냅샷, 매입가 및 구매자 판매가를 분리합니다. 거래처 디렉터리는 별도 마이그레이션/로더를 사용합니다. 앱은 서버 측 키로 REST API를 호출합니다. 회사 직인은 비공개 Storage에서 내려받아 기대 SHA-256과 대조합니다. 실제 가격표/연락처/비밀키는 소스·공개 README·테스트에 복사하지 마세요. 자세한 SQL 적용·비공개 시드 절차는 [Supabase 안내](../supabase/README.md)를 따릅니다.
+새 초안의 품질 검사는 초안 생성 내부 단계이며, 사용자가 실행하는 기존 위험 검토/추천 기능과 별도입니다. 기존 `최종 수정 요청`은 법률적 FINAL 승인이나 전자서명이 아닙니다.
 
-`workflow_state.py`의 초안 상태는 현재 브라우저 세션 범위이며 브라우저/서버 재시작을 넘어 영구 저장되지 않습니다. 메뉴 간 이동 시에는 각 문서의 입력·첨부·진행 중 작업을 분리해 보존합니다.
+## 4. 장기 저장소와 RAG를 정확히 구분하기
 
-## 4. 오류를 어떻게 찾아 고쳤는가
+### 4.1 저장되는 정보
 
-아래는 저장소의 재현·수정 기록에서 확인되는 대표 사례입니다. **PDF의 특정 사용자 파일이 실패한 정확한 원인은 그 파일이 없어 확정하지 않았습니다.** 현재 추가된 PDF 경로는 해당 입력군을 보강한 것이며, 모든 스캔/손상/암호화 PDF의 인식을 보장하지 않습니다.
+| 정보 | 위치 | 지속성과 재사용 방식 |
+| --- | --- | --- |
+| 문서별 입력·첨부·비동기 작업 | Streamlit session + [workflow_state.py](../agent/workflow_state.py) | 브라우저 세션 상태. 서버 재시작 후 영속 복구 보장 없음 |
+| 계약 기본정보 | `kekorea_contracts` | 계약 목록과 현재 revision |
+| 계약 본문/조건 이력 | `kekorea_contract_revisions.snapshot` JSONB | revision별 저장·조회·복구 |
+| 계약별 대화 | `kekorea_contract_messages` | DB에 저장. 현재 조회 상한 200건, AI 분석/작성은 최근 최대 30개 메시지 사용 |
+| 메모·수정 제안 | `kekorea_contract_annotations` | 문장 ID·base revision·제안/적용 상태 저장 |
+| 계약별 첨부·공통 샘플 | `kekorea_contract_references` + 비공개 Storage | 계약별 원본과 승인 기반 공통 재사용을 구분 |
+| 승인된 선호 문구 | `kekorea_preferred_clauses` | 유형·언어·활성 여부에 맞는 문구를 생성에 전달 |
+| 출력 기록/파일 | `kekorea_contract_exports` + 비공개 `kekorea-contracts` 버킷 | revision·형식·파일 해시·경로 저장 |
+| 제품·가격·거래처 | `kekorea_catalog_imports`, `kekorea_products`, `kekorea_purchase_prices`, `kekorea_buyer_prices`, `kekorea_counterparties` | 거래 문서의 조회·보완 기준 데이터 |
 
-| 증상 | 확인한 원인 또는 한계 | 수정·오류 처리 | 회귀 검증 |
-| --- | --- | --- | --- |
-| 주문의 상품 가격이 다수 누락됨 | 일부 주문은 `Code` 열 값이 상품명 괄호에 붙어 있어 문자열 동일 비교가 실패했습니다. | 코드와 이름을 분리하고 구두점·공백·용량 표기를 안전하게 정규화했습니다. 불일치 행만 검토 대상으로 남깁니다. | `test_product_matching.py`, 가격 및 UI 테스트 |
-| 한 행이 미확정일 때 맞는 행의 가격도 누락됨 | 제품 분류가 미확정인 PI/CI에서 부분 일치를 보완하지 않는 경로가 있었습니다. | 거래처·문서 역할·통화를 확인한 후 일치한 행만 가격 조회하고 나머지는 보류합니다. | `test_sale_partial_catalog.py` |
-| 비슷한 오타 제품을 자동으로 잘못 확정할 위험 | OCR 유사도만으로는 다른 용량/SKU/제품 변형을 구분할 수 없습니다. | 호환성 제약과 점수 구간을 두고, 중간 점수는 후보만, 높은 점수도 사용자 확인 후 사용합니다. 직접 입력 제품명은 보존합니다. | `test_product_matching.py`, `test_product_matching_ui.py` |
-| PDF 업로드에서 텍스트가 안 읽히거나 추출 오류 | PDF는 원본 파일 입력 경로가 있었지만 스캔 페이지 텍스트를 앱에서 별도 추출하는 경로가 부족했습니다. 특정 오류 파일은 확보하지 못해 과거 오류 원인을 단정할 수 없습니다. | PDF 헤더/크기 등 입력 검증, PyMuPDF 페이지별 텍스트 처리, 텍스트가 적은 페이지 이미지 렌더링, API 응답 제한 등의 구체적 오류 안내를 추가했습니다. | `test_pdf_inputs.py`, `test_extractor.py` |
-| 메뉴를 이동한 뒤 입력/완료 작업이 사라지거나 오래된 결과가 덮어씀 | 공용 Streamlit 상태와 비동기 작업이 메뉴별 생명주기를 충분히 분리하지 못했습니다. | 메뉴별 상태와 작업 스냅샷을 분리하고 오래된 결과·중복 제출을 막으며 오류 후 재시도를 허용합니다. | `test_workflow_state.py`, `test_workflow_ui.py` |
-| 수량이 0인데 계산이 막히거나 값이 누락됨 | `0`을 미입력으로 취급하면 유효한 명시적 0과 `None`을 구별하지 못합니다. | `None`만 미입력으로 처리하고 0 수량 행 및 0 금액을 보존합니다. | `test_trade_documents.py` 등 계산 테스트 |
-| 공급처 PL 합계와 계산 합계가 다름 | 원본 합계와 정규화 계산을 자동으로 동일시하거나 단위/컨테이너를 추정하면 오기 위험이 있습니다. | 차이를 표시하고 사용자 승인 전 수정하지 않습니다. 단위를 분리하고 모르는 컨테이너 수는 생성하지 않습니다. | `test_packing_approval.py`, `test_packing_workflow.py` |
-| 첨부 PI의 결제 정보가 CI로 넘어갈 위험 | PI와 CI는 은행정보 노출 규칙이 다릅니다. | PI→CI 변환에서 은행/계좌/SWIFT/결제 정보를 제거하고 원본의 가격·수량·근거는 보존합니다. | `test_ci_pi_import.py`, `test_ci_pi_import_ui.py` |
-| Supabase·직인 연결 문제를 정상처럼 보이게 할 위험 | 누락된 테이블/잘못된 키/불일치 직인은 생성 실패로 처리해야 합니다. | 오류를 사용자에게 명시합니다. 자격 증명이 없는 경우에만 로컬 가격 스냅샷을 경고와 함께 선택할 수 있으며, API 실패를 조용히 오래된 데이터로 대체하지 않습니다. 직인은 비공개 경로와 해시를 확인합니다. | 카탈로그·거래처·직인 테스트 |
+DB 정의는 [계약 마이그레이션](../supabase/migrations/202611050001_contracts.sql), [가격 마이그레이션](../supabase/migrations/202610300001_eclado_catalog.sql), [거래처 마이그레이션](../supabase/migrations/202611030001_counterparties.sql)에 있습니다. SQL 파일 존재만으로 운영 DB에 적용됐다고 간주하지 않습니다.
 
-문서에 적힌 재현 정보는 해결 범위와 검증 방법을 설명합니다. 실제 배포에서 발생한 모든 오류나 특정 PDF의 오류 원인을 포괄하는 사후 분석은 아닙니다.
+### 4.2 공통 기억이 만들어지는 과정
 
-## 5. 팀원이 새 에이전트를 붙일 때
+`원본 등록 → 비공개 보관/해시 확인 → 승인 대기 → 관리자가 익명화 참고 메모 작성·검토 → 명시적 승인 → 검색 재사용`
 
-현재 앱은 하나의 Streamlit 오케스트레이션 경로이며 범용 에이전트 플러그인 API나 에이전트 간 메시지 버스는 없습니다. 아래는 **미래 연동을 위한 권장 계약**이지 이미 구현된 확장 API가 아닙니다.
+- [library.py](../contracts/library.py)의 원본 ID는 파일 SHA-256 기반이며 같은 원본의 중복 등록을 확인합니다. 원본 파일은 `kekorea-contracts/library/sources/...`에 보관합니다.
+- 공통 레코드는 `contract_id=NULL`입니다. `source_locations` JSONB의 관리용 manifest에 제목·유형·언어·활성 상태·revision·검토 시각·승인된 chunk·임베딩을 저장합니다.
+- 관리자가 지정한 실제 원문 위치에 연결된 참고 메모를 승인합니다. 등록만 한 `library_pending`과 승인된 `library_approved`를 구분합니다.
+- [promote_reference.py](../contracts/promote_reference.py)는 계약 소속·원본 해시를 확인하고 기존 첨부를 공통 승인 대기로 별도 등록합니다. 원본 계약에서 자동 삭제하거나 즉시 검색에 공개하지 않습니다.
+- 연락처·일부 숫자/비율 패턴 차단은 보조 검사입니다. 회사명·개인정보 제거를 자동으로 완벽하게 수행하는 익명화 엔진은 아닙니다. 관리자 검토가 필요합니다.
+- **계약 저장 = 장기 기록, 승인된 메모 검색 = 지식 재사용, 모델 가중치 학습 = 미구현**입니다. 모든 계약이나 모든 대화를 전역 기억으로 자동 공유하지 않습니다.
 
-1. 새 에이전트는 내부 가격 테이블에 직접 쓰지 말고 기존 `extract_trade_data` 초안 구조와 호환되는 거래 데이터 객체를 반환하도록 어댑터를 둡니다. 문서 종류, 당사자, 행별 품명/코드/용량/수량/단가/통화, 근거, 누락 필드, 충돌을 분리해 전달합니다.
-2. 원문과 사용자 수정값을 보존합니다. 근거 없는 필드를 보완 사실처럼 만들거나, 유사도만으로 가격을 지정하거나, 문서 역할/통화를 바꾸지 않습니다.
-3. Supabase 조회는 기존 가격/거래처 로더를 통합니다. 새 에이전트나 브라우저 코드에서 서비스 키를 직접 다루거나 DB에 주문·가격을 임의 기록하지 않습니다.
-4. 공통 deterministic 검증·계산·사용자 확인·렌더러를 재사용합니다. 미확정 제품·금액·필수 필드는 기존 검토 UI의 생성 차단을 우회하지 않습니다.
-5. 외부 발주/송장 발행/메일 전송 등 부작용은 별도 승인 설계 없이는 추가하지 않습니다. 새 동작은 격리된 테스트 픽스처로 오류/경계/역할별 회귀 테스트를 먼저 추가합니다.
+### 4.3 검색 방식 두 가지
 
-## 6. 실행·테스트·운영 전 확인
+1. **기존 공통 검색:** `search_library()`는 승인·활성·계약 유형을 필터링합니다. 기본 `text-embedding-3-small`, 512차원이며 설정상 `text-embedding-3-large`도 허용합니다. 벡터가 호환되면 Python에서 코사인 유사도 80% + 키워드 20%로 계산합니다. 기본 6개, 최대 8개 조각을 반환하며 조회 상한은 500개 레코드입니다. 임베딩 장애/불일치 시 키워드 경로와 안내를 사용합니다.
+2. **신규 초안의 주제별 검색:** `search_library_topics()`는 승인 레코드를 한 번 읽고 조항별로 최대 3개를 키워드 검색합니다. 이 추가 단계는 임베딩 API를 호출하지 않습니다. 이후 선택 첨부자료와 합쳐 문맥을 발췌합니다.
 
-저장소 루트 폴더에서 `uv`를 사용합니다. 앱 의존성은 `Quotation_KEKOREA/requirements.txt`에 선언되어 있습니다.
+청크당 참고 메모는 최대 2,500자, 샘플당 최대 64개입니다. 벡터는 JSONB의 숫자 배열이며 DB의 벡터 인덱스가 아닙니다. 소스 ID·원문 위치·라이브러리 revision과 검증된 인용을 추적하지만, 관련 계약서가 충분히 등록됐는지·검색 품질이 충분한지는 별도 평가해야 합니다. 참고자료의 금액·기한·법률·당사자를 현재 거래의 확정 사실로 상속하지 않습니다.
+
+## 5. 무역 문서 기능
+
+| 기능 | 주요 파일 | 구현 및 보호 규칙 |
+| --- | --- | --- |
+| 텍스트·이미지·PDF 추출 | [attachments.py](../agent/attachments.py), [extractor.py](../agent/extractor.py) | Responses API 구조화 추출. PyMuPDF로 텍스트/페이지 이미지 준비. 최대 5파일, 각 10 MB, 합계 20 MB |
+| 상품 식별 | [product_matching.py](../agent/product_matching.py) | SKU·용량·변형 제약과 문자열 유사도. 90% 이상 호환 단일 후보도 사용자 확인, 68~90%는 후보 제시. 임베딩 매칭 아님 |
+| 가격 조회 | [pricing.py](../agent/pricing.py) | PO는 검증된 ECLADO KRW 매입가, PI는 Dear Glow 판매가, CI는 첨부 PI 가격 보존. CI/PL 매칭으로 카탈로그 가격을 덮어쓰지 않음 |
+| 거래처 보완 | [counterparties.py](../agent/counterparties.py) | 명시된 값/N/A 우선. 없는 주소나 배송지를 임의 추론하지 않음 |
+| 금액·프로모션·샘플 | [trade_documents.py](../agent/trade_documents.py), [promotions.py](../agent/promotions.py), [samples.py](../agent/samples.py) | Decimal 계산, 명시적 수량 0 유지, 유상/FOC 구분, 샘플 수동값 보존 |
+| PI → CI | [ci_import.py](../agent/ci_import.py) | PI 거래가격·수량 근거 보존, 은행/결제정보 제외. PI 없는 CI는 차단 |
+| PL 합계 승인 | [packing_review.py](../agent/packing_review.py), [packing.py](../agent/packing.py) | 원본/계산값 비교·명시적 승인·단위 분리. 컨테이너 크기를 개수로 곱하지 않음 |
+| 메뉴별 동시 작업 | [workflow_state.py](../agent/workflow_state.py) | 세션별 `ThreadPoolExecutor(max_workers=3)`, 작업 복사본·오래된 결과 방지. 분산 작업 큐 아님 |
+| PDF/Excel·직인 | [renderers.py](../agent/renderers.py), [pi_pdf.py](../agent/pi_pdf.py), [seal_storage.py](../agent/seal_storage.py) | 실제 공간에 따른 페이지 분할, 하단 묶음 보존, 비공개 직인 SHA-256 확인 |
+
+## 6. 입력·출력과 외부 전송 경계
+
+- 계약 참고자료는 PDF/DOCX/HWP5, 파일당 최대 20 MB, PDF 최대 100페이지, 요청당 최대 5개입니다. 구형 `.doc`는 PDF/DOCX 변환이 필요합니다. HWP는 읽기 지원이며 HWP 출력 기능은 없습니다.
+- 텍스트 PDF는 PyMuPDF, DOCX는 ZIP/XML, HWP5는 `pyhwp` subprocess로 추출합니다. 스캔 참고 PDF의 OCR은 사용자 동의 후 OpenAI로 전송합니다.
+- **계약 참고 OCR은 이미지 상단 78%만 처리**합니다. 하단 22%의 조항이 빠질 수 있으며 서명·직인·수기 판독/완전성을 보장하지 않습니다. 무역 PDF 입력 전처리와 같은 경로라고 설명하면 안 됩니다.
+- 계약 출력은 ReportLab PDF + `python-docx` DOCX입니다. DRAFT는 워터마크/머리글·미확정 부록을 포함합니다. FINAL은 앱의 기존 `rules.py` 필수조건·미확정 본문·계좌·법률 검증 경로를 통과해야 합니다. 렌더러 함수를 직접 호출하는 것만으로 FINAL 승인을 구현한 것은 아닙니다.
+- 렌더링 성공 후 비공개 저장이 실패하면 현재 세션에 직접 다운로드를 제공할 수 있습니다. 서버에 저장된 기록과 구분하며 세션 종료 후 보존을 보장하지 않습니다.
+- 추출·생성·검토·임베딩/OCR 실행은 각 경로에서 관련 내용을 OpenAI에 전송할 수 있습니다. DB 영속 저장과 모델 요청은 별도 처리입니다. 민감 문서의 외부 처리 허용 여부를 먼저 확인하세요.
+
+## 7. 실행·설정·테스트
+
+저장소 루트에서 실행합니다. Python 기준은 [`.python-version`](../../.python-version), 패키지는 [requirements.txt](../requirements.txt)입니다.
 
 ```powershell
-uv run --with-requirements .\Quotation_KEKOREA\requirements.txt streamlit run .\Quotation_KEKOREA\app.py
-uv run --with-requirements .\Quotation_KEKOREA\requirements.txt python -m unittest discover -s .\Quotation_KEKOREA\tests
+# 로컬 전용 화면: 같은 포트를 사용 중이면 기존 서버를 먼저 확인
+uv run --with-requirements .\Quotation_KEKOREA\requirements.txt python -m streamlit run .\Quotation_KEKOREA\app.py --server.address 127.0.0.1 --server.port 8502 --server.headless true --browser.gatherUsageStats false
+
+# 전체 회귀 테스트
+uv run --with-requirements .\Quotation_KEKOREA\requirements.txt python -m unittest discover -s .\Quotation_KEKOREA\tests -v
+
 git diff --check
 ```
 
-이전 2026-11-05 검증에서는 위 전체 테스트 명령으로 193개 테스트가 통과했습니다. 이후 검증 결과와 현재 배포 기준은 아래 최신 작업 요약을 참고하세요.
-
-환경변수/Streamlit Secrets는 `OPENAI_API_KEY`, `OPENAI_MODEL`, `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, 선택적 회사/은행 세부정보입니다. 실제 키는 `.env` 또는 호스팅 플랫폼의 서버 Secrets에만 보관합니다. UI의 추출 버튼을 누르면 입력 문서가 OpenAI에 전송됩니다. 외부 전송을 허용할 수 없는 문서를 업로드하지 마세요.
-
-### Render 테스트 배포
-
-저장소 루트의 [`.python-version`](../../.python-version)은 Render가 테스트된 Python 3.12 런타임을 사용하도록 하고, [`render.yaml`](../../render.yaml)은 기존 Streamlit 앱을 Singapore 리전의 Free 웹 서비스로 실행합니다. React 전환 설정은 아니며, 공개 URL에는 앱 로그인 기능이 없습니다. Render 대시보드에서 **New → Blueprint**를 선택하고 이 저장소의 `main` 브랜치를 연결하면 서비스를 생성할 수 있습니다.
-
-Blueprint가 요청할 때 `OPENAI_API_KEY`와 `SUPABASE_SECRET_KEY`는 Render 대시보드에 직접 입력하세요. PI 생성을 쓰려면 6개의 `KEKOREA_USD_*` 은행정보도 Render Environment에 입력해야 합니다. 비밀키나 은행정보를 Git, 채팅, 로그에 입력하지 마세요. 첫 배포 성공 후에는 앱 URL에서 가상 자료로 파일 업로드·추출·검토·PDF/Excel 다운로드를 확인합니다.
-
-Render Free는 절전 후 재기동될 수 있고 영구 디스크가 없습니다. 앱의 세션 메모리와 `outputs` 파일은 재시작/재배포 시 보장되지 않으므로 이 설정은 테스트용입니다. 장기 운영에는 유료 인스턴스, 영속 파일 저장, 세션 복구 및 접근 인증을 별도로 설계해야 합니다. 현재 코드는 로그인 없이 공개되므로 URL을 아는 사용자가 앱에 접근하고 OpenAI 요청을 발생시킬 수 있습니다.
-
-2026-11-05 Render에 배포해 `COMPANY AUTOMATION_Project`의 `Production` 환경으로 이동했습니다. [Render 앱](https://ke-korea-quotation.onrender.com/)은 HTTP 200을 반환했고 UI에서 ECLADO 카탈로그 157개 상품 연결을 확인했습니다. 실제 주문 추출 및 PDF/Excel 생성은 이 배포 확인에서 실행하지 않았습니다. Render GitHub 저장소 연결 목록에 이 저장소가 없어 공개 Git 저장소 URL로 초기 배포했으며, Render가 자동 배포 미지원 상태라고 안내했습니다. 새 커밋 반영 시 Blueprint 수동 동기화/서비스 수동 배포가 필요합니다. 자동 배포를 원하면 Render의 GitHub 계정 설정에서 이 저장소 접근을 연결한 뒤 확인하세요.
-
-**PyMuPDF 배포 전제:** PyMuPDF는 AGPL/상용 라이선스 선택이 필요한 듀얼 라이선스 패키지입니다. 사용자는 2026-11-05에 이 배포의 PyMuPDF 라이선스 확인을 완료했다고 답변했습니다. 상용 배포 전에 해당 라이선스의 증빙과 적용 범위를 팀에서 보관·확인하세요. LangChain은 PDF 파서가 아니므로 추가하지 않았습니다.
-
-기존 Streamlit 앱 주소는 `https://ke-korea.streamlit.app/`입니다. Render와 Streamlit은 서로 별도로 배포되며, 한쪽 변경이 다른 쪽에 자동 반영되지 않습니다. Render 배포 시 Supabase의 현재 가격 스냅샷이 보이는 것은 확인했지만, 실제 DB 데이터의 계약상 최신성이나 양쪽 서비스의 향후 동기화는 별도 확인 대상입니다.
-
-### 2026-11-05 최신 변경 및 유지보수 기준
-
-- **사이드바 메뉴는 현재 상태로 유지합니다.** 메뉴 목록, 라벨, 선택/전환 동작 및 메뉴별 워크플로 연결 코드는 팀의 명시적인 사전 승인 없이 수정·삭제·재구성하지 않습니다. 다른 기능의 수정도 메뉴 동작에 영향을 주지 않도록 분리하고 관련 회귀 테스트로 확인합니다.
-- CIPL 통합 메뉴와 CI+PL 동시 생성 경로를 제거했습니다. 현재는 PI, PO, CI, PL을 각각 선택해 개별 문서를 만듭니다. CI·PL 개별 흐름은 유지하며 앱 UI에서 CI 및 PL 메뉴가 보이고 CIPL 메뉴가 없는 것을 배포 후 확인했습니다.
-- 메뉴를 전환해도 같은 브라우저 세션 안에서는 각 문서의 입력, 첨부, 추출 초안, 검토/수정 상태 및 생성 파일 상태가 메뉴별로 보존됩니다. 추출/생성 작업은 전환 후에도 계속 진행되고, 완료 결과는 해당 메뉴로 돌아왔을 때 확인할 수 있습니다. 이는 세션 메모리 상태이며 새로고침, 세션 종료, 서버 재시작 또는 재배포를 넘어 보존되는 저장 기능은 아닙니다.
-- 변경 커밋 `54a6fdd` (**Remove combined CI and PL workflow**)는 Render 배포 `dep-dbm3rll9fdbs73bp7gg0`에 성공했고, `https://ke-korea-quotation.onrender.com/`에서 메뉴 구성을 확인했습니다. 이 확인은 실제 거래 추출 및 PDF/Excel 파일 생성까지 수행한 배포 검증은 아닙니다.
-- 변경 관련 CI/PL·사이드바·업로드·포장 워크플로 집중 테스트 **50개 통과**. 전체 테스트는 **203개 중 202개 통과, 1개 실패**였으며, 실패는 PO 상품 Double-check UI 기대값 관련으로 CIPL 제거 변경 경로와 무관합니다. 전체 테스트가 모두 통과한 것으로 간주하지 마세요.
-
-### 계약 자동화 추가 (로컬 구현)
-
-- 기존 사이드바의 두 계약 메뉴 라벨과 메뉴 목록은 그대로 두고, 해당 메뉴를 매매계약/커미션 계약 UI에 연결했습니다. PI/PO/CI/PL 코드는 계약 저장소와 분리되어 있습니다.
-- 자연어 거래 분석, 당사자·조건표, 한국어/영어 초안, 문장별 메모·수정안·revision 복구, 참고 PDF/DOCX 및 사용자 승인 선호 조항, DOCX/PDF 내보내기를 `Quotation_KEKOREA/contracts/`에 분리했습니다.
-- 계약 화면은 사용자 요청으로 비밀번호 없이 공개 접근하도록 변경했습니다. 앱 URL에 접근 가능한 누구나 계약 및 참고 파일을 열람·수정·삭제할 수 있으므로, 비공개/민감 계약을 저장하지 마세요. Supabase Storage 버킷은 비공개지만 앱은 서버 `SUPABASE_SECRET_KEY`로 파일을 대신 제공합니다. 스캔 PDF OCR은 별도 동의를 요구합니다.
-- 구현 설정·테스트 명령·운영 전 확인사항은 [README_CONTRACTS.md](../README_CONTRACTS.md)에 기록했습니다. 새 테이블/Storage 버킷은 [계약 migration](../supabase/migrations/202611050001_contracts.sql) 적용 전에는 운영에서 사용할 수 없습니다.
-- **현재 상태:** 코드와 합성 데이터 로컬 테스트는 추가됐지만 Supabase migration 적용, 실제 비밀 설정, 실제 DB 권한/RLS 검증, 앱 배포 및 운영 문서 시각 검증은 완료되지 않았습니다. 이를 배포 완료로 표현하지 마세요.
-
-## 7. 계약서 목록 오류 수정 및 인수인계 (2026-11-06)
-
-### 목적 및 영향
-
-- **문제:** 저장된 계약이 하나 이상 있을 때 `render_contract_page()`의 삭제 확인 분기가 정의되지 않은 `options` 변수를 참조하여 `NameError`를 발생시킬 수 있었습니다. 이 오류가 나면 계약 목록과 대화 History 확인도 중단됩니다.
-- **수정:** `records`에서 ID를 문자열로 정규화한 `options` 사전을 생성합니다. 삭제 요청 ID가 실제 목록에 포함되는 경우에만 계약 제목과 확인창을 표시합니다. 메뉴 구성, 견적서 가격 계산, 계약 revision 및 Supabase 데이터 구조는 변경하지 않습니다.
-- **대화 History:** `repo.list_messages(contract_id)`에서 계약별 대화를 읽어 `st.chat_message`에 표시하는 기존 기능을 유지합니다. 화면이 열리지 않던 원인을 제거한 것이며, 과거 메시지가 실제 DB에 존재하는지나 운영 서버에서 정상 노출되는지는 별도 검증이 필요합니다.
-- **삭제 흐름:** 목록의 X → 확인/취소. 실제 삭제는 기존 Supabase RPC 및 Storage 처리 경로를 사용합니다. 확인 없이 삭제하지 않습니다. 실제 DB·파일을 대상으로 파괴적 테스트를 수행하지 않습니다.
-
-### 적용 및 테스트
+로그 저장과 진행 표시를 함께 하려면 다음처럼 실행합니다. `*> 파일`만 쓰면 터미널에는 진행 내용이 보이지 않습니다. 실행한 테스트의 종료 코드는 `$LASTEXITCODE`로 확인합니다.
 
 ```powershell
-# 저장소 최상위 폴더에서, 수정 패치 적용 후
-uv run --with-requirements .\Quotation_KEKOREA\requirements.txt python -m unittest Quotation_KEKOREA.tests.test_contract_workspace_ui
-uv run --with-requirements .\Quotation_KEKOREA\requirements.txt python -m unittest discover -s .\Quotation_KEKOREA\tests
-git diff --check
-uv run --with-requirements .\Quotation_KEKOREA\requirements.txt streamlit run .\Quotation_KEKOREA\app.py
+uv run --with-requirements .\Quotation_KEKOREA\requirements.txt python -m unittest discover -s .\Quotation_KEKOREA\tests -v 2>&1 | Tee-Object -FilePath .\logs\tests\contract_test_full.log
+$LASTEXITCODE
 ```
 
-화면에서 (1) 저장 계약 2건 조회 (2) 삭제 취소 (3) 삭제 확인 (합성·테스트 저장소만) (4) 다른 계약을 열 때 History가 섞이지 않는지 확인합니다. 이전 상품 주석 실패 기록은 과거 이력이며 이번 작업 시작 전 `3991930`의 전체 296개 테스트는 통과했습니다. 새 실패가 발생하면 배포하지 않습니다.
+### 환경변수
 
-**당시 조사 이력:** 계약 목록 오류를 조사했던 이전 세션에서는 GitHub 연결 쓰기 권한 부족으로 HTTP 403이 발생했고 전체 검증을 완료하지 못했습니다. 현재 기준으로 해당 목록 보호 테스트는 296개 통과한 작업 시작 전 검사에 포함돼 있습니다. 이번 UI의 로컬 검증과 실제 운영 적용 여부는 별도로 기록합니다.
+값은 Git 제외 `.env` 또는 서버 Secrets에 보관합니다. [환경 예제](../.env.example)는 이름/형식 확인용입니다.
 
-### 보안 및 운영 확인
+| 설정 | 역할 |
+| --- | --- |
+| `OPENAI_API_KEY`, `OPENAI_MODEL` | 구조화 추출 및 기본 AI 모델 |
+| `CONTRACT_OPENAI_MODEL` | 계약 전용 모델 선택; 비어 있으면 기본 모델 사용 |
+| `CONTRACT_LIBRARY_EMBEDDING_MODEL` | 공통 참고 메모의 임베딩 모델 |
+| `SUPABASE_URL`, `SUPABASE_SECRET_KEY` | 서버 측 DB/Storage 접근. 키를 브라우저 코드에 노출하지 않음 |
+| `CONTRACT_LIBRARY_ADMIN_TOKEN` | 샘플 등록·원본 열람·승인 관리 키. 앱 전체 로그인 키가 아님 |
+| `KEKOREA_USD_*` 6개 항목 | PI/커미션 수취 은행정보. 실제 값은 문서·로그에 복사하지 않음 |
+| `KEKOREA_COMPANY_SEAL_BASE64` | 선택적 이전 방식 대체 경로; 기본은 비공개 Storage + 해시 확인 |
 
-계약 화면은 비밀번호 없이 공개 접근됩니다. 민감 계약/개인정보 저장은 접근 제어가 마련되기 전까지 피해야 합니다. Supabase migration, Secrets, RLS, 실제 계약·파일 삭제 및 PDF/DOCX 시각 검증은 별개입니다. 배포 후 앱에서 확인하지 않고 단순 GitHub 반영을 운영 성공으로 표시하지 않습니다.
+샘플 관리 스크립트 [import_contract_samples.py](../scripts/import_contract_samples.py)는 검토된 로컬 manifest와 등록 결과 receipt를 사용합니다. 원본·manifest·receipt는 Git 제외 `private/contracts` 아래에 보관하고, 재색인과 DB 쓰기는 담당자가 승인된 자료로 실행하세요.
 
-## 8. 관련 문서
+## 8. 검증·배포·운영의 현재 경계
 
-- 상세 설계·기능 변경 이력: [README.md](../README.md)
-- 계약 자동화 구현·설정·미검증 항목: [README_CONTRACTS.md](../README_CONTRACTS.md)
-- 유지해야 할 동작 및 수정 전 확인 절차: [AGENTS.md](../AGENTS.md)
-- SQL 스키마·시드 적용·검증: [supabase/README.md](../supabase/README.md)
-- 발표 스크립트: [Presentation/presentation_script_ko.md](../Presentation/presentation_script_ko.md)
+| 항목 | 확인한 내용 | 미확인/한계 |
+| --- | --- | --- |
+| 최신 코드 자동 테스트 | 2026-11-09 전체 **437개 통과, 109.838초, 생략 없음**; 신규 품질 테스트 15개 포함 | 가상 API 응답 기반이며 실제 AI 문장 품질 보증 아님 |
+| 테스트 근거 | [실행 로그](../../logs/tests/drafting_quality_2026-11-09.log), [신규 테스트](../tests/test_contract_drafting.py), [연결 테스트](../tests/test_contract_library_ui.py) | 기존 Streamlit/PyMuPDF 경고 남음 |
+| 로컬 임시 화면 | 이번 세션에서 `http://127.0.0.1:8502/_stcore/health` 200/ok 확인 | 브라우저 URL 확인 도구 제한으로 시각 확인 미완료. 재시작 후 가동 보장 없음 |
+| 로컬 데이터 | 사용자 선택에 따라 **기존 Supabase DB 공유** | 임시 화면에서 만든 계약도 기존 DB에 저장. `[TEST]` 제목 사용; 완전히 격리된 staging DB가 아님 |
+| Render | [render.yaml](../../render.yaml)에 `main`·Python·Streamlit 실행 설정 | 이번 변경의 배포/대시보드 연결·자동 반영 여부는 미확인 |
+| Streamlit 운영 | 별도 호스팅 대상 | 이번 변경의 실제 배포와 문서 생성 경로는 미확인 |
 
-## 2026-11-06 TASTE 계약서 UI 및 README 동기화
+- 앱 전체의 사용자 로그인·사용자별 계약 접근 통제는 구현돼 있지 않습니다. UI에도 이 사실을 경고합니다. DB의 RLS/비공개 버킷/서버 키는 공개 앱 경유 접근을 사용자별로 제한하는 로그인 기능을 대체하지 않습니다.
+- 샘플 관리 키는 관리 영역에만 적용됩니다. 외부 공개 시에는 앱 인증·권한·비용 제한·감사 체계를 먼저 설계해야 합니다.
+- 로컬 실행은 코드 배포와 분리되지만 DB를 자동 복제하지 않습니다. 운영 데이터를 수정하는 테스트나 삭제·복구 시연을 임의로 하지 마세요.
+- Render 설정 파일의 자동 배포 선언과 실제 서비스의 Git 연결 상태는 별개입니다. 실제 서비스 상태는 배포 담당자가 확인해야 합니다.
+- 의존성 라이선스의 적용 범위·실제 배포 승인 기록은 팀이 별도로 보관/검토합니다. 이 문서로 법적 적정성을 확인한 것으로 취급하지 않습니다.
 
-### 계약서 워크스페이스 운영 및 유지보수
+## 9. 팀 인수인계에서 누락되기 쉬운 항목
 
-- 메뉴는 PO/PI/CI/PL과 **계약서 만들기**로 구분한다. 기존 견적서 계산과 가격 정책은 변경하지 않는다.
-- **BOX 1** 자연어 거래 입력·AI 대화·기존 질문 제한·참고자료 → **BOX 2** 상세조건과 당사자 수동 입력·지급조건 갱신 → **BOX 3** 문서형 초안·문장별 메모 → `최종 수정 요청` → 비교·승인·단일 revision 저장 순서다. 위험 검토·이전 revision 복원·복사·삭제 기능은 보조 영역에 유지한다.
-- 검토 요약은 `contracts/review_summary.py`에서 중복을 묶고 필수/권장/법률/TBD로 안내한다. 한국어가 기본이며 검토 언어를 별도로 선택한다. 원문·항목별 근거는 접힌 메뉴에 보존한다. 확인 해제는 해당 이슈만 다시 미확정으로 바꾸며 관련 없는 필드를 자동 확정하지 않는다.
-- `검토용 초안 PDF/DOCX`는 실제 조항이 있으면 미확정을 표시해 비공개 저장한다. 최종본은 기존 규칙을 그대로 통과해야 한다. 출력 기록은 경로의 `draft/final`로 구분하며 DB 마이그레이션은 추가하지 않는다.
-- 문장 옆에 여러 메모를 동시에 열어 입력하고 `최종 수정 요청`에서 함께 저장·단일 AI 요청한다. BOX 1의 AI 전송 동의가 필요하며, 기존 조건 수정안은 먼저 적용·취소해야 한다. AI가 보고한 충돌과 중복·누락·보호된 지급조항 수정은 차단한다. 서로 다른 문장 간 의미 충돌은 비교 화면에서 사용자가 명시적으로 확인한다. 이전 revision 메모는 재저장 없이 적용하지 않는다. 기존 단일문장 AI 호출·지급정책·법률검증·revision 엔진과 거래 문서 코드는 유지한다.
-- 커미션 지급조건은 기본 D+7·TT에서 출발하지만 사용자가 지급기한과 서면합의 연체이율을 편집할 수 있다. 계좌/법률 정보는 AI가 임의 확정하지 않는다.
-- `contracts/library.py`, `review.py` 등의 승인된 샘플 검색(RAG)은 **계약서 관련** 기능이다. 상품·가격 매칭은 별도의 SKU/용량 규칙을 계속 사용하며, 위에서 설명한 '상품에 벡터 DB 미사용' 규칙과 충돌하지 않는다.
-- 과거 README의 74개 테스트·상품 주석 실패 등은 당시 기록이다. 이번 작업 시작 전 전체 296개 테스트는 통과했다. 운영 DB/API·실제 배포는 이번 작업에서 확인하지 않았으며, Windows 브라우저 URL 확인 제한으로 실제 브라우저 시각 검수도 미완료다.
-- 코드 변경·삭제 시 루트/프로젝트/계약/Team/Presentation README를 동일 변경에서 갱신한다. `scripts/check_readme_sync.py`의 staged guard를 통과시키고 기존 기능 설명이 남아 있지 않은지 확인한다.
+| 항목 | 현재 결론 / 다음 확인 |
+| --- | --- |
+| 장기기억의 범위 | 계약 기록과 승인된 참고 지식은 저장됨. 모든 대화의 전역 자동 기억·자동학습은 없음 |
+| 프레임워크 주장 | LangChain·LangGraph·MCP 도입으로 발표하지 않음. 향후 도입 시 어댑터와 기존 검증 경계 보존 필요 |
+| 지식 데이터 준비 | 실제 승인 샘플 수·조항별 다양성·개인정보 제거 상태는 이번 코드 검토로 확인하지 않음 |
+| 의미 품질 평가 | 불가항력 등 대표 조항의 기준 계약 세트로 누락·허위 조건·검색 적합성·비용/지연을 실모델 평가해야 함 |
+| OCR 완전성 | 상단 78% 크롭 및 불명확 문자 때문에 추출 원문과 실제 PDF를 비교해야 함 |
+| 지속성 | 세션 메모리, DB 저장, Storage 업로드 성공, 직접 다운로드를 구분 |
+| 운영 준비 | 앱 인증, 사용자별 권한, 독립 staging DB, 백업/복구 절차, 부하/비용 측정, 서버 운영 모니터링은 별도 확인/구축 대상 |
+| 오류 대응 | `logs/tests`·`logs/preview`와 revision·source ID로 추적. API 키·원본 계약·실제 계좌를 오류 로그에 남기지 않음 |
+| 변경 규칙 | [AGENTS.md](../AGENTS.md) 보호 규칙과 [README 검사](../../scripts/check_readme_sync.py) 준수. 다섯 README를 함께 점검 |
 
-**이번 최종 로컬 검증:** 2026-11-06 전체 320개 테스트 통과, 실패 0개, 종료 코드 0(기존 296개 + 신규 24개). `git diff --check` 통과. 합성 자료·가짜 API/DB와 Streamlit AppTest로 검증했고 기존 보호 테스트는 변경하지 않았다. 운영 데이터 수정, GitHub 푸시, 배포는 수행하지 않았다. DRAFT PDF의 다중 페이지·혼합 언어는 렌더링으로 확인했으며 브라우저·Word의 실제 시각 검수는 별도다.
+## 10. 발표·유지보수 연결
 
-## 2026-11-06 회귀 테스트 보완
-
-상품 주석 확인 미완료 시 PO/PI PDF 및 Excel 생성 버튼은 차단됩니다. 투자/무역 커미션 계약의 기본 7일 영문 문구는 `seven (7) calendar days`를 사용하며 사용자 지정 기한은 유지합니다. 두 동작은 296개 통과한 기준 소스에 포함되어 있으며 이번 UI 작업에서 수정하지 않았습니다.
-
-## 2026-11-06 CI DRAFT 출력 보존
-
-PO/PI의 확인 전 생성 차단과 달리, CI는 첨부 PI 거래가격을 변경하지 않고 상품 매칭 미확정 경고 및 DRAFT 상태를 유지해 검토용 PDF/Excel 출력을 허용합니다. 관련 회귀 테스트는 `test_product_matching_ui.py`와 `test_review_ui.py`이며 둘 다 통과해야 합니다.
-
-### 계약서 UX 업데이트 (2026-11-06)
-BOX 3 문장/댓글은 고정된 두 열로 렌더링하여 클릭 전후에 레이아웃이 이동하지 않는다. 수정 전후 비교·수동 승인·revision 동작은 동일하다. 기존 거래 문서 영역 및 위험 통제는 수정하지 않았다.
-
-## 2026-11-06 AI 위험 검토 페이지·추천안 확장
-
-팀 시연: BOX 3 > AI 핵심 위험 검토 > 전체 위험 검토 > 1/2/3 페이지 이동 > 항목 선택 > 추천안 3개 생성 > 가변값·문장 직접 편집 > 추천 문장 적용 > BOX 3 미리보기 확인 > 선택한 수정안 비교·승인. 관련 코드는 risk_review_workspace.py 및 risk_review_ui.py. 기존 PO/PI/CI/PL·ECLADO 및 법률 검증 엔진은 변경하지 않았다.
-
-### 2026-11-06 · 계약서 위험 검토 미리보기 표시 보강
-
-- `추천 문장 적용`은 기존 계약서 조항을 즉시 확정 저장하지 않으며, 같은 revision의 BOX 3 문장에만 임시 수정 문구를 표시한다.
-- BOX 3 상단에 미저장 위험 검토 수정안 개수와 `선택한 수정안 비교·승인` 경로를 명시하고, 변경된 각 문장에 미리보기 상태를 표시한다.
-- 비교·승인 및 revision 저장·PDF/DOCX 최종 검증 로직은 그대로 유지한다. 실제 Streamlit 운영 브라우저의 반영 여부는 별도 검증이 필요하다.
-
-
-### 2026-11-06 계약서 내보내기 UI 간소화 (검증 규칙 변경 없음)
-
-- BOX 3에서 문서 다운로드(DRAFT/FINAL)를 먼저 표시하고, 길게 반복되는 서명 전 검토 목록은 `고급 검토 기록 · 확정 근거 확인 (선택)` 접힌 영역으로 이동했다. 검토 기록·원문·확인 근거 입력 기능은 유지한다.
-- 미확정 조건이 있더라도 검토용 DRAFT PDF/DOCX는 생성할 수 있다. FINAL PDF/DOCX는 변경하지 않은 기존 `validate_rules(..., for_export=True)` 결과에 따라 차단될 수 있다. UI를 숨기거나 TBD를 선택하는 것이 법적/거래조건 확인을 의미하지는 않는다.
-- 계약서 UI 외의 ECLADO·PO/PI/CI/PL, 지급정책, 수정 엔진, 저장·승인 로직은 수정하지 않는다. 실제 Streamlit 운영 화면과 전체 회귀 테스트는 사용자 PC에서 별도로 검증한다.
-
-### 2026-11-06 계약서 메모 revision 복구 UX 보완
-
-계약서 BOX 3에서 현재 revision에 유효한 메모가 0개이지만 이전 revision의 메모가 존재하면, 기존 메모를 **명시적으로 현재 revision으로 가져오기** 버튼으로 재사용할 수 있습니다. 다른 계약 또는 삭제된 문장에 연결된 메모는 가져올 수 없습니다. 이전 메모를 자동 확정하거나 적용하지 않으며, AI 전송 동의와 기존 수정안 충돌 검사를 유지합니다. `최종 수정 요청` 비활성 상태에는 현재 revision 메모가 필요한 이유를 안내합니다. 계약서 데이터 모델·지급 정책·FINAL 검증·ECLADO/PO/PI/CI/PL 기능은 변경하지 않았습니다. 이 기능의 실제 Streamlit 검증은 전체 테스트를 통해 확인해야 합니다.
-
-### 계약서 출력 장애 시
-DRAFT/FINAL 모두 렌더링 단계와 비공개 저장 단계를 구분한다. 저장 실패만 발생했으면 브라우저 세션의 직접 다운로드로 확인하고, Supabase Storage 버킷 `kekorea-contracts` 및 exports 테이블 권한/설정을 점검한다. FINAL 필수검증은 유지한다.
-
-### 2026-11-09 · BOX 3 긴 문장 전체 보기
-- 계약서 BOX 3의 문장 클릭 버튼을 줄바꿈 가능한 가변 높이로 변경하여 긴 문장도 생략 없이 표시합니다. 폰트 크기는 6pt 이하로 줄이지 않습니다.
-- 180자 초과 문장은 마우스 오버 또는 키보드 포커스에서 전체 문장을 보여주는 보조 말풍선을 지원합니다. 커서를 치우거나 포커스를 옮기면 숨깁니다. 말풍선 본문은 HTML escape 처리합니다.
-- sentence ID, 문장 클릭, 문장별 메모, AI 수정 미리보기, 수정 승인, DRAFT/FINAL 및 계약·무역 로직은 변경하지 않습니다.
-- 적용 스크립트가 문법 검사와 이전 코드 패턴 검증을 수행합니다. 전체 Streamlit 테스트·실제 배포 확인은 별도로 진행해야 합니다.
-
-
-### 2026-11-09 통합 최종 수정 요청 UI
-- BOX 3의 문장 메모, 이전·제외 메모, AI 핵심 위험 검토 이후 최종 수정 요청을 배치한다.
-- 최종 수정 요청은 현재 revision의 메모와 AI 위험 검토 추천안을 충돌 검사 후 하나의 수정안으로 모으며, 비교·승인 전에는 원본 계약서를 수정하지 않는다.
-- 같은 문장을 두 경로로 수정하면 조정을 요구하고, 빈 메모라도 위험 검토 선택안이 있으면 통합 요청할 수 있다.
-- 사용자 승인 뒤에만 새 revision을 저장한다. 기존 필수 검증·DRAFT/FINAL 출력과 ECLADO·PO/PI/CI/PL 기능은 변경하지 않는다.
-- 운영 Streamlit 배포는 별도 검증이 필요하다.
-
-- **2026-11-09 OCR JSON 400 오류 수정:** 스캔 PDF 참조자료 OCR의 OpenAI Responses API 요청에서 `json_object` 출력 형식을 사용할 때 `input_text`에 JSON 응답 요청을 명시했습니다. 기존 OCR 상단 78% 범위, 사용자 전송 동의, 필드 검증 및 실패 처리 방식은 유지합니다.
-
-### KE KOREA 공통 참고자료 승격 / 2026-11-09
-- 계약별로 비공개 저장된 참고 PDF/DOCX는 그대로 유지한다. 관리 키 인증을 마친 관리자만 현재 계약의 기존 참고자료를 회사 공통 샘플 라이브러리에 명시적으로 등록할 수 있다.
-- 원본 해시 및 현재 계약 소속을 확인하여 Supabase 비공개 `kekorea-contracts` 라이브러리 경로에 별도 등록하고, 공통 레코드는 `kekorea_contract_references`에서 `contract_id=NULL`, `library_pending`으로 보관한다. 다른 계약의 원본 파일을 자동으로 공개하거나 이전하지 않는다.
-- 원본 등록만으로 AI 장기기억 또는 자동학습이 되는 것이 아니다. 관리자 검토 후 개인정보·회사명·거래 금액·계좌 등을 제거한 익명화 참고 메모를 명시적으로 승인해야 검색·RAG에서 계약 유형에 맞춰 재사용한다.
-- 기존 `library.py`/`repository.py`/`service.py`, 계약의 PDF/Word 생성, ECLADO 및 PO/PI/CI/PL 기능은 변경하지 않는다. 인증되지 않은 운영 공개화면에서 원본을 공유해서는 안 된다.
-
-### BOX 3 문장 정렬 보정 (2026-11-09)
-계약서 미리보기의 모든 문장 버튼과 내부 텍스트 래퍼를 동일한 왼쪽 기준선으로 정렬한다. 짧은 문장/긴 문장의 시작점이 일치하며, 기존 자동 줄바꿈·문장 호버 전체보기·문장별 메모·AI 수정과 계약서 저장/출력 검증은 변경하지 않는다. 수정 파일: `Quotation_KEKOREA/contracts/ui.py` (CSS만).
-
-### BOX 3 문장 왼쪽 정렬(본문/클릭영역 분리)
-
-- 계약서 문장 표시를 Streamlit 버튼의 기본 텍스트 정렬과 분리해, 짧거나 긴 문장 모두 왼쪽 기준선에서 시작합니다.
-- 기존 문장 클릭 키/메모·AI 위험 검토·revision 처리와 긴 문장 전체 보기 기능은 유지합니다.
-- 기능 변경은 `Quotation_KEKOREA/contracts/ui.py`의 BOX 3 문장 렌더링과 CSS에만 한정됩니다.
-
-
-### 2026-11-09 · 본문 조건 후보 연결 및 DRAFT 문장별 표시
-- BOX 2에서 계약서 본문을 AI로 재분석하여 값이 비어 있는 구조화 조건과 당사자 필드에 미승인 후보를 불러옵니다. 기존 비어 있지 않은 값은 보존하고 사용자 승인과 본문 영향 비교 절차를 유지합니다.
-- 검토용 PDF/DOCX는 미확정 조건과 직접 연결된 문장에만 추가 표시를 붙이고, 미확정 전체 목록은 부록에 유지합니다. DRAFT 워터마크와 FINAL 검증은 변경하지 않습니다.
-
-### 2026-11-09 루트 작업 파일 정리
-
-- 과거 오류 수정 패키지는 루트 `archive/bugfixes/`의 UI·PDF·언어·거래조건·참고자료·위험 검토·워크플로·OCR·테스트·문서 폴더로 모았습니다. 독립 백업은 `archive/backups/`, 루트 테스트 로그는 `logs/tests/`로 이동했습니다.
-- 현재 실행 코드, 공식 테스트(`Quotation_KEKOREA/tests`), 배포 설정 및 비공개 데이터 경로는 유지합니다. 보관 패키지 내부의 보조 테스트와 내장 백업은 해당 패키지와 함께 보존합니다.
-- 상세 위치는 루트 `archive/README.md`, 이전·새 경로와 파일 해시는 `archive/move_manifest_2026-11-09.json`에서 확인합니다. 과거 적용 스크립트는 재사용 전 경로·코드 버전 검토가 필요합니다.
-- 이동 무결성: 34개 항목, 145개 파일의 개수와 SHA-256 일치를 확인했습니다. 정리 후 전체 회귀 테스트 403개가 모두 통과했습니다(116.182초, 생략 없음). `git diff --check`도 통과했습니다. 기존 Streamlit/PyMuPDF 경고는 남아 있습니다. 운영 배포는 이번 정리 범위에 포함하지 않습니다.
-
-## 2026-11-09 다국어 계약 조건 추출 키 정규화
-
-- BOX 2 본문 후보 추출 시 한국어·영어·인도네시아어 입력을 동일한 내부 snake_case 조건 키에 대응한다. 제품/단가/수량/인도/지급조건을 임의의 새 키로 중복 등록하지 않도록 주요 별칭을 정규화한다.
-- buyer/seller는 당사자 별도 표에서 확인하며 값·단위·통화 원문을 보존한다. AI 추출은 `suggested` 후보이며 사람이 `확정`해야만 confirmed가 된다. 기존 비어 있지 않은 값은 덮어쓰지 않는다.
-- 서로 다른 값이 하나의 표준 키에 충돌하면 첫 후보만 미승인으로 제시하고 경고를 표시한다. 자동 해결/기존 확정값 변경은 하지 않는다.
-- DRAFT/FINAL 출력 및 법적 최종 검증은 변경하지 않는다. 로컬 회귀 테스트와 실제 Streamlit 배포 검증은 별개이다.
-
-## 2026-11-09 거래조건 동의어 확장 및 문맥 분류
-
-- BOX 2에서 한국어·영어·인도네시아어의 400개 이상 정확 별칭을 계약조건 표준 키로 정규화한다. price·qty·volume·harga satuan·jumlah 등 표시가 달라도 공통 항목에 제안한다. MT·KG는 수량 자체가 아닌 단위(unit)이고 value·amount는 총액일 수 있어 문맥이 불확실한 경우 경고를 남긴다.
-- buyer/seller는 당사자 별도 표에서 확인하며 값·단위·통화 원문을 보존한다. AI 추출은 `suggested` 후보이며 사람이 `확정`해야만 confirmed가 된다. 기존 비어 있지 않은 값은 덮어쓰지 않는다.
-- 서로 다른 값이 하나의 표준 키에 충돌하면 첫 후보만 미승인으로 제시하고 경고를 표시한다. value·rate 등 모호한 키를 함부로 unit_price로 강제하지 않으며 기존 확정값을 변경하지 않는다.
-- DRAFT/FINAL 출력 및 법적 최종 검증은 변경하지 않는다. 로컬 회귀 테스트와 실제 Streamlit 배포 검증은 별개이다.
-
-## 2026-11-09 계약조건 추출·충돌 비교·FINAL 검증 강화
-
-- BOX 2 AI 추출은 한국어·영어·인도네시아어 표준 키 정규화를 유지하되 통화·단위·숫자·인도조건의 의미를 별도로 비교한다. **4와 5는 충돌**하나 `5`와 `5.00`은 수치가 같을 수 있으며, EXW 인도조건과 일정 협의 절차는 상호 배타적인 조건이 아니다. 근거가 불확실하면 미확정 후보로 남긴다.
-- 거래조건은 `AI 제안(suggested)`으로 표시하며 사용자가 승인하기 전까지 확정으로 승격되지 않는다. 기존 확정 조건은 자동 덮어쓰기하지 않는다. `$`만으로 USD를 가정하지 않는다.
-- DRAFT PDF/DOCX: 문장에 연결된 미확정 후보가 **값을 이미 보유한 경우** 중복 `[확인 필요]` 접두어 대신 미확정 부록과 DRAFT 경고로 관리한다. 실제 값이 빠진 연결 조항에는 계속 표시한다. 본문의 기존 `[서명 전 확인]`은 삭제하지 않는다.
-- FINAL PDF/DOCX: 서명 전 확인/TBD 등 명시적 미확정 표시가 본문에 남으면 기존 필수조건 검증에 더해 차단한다. Supabase 저장·다운로드, 법률/결제 검증과 Revision 흐름은 변경하지 않는다.
-- 수정사항 테스트: `Quotation_KEKOREA.tests.test_contract_integrity_fix`. 전체 회귀 및 실제 배포 파일 생성은 별개로 검증한다.
+- 팀 설명: 이 문서의 구현 표 → 저장소/RAG → 실행/검증 순서로 공유합니다.
+- 발표/시연: [발표용 README](../Presentation/README.md)를 사용합니다. 과거 [발표 스크립트](../Presentation/presentation_script_ko.md)는 최신 구현/검증 상태와 대조한 뒤 사용하세요.
+- 상세 계약 기능: [README_CONTRACTS.md](../README_CONTRACTS.md). 최근 설계: [초안 품질 계획](../../docs/superpowers/plans/2026-11-09-draft-quality-pipeline.md).
