@@ -535,6 +535,19 @@ def _render_draft(repo, snapshot, state_key, env):
         outline:2px solid #0877c9;outline-offset:2px;}
     .st-key-contract_document_paper button[kind="primary"] {background:#e7f2fa;
         border-left:3px solid #0877c9;color:#092b4c;}
+    /* Contract sentence alignment: consistent left edge for short and long clauses. */
+    .st-key-contract_document_paper [class*="st-key-contract_sentence_display_"] [data-testid="stButton"] button {
+        justify-content:flex-start!important;text-align:left!important;
+        align-items:flex-start!important;flex-direction:row!important;
+    }
+    .st-key-contract_document_paper [class*="st-key-contract_sentence_display_"] [data-testid="stButton"] button [data-testid="stMarkdownContainer"] {
+        width:100%!important;min-width:0!important;text-align:left!important;
+        margin:0!important;padding:0!important;
+    }
+    .st-key-contract_document_paper [class*="st-key-contract_sentence_display_"] [data-testid="stButton"] button p {
+        width:100%!important;max-width:none!important;min-width:0!important;
+        margin:0!important;padding:0!important;text-align:left!important;
+    }
     /* Long clause readability: never shrink below a usable font size or clip text. */
     .st-key-contract_document_paper [class*="st-key-contract_sentence_display_"] {
         position:relative;min-width:0;}
