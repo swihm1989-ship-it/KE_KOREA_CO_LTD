@@ -172,8 +172,7 @@ def render_risk_review(repo, snapshot, state_key, env):
             with st.container(border=True):
                 st.markdown(f"**{'◉' if picked else '○'} 추천안 {index+1} · {option['label']}**")
                 st.write(replace_variables(option['template'], values))
-                if st.button('이 추천안 선택', key=f'risk_choose_{contract_id}_{revision}_{sentence_id}_{index}',
-                             disabled=picked):
+                if st.button('이 추천안 선택', key=f'risk_choose_{contract_id}_{revision}_{sentence_id}_{index}'):
                     st.session_state[choice_key] = index
                     st.session_state[f'risk_edited_{contract_id}_{revision}_{sentence_id}'] = replace_variables(option['template'], values)
                     st.rerun()

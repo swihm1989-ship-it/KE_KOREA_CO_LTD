@@ -32,13 +32,24 @@ def export_draft(snapshot, *, formats=('docx', 'pdf'), env=None):
     issues = validate_rules(snapshot, for_export=True, env=env)
     cards = review_cards(issues, language=snapshot['language'])
     lines = [(snapshot.get('title') or 'Contract', True), (notice, False)]
+    term_map = {}
+    for term in snapshot.get('terms', []):
+        for identifier in (term.get('key'), term.get('id')):
+            if identifier:
+                term_map[str(identifier)] = term
     for clause in sorted(snapshot['clauses'], key=lambda c: c.get('order', 0)):
         lines.append((clause.get('title') or '', True))
         for sentence in clause.get('sentences', []):
-            # An unresolved contract must not present ANY sentence as approved fact.
-            # Preserve the exact original text, visibly qualify it instead of guessing replacements.
-            prefix = ('[확인 필요] ' if korean else '[TBD / UNCONFIRMED] ') if issues else ''
-            lines.append((prefix + sentence['text'], False))
+            # Scope markers to directly linked, unconfirmed terms only. All other
+            # unresolved concerns remain in the complete appendix and DRAFT notice.
+            linked = [term_map.get(str(identifier)) for identifier in sentence.get('term_ids', [])]
+            unresolved = any(term is None or term.get('status') != 'confirmed'
+                             or not str(term.get('value') or '').strip() for term in linked)
+            raw_text = sentence['text']
+            already_marked = ('[서명 전 확인]' in raw_text or '[확인 필요]' in raw_text
+                              or '[TBD' in raw_text or '[TO CONFIRM]' in raw_text)
+            prefix = ('[확인 필요] ' if korean else '[TBD / UNCONFIRMED] ') if unresolved and not already_marked else ''
+            lines.append((prefix + raw_text, False))
     lines.append(('미확정 사항 부록 / TBD' if korean else 'Unresolved items / TBD', True))
     if cards:
         for card in cards:

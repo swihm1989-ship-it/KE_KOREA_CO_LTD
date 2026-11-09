@@ -85,7 +85,12 @@ class WorkspaceActionsTests(unittest.TestCase):
         document = Document(BytesIO(outputs['docx']['content']))
         text = '\n'.join(p.text for p in document.paragraphs)
         self.assertIn('DRAFT', document.sections[0].header.paragraphs[0].text)
-        self.assertIn('[확인 필요]', text)
+        # DRAFT preserves exact sentences; unrelated omissions stay in the appendix.
+        self.assertIn('첫 번째 계약 문장입니다.', text)
+        self.assertIn('두 번째 계약 문장입니다.', text)
+        self.assertNotIn('[확인 필요] 첫 번째 계약 문장입니다.', text)
+        self.assertNotIn('[확인 필요] 두 번째 계약 문장입니다.', text)
+        self.assertIn('[필수 확인]', text)
         self.assertIn('미확정 사항', text)
         self.assertNotIn('By: ___', text)
         with fitz.open(stream=outputs['pdf']['content'], filetype='pdf') as pdf:

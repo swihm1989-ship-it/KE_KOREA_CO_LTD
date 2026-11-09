@@ -1,3 +1,4 @@
+from Quotation_KEKOREA.contracts.clause_terms import clause_evidence, merge_clause_candidates
 """Streamlit UI for private contract drafting, review, revision and export."""
 import hashlib
 import re
@@ -548,6 +549,32 @@ def _render_draft(repo, snapshot, state_key, env):
         width:100%!important;max-width:none!important;min-width:0!important;
         margin:0!important;padding:0!important;text-align:left!important;
     }
+    /* Sentence text is real left-aligned document prose; the button is a click target only. */
+    .st-key-contract_document_paper [class*="st-key-contract_sentence_display_"] {
+        position:relative;min-width:0;
+    }
+    .st-key-contract_document_paper .contract-sentence-body {
+        display:block;width:100%;box-sizing:border-box;margin:0;padding:.35rem .5rem;
+        text-align:left!important;white-space:pre-wrap;overflow-wrap:anywhere;
+        word-break:break-word;font:normal clamp(.8rem,1vw,1rem)/1.7 Georgia,"Malgun Gothic",serif;
+        color:#172b3a;cursor:pointer;border-radius:2px;min-height:2rem;
+    }
+    /* Keep original button key and accessible label, but use it only as a full-surface hit area. */
+    .st-key-contract_document_paper [class*="st-key-contract_sentence_display_"] [data-testid="stButton"] button {
+        position:absolute!important;inset:0!important;z-index:3;
+        display:block!important;width:100%!important;height:100%!important;
+        min-height:0!important;opacity:0!important;margin:0!important;
+        cursor:pointer!important;
+    }
+    .st-key-contract_document_paper [class*="st-key-contract_sentence_display_"]:has(button:hover) .contract-sentence-body {
+        background:#f0f7fc;
+    }
+    .st-key-contract_document_paper [class*="st-key-contract_sentence_display_"]:has(button:focus-visible) .contract-sentence-body {
+        outline:2px solid #0877c9;outline-offset:2px;
+    }
+    .st-key-contract_document_paper .contract-sentence-body.is-open {
+        background:#e7f2fa;border-left:3px solid #0877c9;padding-left:calc(.5rem - 3px);
+    }
     /* Long clause readability: never shrink below a usable font size or clip text. */
     .st-key-contract_document_paper [class*="st-key-contract_sentence_display_"] {
         position:relative;min-width:0;}
@@ -599,6 +626,12 @@ def _render_draft(repo, snapshot, state_key, env):
                         with st.container(key=f"contract_sentence_display_{contract_id}_{sentence_id}"):
                             if sentence_id in preview_texts:
                                 st.caption("✎ AI 추천 수정안 미리보기 · 확정 저장 전")
+                            # Render document prose independently of Streamlit's button label alignment.
+                            # The same keyed button remains the clickable, keyboard-accessible hit area.
+                            st.markdown(
+                                '<div class="contract-sentence-body' + (' is-open' if is_open else '') + '">'
+                                + escape(displayed_text).replace('\n', '<br/>') + '</div>',
+                                unsafe_allow_html=True)
                             if st.button(displayed_text, key=f"contract_sentence_{contract_id}_{sentence_id}",
                                          help=(displayed_text if len(displayed_text) > 180 else
                                                "클릭해 이 문장의 메모를 열거나 선택합니다."),
@@ -969,10 +1002,38 @@ def _persist_contract_outputs(repo, snapshot, outputs, mode):
 def _run_editor(repo, snapshot, state_key, env):
     st.markdown('<span id="contract-terms"></span>', unsafe_allow_html=True)
     st.markdown("#### 거래금액·수수료·지급·기간·법률 및 기타 조건")
+    candidate_key = f"contract_clause_candidates_{snapshot['contract_id']}_{snapshot['revision']}"
+    editor_version_key = f"contract_terms_editor_version_{snapshot['contract_id']}_{snapshot['revision']}"
+    st.caption('계약서 본문과 구조화 조건표는 별도 데이터입니다. 이미 본문에 있는 정보만 AI가 다시 추출해 입력 후보로 보여줍니다.')
+    can_extract = bool(clause_evidence(snapshot)) and st.session_state.get(f"contract_ai_consent_{snapshot['contract_id']}", False)
+    if st.button('계약서 본문에서 조건 후보 불러오기', disabled=not can_extract,
+                 key=f"contract_clause_extract_{snapshot['contract_id']}_{snapshot['revision']}"):
+        try:
+            with st.spinner('현재 계약서 본문에서 거래조건 후보를 찾는 중입니다...'):
+                analysis = analyze_trade([{'role': 'user', 'content': clause_evidence(snapshot)}],
+                                         snapshot, [], env=env)
+            if analysis['contract_type'] != snapshot['contract_type']:
+                raise ValueError('계약 유형이 달라 기존 조건을 보존했습니다.')
+            staged = merge_clause_candidates(snapshot, analysis)
+            st.session_state[candidate_key] = staged
+            st.session_state[editor_version_key] = st.session_state.get(editor_version_key, 0) + 1
+            st.rerun()
+        except (ValueError, RuntimeError, ContractRepositoryError) as exc:
+            st.error(f'본문 거래조건 후보 추출 실패: {exc}')
+    editor_snapshot = st.session_state.get(candidate_key) or snapshot
+    if candidate_key in st.session_state:
+        st.info('본문에서 찾은 조건이 입력표에 AI 제안으로 나타납니다. 실제 값과 당사자 정보를 검토하고 상태를 확정한 뒤 기존 저장 버튼을 누르세요. 아직 원본은 변경되지 않았습니다.')
+        if st.button('불러온 후보 취소', key=f"contract_clause_cancel_{snapshot['contract_id']}_{snapshot['revision']}"):
+            st.session_state.pop(candidate_key, None)
+            st.session_state[editor_version_key] = st.session_state.get(editor_version_key, 0) + 1
+            st.rerun()
+    editor_version = st.session_state.get(editor_version_key, 0)
     state_key_terms = f"contract_terms_table_{snapshot['contract_id']}_{snapshot['revision']}"
+    if editor_version:
+        state_key_terms += f"_{editor_version}"
     terms_rows = st.data_editor(
-        _term_rows(snapshot), key=state_key_terms, hide_index=True,
-        num_rows="dynamic", use_container_width=True,
+        _term_rows(editor_snapshot), key=state_key_terms, hide_index=True,
+        num_rows="dynamic", width="stretch",
         column_config={
             "key": st.column_config.TextColumn("내부 키", disabled=True),
             "항목": st.column_config.TextColumn("조건 항목", disabled=True),
@@ -988,7 +1049,7 @@ def _run_editor(repo, snapshot, state_key, env):
     st.markdown('<span id="contract-parties"></span>', unsafe_allow_html=True)
     st.markdown("#### 당사자 및 역할")
     party_rows = st.data_editor(
-        _party_rows(snapshot), key=f"contract_parties_table_{snapshot['contract_id']}_{snapshot['revision']}",
+        _party_rows(editor_snapshot), key=f"contract_parties_table_{snapshot['contract_id']}_{snapshot['revision']}_{st.session_state.get(editor_version_key, 0)}",
         hide_index=True, num_rows="dynamic", use_container_width=True,
         column_config={
             "id": st.column_config.TextColumn("ID", disabled=True),
