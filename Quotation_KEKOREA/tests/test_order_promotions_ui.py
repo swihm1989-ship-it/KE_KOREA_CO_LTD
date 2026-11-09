@@ -1,4 +1,5 @@
 """Exercise event commands and late quantity completion through PO/PI screens."""
+from Quotation_KEKOREA.tests.auth_test_helpers import isolated_authenticated_ui_tests
 import copy
 import importlib.util
 import json
@@ -10,6 +11,7 @@ from Quotation_KEKOREA.tests.test_order_promotions import RULES, order
 
 
 @unittest.skipUnless(importlib.util.find_spec('streamlit'), 'Streamlit is not installed')
+@isolated_authenticated_ui_tests
 class OrderPromotionsUiTests(unittest.TestCase):
     def test_six_commands_reach_po_pi_review_and_enable_document_creation(self):
         from streamlit.testing.v1 import AppTest

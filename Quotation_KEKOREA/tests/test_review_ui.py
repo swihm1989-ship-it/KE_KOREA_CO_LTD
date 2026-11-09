@@ -1,4 +1,5 @@
 """Exercise document completion, reruns, and stale-download prevention in Streamlit."""
+from Quotation_KEKOREA.tests.auth_test_helpers import isolated_authenticated_ui_tests
 import importlib.util
 import copy
 from pathlib import Path
@@ -9,6 +10,7 @@ from Quotation_KEKOREA.tests.test_review_fields import complete_draft
 
 
 @unittest.skipUnless(importlib.util.find_spec('streamlit'), 'Streamlit is not installed')
+@isolated_authenticated_ui_tests
 class ReviewUiTests(unittest.TestCase):
     def test_unconfirmed_ci_product_match_allows_draft_pdf(self):
         from streamlit.testing.v1 import AppTest

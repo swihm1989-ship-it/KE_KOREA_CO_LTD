@@ -278,3 +278,34 @@ $LASTEXITCODE
 - PDF/DOCX changes are implemented in contracts/draft_exports.py and contracts/exports.py.
 - Regression tests cover draft formatting, final authorization, and export behavior.
 - Rendered contracts must be reviewed before signing.
+
+## 2026-11-09 AI contract note review format recovery
+
+- In `contracts/service.py`, AI issue lists containing plain nonempty text are normalized into explicit, unconfirmed review issues; invalid/empty content fails closed rather than disappearing.
+- In `contracts/workspace.py`, the model receives clearer issue-structure instructions. Original sentence validation, conflict detection, and atomic revision approval remain unchanged.
+- The BOX 3 final-revision-request error path explains that the contract has not changed and existing note drafts remain available.
+- `tests/test_contract_review_issue_recovery.py` checks mixed/invalid issues, unmodified snapshots on failure, and correct proposal creation. FINAL still requires current-revision approval and existing placeholder/seal-authority checks.
+
+## 2026-11-09 BOX 3 note revision preview reliability
+
+- `contracts/service.py`: preserve nonempty free-text AI review issues as unconfirmed review items, while rejecting malformed/empty issue data without accepting or discarding risks.
+- `contracts/workspace.py`: explicitly request structured AI issue objects; keep the revision and user notes unchanged until review/approval.
+- `contracts/ui.py`: display entire proposed contract in the existing revision-comparison panel, and the full saved contract immediately after approval. Keep approval/commit and FINAL seal authorization separate; display a helpful message on proposal errors.
+- `tests/test_contract_issue_preview_recovery.py`: cover recoverable AI issues, invalid issues, proposal preview integrity and unchanged source revision.
+
+## Auth and contract review integration (2026-11-09)
+
+- Auth/gate.py protects the entire Streamlit UI before sidebar, database and AI use. Streamlit Secrets configure one admin login; a signed cookie expires 12 hours after initial login, even across refresh.
+- Auth/session.py provides HMAC-signed time-limited tokens. The CookieController is a JavaScript-cookie component (not HttpOnly), appropriate only for a limited demo; production access needs stronger authentication and rate limiting.
+- BOX 3 AI review issue objects and text issues normalize into explicit unconfirmed review items. Unknown AI issue structures fail safely without changing existing contract text or notes.
+- Proposed revisions require human comparison/approval and atomic revision saving. The UI provides the full approved preview and displays all remaining FINAL blockers.
+- Logged-in admin no longer retypes the FINAL seal password. Direct standalone contract module retains a legacy password fallback for compatibility; explicit final approval and verified seal still apply.
+- Dependencies: streamlit-cookies-controller==0.0.4. Credentials and session signing secret belong in private Streamlit Secrets, never in Git.
+- The uploaded four Python files were the direct source for this repair, rather than a historical GitHub or ZIP patch version.
+
+## Authenticated UI test isolation and AI review issue schema (2026-11-09)
+- Existing Streamlit AppTest suites simulate a signed-in test session **only within each test method**; production login remains mandatory.
+- The server-side Auth gate is unchanged, and separate authentication/security tests continue to test real 12-hour signed-token validation.
+- AI review issues provided as text remain unconfirmed, while malformed opaque issues fail closed and preserve user notes.
+- Legacy error messages retain the original invalid severity for audit and compatibility.
+- Run full regressions before deployment; no login bypass environment variable is introduced.

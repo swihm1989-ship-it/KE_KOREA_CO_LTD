@@ -1,4 +1,5 @@
 """Navigate real Streamlit widgets while extraction/render workers are running."""
+from Quotation_KEKOREA.tests.auth_test_helpers import isolated_authenticated_ui_tests
 from contextlib import ExitStack
 import copy
 import importlib.util
@@ -11,6 +12,7 @@ from Quotation_KEKOREA.tests.test_review_fields import complete_draft
 
 
 @unittest.skipUnless(importlib.util.find_spec('streamlit'), 'Streamlit is not installed')
+@isolated_authenticated_ui_tests
 class WorkspaceUiTests(unittest.TestCase):
     def setUp(self):
         from streamlit.testing.v1 import AppTest

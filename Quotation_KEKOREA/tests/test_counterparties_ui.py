@@ -1,3 +1,4 @@
+from Quotation_KEKOREA.tests.auth_test_helpers import isolated_authenticated_ui_tests
 import importlib.util
 import json
 from pathlib import Path
@@ -9,6 +10,7 @@ from Quotation_KEKOREA.tests.test_review_fields import complete_draft
 
 
 @unittest.skipUnless(importlib.util.find_spec('streamlit'), 'Streamlit is not installed')
+@isolated_authenticated_ui_tests
 class CounterpartyUiTests(unittest.TestCase):
     def test_database_defaults_reach_pi_po_and_ci_without_overwriting_ship_to(self):
         from streamlit.testing.v1 import AppTest

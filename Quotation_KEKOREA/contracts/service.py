@@ -36,34 +36,50 @@ def language_conflict(text, selected_language):
 
 
 def _normalize_ai_issues(issues, error_message):
+    """Retain AI warnings while normalizing safely understood response variations.
+
+    This is data-validation only. It does not approve issues or alter contract terms.
+    """
+    if issues is None:
+        return []
+    if isinstance(issues, str):
+        if not issues.strip():
+            raise ValueError(error_message)
+        issues = [issues]
     if not isinstance(issues, list):
         raise ValueError(error_message)
     normalized = []
+    text_count = 0
     for issue in issues:
-        if not isinstance(issue, dict):
-            raise ValueError("Contract AI returned an invalid review issue.")
-        candidate = dict(issue)
-        message = candidate.get("message")
-        if not isinstance(message, str) or not message.strip():
-            raise ValueError("Contract AI returned a review issue without a message.")
-        if candidate.get("severity") not in {"block", "confirm", "info"}:
-            reported_severity = candidate.get("severity")
-            reported_severity = (
-                reported_severity.strip()[:40]
-                if isinstance(reported_severity, str) and reported_severity.strip()
-                else "unspecified"
-            )
-            candidate["severity"] = "confirm"
-            candidate["message"] = (
-                f"{message.strip()} (AI severity '{reported_severity}' was unclear; "
-                "please review and confirm.)"
-            )
-        code = candidate.get("code")
+        if isinstance(issue, str):
+            if not issue.strip():
+                raise ValueError("AI 검토사항에 빈 항목이 있습니다. 기존 문장 메모는 유지됩니다.")
+            code = 'ai_review_text' if text_count == 0 else f'ai_review_text_{text_count}'
+            text_count += 1
+            candidate = {'code': code, 'severity': 'confirm', 'message': issue.strip()}
+        elif isinstance(issue, dict):
+            candidate = dict(issue)
+            message = candidate.get('message')
+            if not isinstance(message, str) or not message.strip():
+                fallback = next((candidate.get(key) for key in ('description', 'text', 'detail')
+                                 if isinstance(candidate.get(key), str) and candidate[key].strip()), None)
+                if not fallback:
+                    raise ValueError("AI 검토사항 설명이 비어 있습니다. 기존 문장 메모는 유지됩니다.")
+                candidate['message'] = fallback.strip()
+        else:
+            raise ValueError("AI 검토사항 데이터 형식이 잘못되었습니다. 기존 문장 메모는 유지됩니다.")
+        candidate['message'] = candidate['message'].strip()
+        if candidate.get('severity') not in {'block', 'confirm', 'info'}:
+            reported = candidate.get('severity')
+            reported = reported.strip()[:40] if isinstance(reported, str) and reported.strip() else 'unspecified'
+            candidate['severity'] = 'confirm'
+            candidate['message'] += (f" (AI severity '{reported}' was unclear; "
+                                     'please review and confirm.)')
+        code = candidate.get('code')
         if not isinstance(code, str) or not code.strip():
-            candidate["code"] = "ai_review"
+            candidate['code'] = 'ai_review'
         normalized.append(candidate)
     return normalized
-
 
 def _http_error_detail(exc, api_key=""):
     try:

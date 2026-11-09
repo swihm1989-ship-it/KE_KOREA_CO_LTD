@@ -1,4 +1,5 @@
 """Product annotations must resolve prices in the actual review screen."""
+from Quotation_KEKOREA.tests.auth_test_helpers import isolated_authenticated_ui_tests
 import importlib.util
 from pathlib import Path
 import unittest
@@ -9,6 +10,7 @@ from Quotation_KEKOREA.tests.test_review_fields import complete_draft
 
 
 @unittest.skipUnless(importlib.util.find_spec('streamlit'), 'Streamlit is not installed')
+@isolated_authenticated_ui_tests
 class ProductMatchingUiTests(unittest.TestCase):
     def test_annotations_load_prices_without_bypassing_product_confirmation(self):
         from streamlit.testing.v1 import AppTest

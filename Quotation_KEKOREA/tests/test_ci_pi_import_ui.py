@@ -1,4 +1,5 @@
 """Attached PI commercial data reaches CI without catalog/default discount changes."""
+from Quotation_KEKOREA.tests.auth_test_helpers import isolated_authenticated_ui_tests
 import copy
 import importlib.util
 import json
@@ -13,6 +14,7 @@ from Quotation_KEKOREA.tests.test_ci_pi_import import pi_source
 
 
 @unittest.skipUnless(importlib.util.find_spec('streamlit'), 'Streamlit is not installed')
+@isolated_authenticated_ui_tests
 class CiPiImportUiTests(unittest.TestCase):
     def test_pi_conversion_request_preserves_prices_discounts_and_blocks_changed_source_amount(self):
         for mime in ('application/pdf', 'image/png'):

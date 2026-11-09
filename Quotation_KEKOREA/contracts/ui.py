@@ -394,6 +394,22 @@ def _references_panel(repo, contract_id, env):
                     st.rerun()
 
 
+def _render_revision_preview(snapshot, heading):
+    """Display the complete saved or proposed clause text, never implicitly approve it."""
+    st.markdown(f'#### {heading}')
+    st.caption(f"Revision {snapshot.get('revision')} · {'한국어' if snapshot.get('language') == 'ko' else 'English'} · 실제 문서 본문 미리보기")
+    st.markdown(f"**{snapshot.get('title') or 'Contract'}**")
+    for clause in sorted(snapshot.get('clauses') or [], key=lambda c: int(c.get('order') or 0)):
+        st.markdown(f"**{clause.get('title') or ''}**")
+        for sentence in clause.get('sentences') or []:
+            if str(sentence.get('text') or '').strip():
+                st.write(sentence['text'])
+    blockers = final_document_blockers(snapshot)
+    if blockers:
+        st.caption(f'최종 PDF 생성 전 해결할 실제 본문 조건 {len(blockers)}건. 미리보기와 최종 날인은 별개의 단계입니다.')
+    else:
+        st.caption('본문 차단 조건은 발견되지 않았습니다. FINAL 생성 시 승인 및 회사 직인 권한을 별도 확인합니다.')
+
 def _proposal_panel(repo, snapshot, proposal, state_key):
     st.markdown("#### 수정안 비교")
     stale = proposal.get("base_revision") != snapshot.get("revision")
@@ -426,6 +442,15 @@ def _proposal_panel(repo, snapshot, proposal, state_key):
                 key=f"proposal_change_{proposal['id']}_{change['id']}")
             if checked:
                 selected_ids.append(change["id"])
+    # Show the entire candidate contract before the user approves the revision.
+    # Dry-run uses the unchanged revision engine and makes no persistence calls.
+    try:
+        preview = apply_proposal(snapshot, proposal, [c['id'] for c in proposal.get('changes', [])])
+    except (ValueError, RevisionConflict) as exc:
+        st.error('수정안 전체 미리보기를 만들 수 없습니다: ' + str(exc))
+    else:
+        with st.expander('최종 수정안 전체 계약서 미리보기', expanded=True):
+            _render_revision_preview(preview, '변경 적용 전 미리보기 — 아직 승인되지 않음')
     batch_reviewed = True
     if len(proposal.get('note_ids', [])) > 1:
         st.caption("같은 문장·조건의 충돌은 자동 차단합니다. 서로 다른 문장의 의미 충돌은 금액·기한·역할을 함께 대조해 확인하세요.")
@@ -453,6 +478,7 @@ def _proposal_panel(repo, snapshot, proposal, state_key):
             # The revision RPC is the authoritative atomic save. A separate
             # annotation-log failure must never leave this session on the old base.
             st.session_state[state_key] = saved
+            st.session_state[f"contract_approved_preview_{snapshot['contract_id']}"] = saved['revision']
             st.session_state.pop("contract_pending_proposal", None)
             st.session_state.pop("contract_pending_terms", None)
             try:
@@ -467,7 +493,8 @@ def _proposal_panel(repo, snapshot, proposal, state_key):
             except ContractRepositoryError:
                 st.session_state[f"contract_commit_notice_{snapshot['contract_id']}"] = (
                     "계약서 revision은 저장됐지만 수정 이력 메모의 상태 기록은 확인이 필요합니다. 본문을 다시 적용하지 마세요.")
-            st.success(f"Revision {saved['revision']}로 저장했습니다.")
+            st.session_state[f"contract_last_saved_revision_{snapshot['contract_id']}"] = saved['revision']
+            st.success(f"Revision {saved['revision']}로 저장했습니다. 최종 본문 및 차단 항목을 확인하세요.")
             st.rerun()
         except (ValueError, RevisionConflict, ContractRepositoryError) as exc:
             st.error(str(exc))
@@ -837,6 +864,7 @@ def _batch_request_panel(repo, snapshot, state_key, env, pending, buffers):
             st.rerun()
         except (ValueError, RuntimeError, ContractRepositoryError) as exc:
             st.error(str(exc))
+            st.info('수정안 준비가 중단됐습니다. 기존 계약서와 저장된 메모는 유지됩니다. 수정 내용을 다시 입력할 필요 없이 재요청할 수 있습니다.')
 
 
 def _review_panel(repo, snapshot, state_key, issues):
@@ -955,17 +983,27 @@ def _export_panel(repo, snapshot, env):
         blockers = final_document_blockers(snapshot)
         if issues:
             st.caption(f'내부 검토사항 {len(issues)}건은 PDF에 출력되지 않습니다. 최종 승인 전 내용을 확인하세요.')
-        for message in blockers[:6]:
+        if blockers:
+            st.warning(f'FINAL 생성 전 수정할 계약 본문/당사자 항목: {len(blockers)}건. BOX 3에서 남은 항목을 수정한 뒤 새 revision을 승인하세요.')
+        for message in blockers:
             st.error(message)
         approval_key = f"contract_final_approved_{snapshot['contract_id']}_{snapshot['revision']}"
         approved = st.checkbox('현재 revision의 계약 본문 및 당사자를 확인하고 최종 파일을 승인합니다.',
                                key=approval_key)
-        password = st.text_input('FINAL 회사 직인 사용 암호', type='password',
-                                 key=f"contract_final_seal_access_{snapshot['contract_id']}_{snapshot['revision']}")
-        configured = str(env.get('CONTRACT_FINAL_SEAL_PASSWORD') or '')
-        authorized = bool(configured) and hmac.compare_digest(str(password), configured)
-        if not configured:
-            st.caption('관리자: 비공개 Streamlit Secrets에 CONTRACT_FINAL_SEAL_PASSWORD를 설정하세요.')
+        # A verified application login replaces repeated seal-password entry.
+        # The legacy password path remains only for direct standalone contract UI
+        # integrations and existing regression tests (without the app login gate).
+        from Auth.gate import is_authenticated
+        if is_authenticated(st):
+            authorized = True
+            st.caption('관리자 로그인으로 직인 사용 권한이 확인되었습니다.')
+        else:
+            password = st.text_input('FINAL 회사 직인 사용 암호', type='password',
+                                     key=f"contract_final_seal_access_{snapshot['contract_id']}_{snapshot['revision']}")
+            configured = str(env.get('CONTRACT_FINAL_SEAL_PASSWORD') or '')
+            authorized = bool(configured) and hmac.compare_digest(str(password), configured)
+            if not configured:
+                st.caption('관리자: 앱 로그인 또는 비공개 Streamlit Secrets에 직인 사용 권한을 설정하세요.')
         disabled = bool(blockers) or not approved or not authorized
         for ext in ('pdf', 'docx'):
             button_key = f"contract_export_final_{snapshot['contract_id']}_{snapshot['revision']}_{ext}"
@@ -1679,6 +1717,10 @@ def render_contract_page(page, env):
             proposal = st.session_state.get('contract_pending_proposal')
             if proposal and proposal.get('contract_id') == active_id:
                 _proposal_panel(repo, snapshot, proposal, state_key)
+            # Following an approved commit, show the saved full contract immediately.
+            if st.session_state.get(f"contract_approved_preview_{active_id}") == snapshot['revision']:
+                with st.expander('최종 수정 완료 — 전체 계약서 미리보기', expanded=True):
+                    _render_revision_preview(snapshot, '승인·저장된 계약서')
             _export_panel(repo, snapshot, env)
 
     with st.expander("저장·복사·언어 버전 관리", expanded=False):

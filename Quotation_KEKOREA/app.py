@@ -361,6 +361,9 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+from Auth.gate import require_login
+require_login(st, ROOT)
+
 with st.sidebar:
     logo = ROOT / "assets" / "company_logo.png"
     if logo.exists():

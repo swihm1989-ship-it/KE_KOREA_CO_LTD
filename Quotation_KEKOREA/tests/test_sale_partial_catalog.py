@@ -1,4 +1,5 @@
 """PI/CI use verified buyer sale prices even if one image row is unresolved."""
+from Quotation_KEKOREA.tests.auth_test_helpers import isolated_authenticated_ui_tests
 import unittest
 import importlib.util
 from pathlib import Path
@@ -20,6 +21,7 @@ def sale_draft(dtype='PI', buyer='Dear Glow', currency=None):
                        dict(product_name='Unconfirmed product', capacity='10ml', quantity='1')])
 
 
+@isolated_authenticated_ui_tests
 class SalePartialCatalogTests(unittest.TestCase):
     @unittest.skipUnless(importlib.util.find_spec('streamlit'), 'Streamlit is not installed')
     def test_pi_review_requests_only_unmatched_row_price(self):

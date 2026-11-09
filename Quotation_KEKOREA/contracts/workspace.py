@@ -100,7 +100,9 @@ def propose_notes_revision(snapshot, notes, *, env):
         'Each change must have a unique id, an existing '
         'sentence_id, exact original_text, proposed_text, boolean delete_sentence, reason, and '
         'required_to_resolve_conflict. Include a change for every requested sentence. '
-        'Do not return term_key changes or modify protected payment clauses; report uncertainty as an issue.',
+        'Do not return term_key changes or modify protected payment clauses; report uncertainty as an issue. '
+        'Return issues as an array of objects with nonempty message, code, and severity (block/confirm/info). '
+        'If no issues, return an empty array. Do not mix free-form text into issues.',
         {'snapshot': snapshot, 'notes': requests}, env=env)
     conflicts = data.get('conflicts', [])
     if not isinstance(conflicts, list):

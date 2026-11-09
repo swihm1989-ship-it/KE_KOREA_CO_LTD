@@ -1,4 +1,5 @@
 """PI sample edits must survive sidebar navigation and invalidate old files."""
+from Quotation_KEKOREA.tests.auth_test_helpers import isolated_authenticated_ui_tests
 import copy
 import importlib.util
 import json
@@ -10,6 +11,7 @@ from Quotation_KEKOREA.tests.test_order_promotions import order
 
 
 @unittest.skipUnless(importlib.util.find_spec('streamlit'), 'Streamlit is not installed')
+@isolated_authenticated_ui_tests
 class PiSamplesUiTests(unittest.TestCase):
     def test_prompt_manual_edits_totals_sidebar_and_stale_downloads(self):
         from streamlit.testing.v1 import AppTest

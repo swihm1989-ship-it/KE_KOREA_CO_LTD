@@ -1,4 +1,5 @@
 """All document menus accept and retain PDFs through the existing worker path."""
+from Quotation_KEKOREA.tests.auth_test_helpers import isolated_authenticated_ui_tests
 import copy
 import importlib.util
 from pathlib import Path
@@ -10,6 +11,7 @@ from Quotation_KEKOREA.tests.test_order_promotions import order
 
 
 @unittest.skipUnless(importlib.util.find_spec('streamlit'), 'Streamlit is not installed')
+@isolated_authenticated_ui_tests
 class PdfUploadUiTests(unittest.TestCase):
     def test_document_menus_preview_pdf_safely_and_send_complete_attachment_to_extractor(self):
         from streamlit.testing.v1 import AppTest
