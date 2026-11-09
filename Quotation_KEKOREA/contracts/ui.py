@@ -816,18 +816,45 @@ def _export_panel(repo, snapshot, env):
                             raise ValueError("최종 검증을 통과하지 못했습니다.")
                         outputs = (export_draft(snapshot, formats=(extension,), env=env) if mode == 'draft'
                                    else export_contract(snapshot, formats=(extension,)))
-                        _persist_contract_outputs(repo, snapshot, outputs, mode)
-                        st.session_state[f"contract_output_{mode}_{snapshot['contract_id']}_{snapshot['revision']}_{extension}"] = outputs[extension]
-                        st.success("현재 revision의 파일을 비공개 저장했습니다.")
+                        # Render first, then save privately. Do not conflate a valid PDF
+                        # with a failed Supabase upload or export-record write.
+                        local_key = f"contract_unsaved_output_{mode}_{snapshot['contract_id']}_{snapshot['revision']}_{extension}"
+                        saved_key = f"contract_output_{mode}_{snapshot['contract_id']}_{snapshot['revision']}_{extension}"
+                        try:
+                            _persist_contract_outputs(repo, snapshot, outputs, mode)
+                        except ContractRepositoryError as storage_exc:
+                            # _persist_contract_outputs already performs its normal
+                            # partial-upload rollback. Keep bytes only in this session,
+                            # not in the DB or a public location.
+                            st.session_state[local_key] = outputs[extension]
+                            st.session_state.pop(saved_key, None)
+                            st.warning("파일은 생성됐지만 비공개 저장소 기록에 실패했습니다. "
+                                       "아래 '직접 다운로드'로 받을 수 있습니다. "
+                                       f"서버 저장 실패 원인: {storage_exc}")
+                        else:
+                            st.session_state.pop(local_key, None)
+                            st.session_state[saved_key] = outputs[extension]
+                            st.success("현재 revision의 파일을 비공개 저장했습니다.")
                     except (ValueError, RuntimeError, ContractRepositoryError) as exc:
-                        st.error(f"파일 생성/저장에 실패했습니다. {exc}")
+                        st.error(f"파일 생성 단계에서 실패했습니다. {exc}")
                 output = st.session_state.get(f"contract_output_{mode}_{snapshot['contract_id']}_{snapshot['revision']}_{extension}")
                 if output and not (mode == 'final' and issues):
                     st.download_button(f"{title} {extension.upper()} 다운로드", data=output['content'],
                                        file_name=output['filename'], mime=_contract_mime(extension),
                                        key=f"contract_download_{mode}_{snapshot['contract_id']}_{snapshot['revision']}_{extension}")
-    current_exports = [item for item in repo.list_exports(snapshot['contract_id'])
-                       if item.get('revision') == snapshot['revision']]
+                local_output = st.session_state.get(
+                    f"contract_unsaved_output_{mode}_{snapshot['contract_id']}_{snapshot['revision']}_{extension}")
+                if local_output and not (mode == 'final' and issues):
+                    st.download_button(f"{title} {extension.upper()} 직접 다운로드 (서버 미저장)",
+                                       data=local_output['content'], file_name=local_output['filename'],
+                                       mime=_contract_mime(extension),
+                                       key=f"contract_local_download_{mode}_{snapshot['contract_id']}_{snapshot['revision']}_{extension}")
+    try:
+        current_exports = [item for item in repo.list_exports(snapshot['contract_id'])
+                           if item.get('revision') == snapshot['revision']]
+    except ContractRepositoryError as exc:
+        st.caption(f"비공개 출력 기록을 조회하지 못했습니다. 서버 저장 상태를 확인해 주세요: {exc}")
+        current_exports = []
     if current_exports:
         with st.expander("현재 revision의 비공개 출력 기록", expanded=False):
             for item in current_exports:
