@@ -1,0 +1,934 @@
+{
+  "date": "2026-11-09",
+  "moves": [
+    {
+      "from": "contract_ui_simplification",
+      "to": "archive/bugfixes/ui/contract_ui_simplification",
+      "files": [
+        {
+          "path": "apply_contract_ui_simplification.py",
+          "sha256": "e07a3152aa84c2629804e6d268866d4ab1bf9b5eec935429c27e95771e5a50c4",
+          "bytes": 3907
+        },
+        {
+          "path": "README.txt",
+          "sha256": "82f4c6c1a3fe8cb3138c97f98daa72d1aed332a0e99542fc43165bf1774dc84c",
+          "bytes": 600
+        }
+      ]
+    },
+    {
+      "from": "kekorea_first_option_fix",
+      "to": "archive/bugfixes/ui/kekorea_first_option_fix",
+      "files": [
+        {
+          "path": "apply_first_option_fix.py",
+          "sha256": "83a54d3951cf9002cb9b34d01f2ab3127c3835f9646ea4d6f8f66b14fd11c42c",
+          "bytes": 2819
+        },
+        {
+          "path": "test_patch.py",
+          "sha256": "7e2e6f7d4d1322ccf096447cdf591a0a41cd6d088231e9eb54c1806499bc0bad",
+          "bytes": 1519
+        }
+      ]
+    },
+    {
+      "from": "kekorea_full_sentence_patch",
+      "to": "archive/bugfixes/ui/kekorea_full_sentence_patch",
+      "files": [
+        {
+          "path": "apply_full_sentence_patch.py",
+          "sha256": "c1b1c8ab7380660f14f3603fb412a91a470566bf9aa3a40a9a545862b9d612c0",
+          "bytes": 7236
+        },
+        {
+          "path": "backup_20261109_094149/Quotation_KEKOREA/contracts/ui.py",
+          "sha256": "d041230c11d1fa49c559124914a65fd9a3395d0ac035ab723b9aac942e179cf3",
+          "bytes": 96414
+        },
+        {
+          "path": "backup_20261109_094149/Quotation_KEKOREA/Presentation/README.md",
+          "sha256": "500790ade059576de46d9243d185bafdf0a5e0e79cc6d10131a9d083de0cabee",
+          "bytes": 10529
+        },
+        {
+          "path": "backup_20261109_094149/Quotation_KEKOREA/README.md",
+          "sha256": "2bac3ee8a5e3d9a4b9121e99e12b936f28250413834b2ede75796526cf8928b7",
+          "bytes": 90868
+        },
+        {
+          "path": "backup_20261109_094149/Quotation_KEKOREA/README_CONTRACTS.md",
+          "sha256": "6eec43789eb79278021ade3e8fc72c0e4de058b3bf004e8bae5d5e6d66c9e431",
+          "bytes": 21565
+        },
+        {
+          "path": "backup_20261109_094149/Quotation_KEKOREA/Team/README.md",
+          "sha256": "b121e5c62d0c4df2ff22140ce589a05947db85884dda246e182c26228a4aac44",
+          "bytes": 33043
+        },
+        {
+          "path": "backup_20261109_094149/README.md",
+          "sha256": "29c040ba38a9e220dd8b217d8f846b8eadc60fd50d86fe7fa423680580080c92",
+          "bytes": 8076
+        }
+      ]
+    },
+    {
+      "from": "kekorea_inline_ui_patch",
+      "to": "archive/bugfixes/ui/kekorea_inline_ui_patch",
+      "files": [
+        {
+          "path": "apply_inline_ui_patch.py",
+          "sha256": "560f6bc0d57cc96a4d16cec43beb74adceed24cfa357a162d74e0128ce63e249",
+          "bytes": 8230
+        },
+        {
+          "path": "self_test_patch.py",
+          "sha256": "0cc02008c19645075fc570177aae1a80d7844cb930ba4e1c7ef37cdd1770df50",
+          "bytes": 2552
+        }
+      ]
+    },
+    {
+      "from": "kekorea_sentence_alignment_fix",
+      "to": "archive/bugfixes/ui/kekorea_sentence_alignment_fix",
+      "files": [
+        {
+          "path": "__pycache__/apply_sentence_alignment_fix.cpython-313.pyc",
+          "sha256": "852628c0afb8e13fe9c00607f406f745ab3ed4d272273278f1fbcd571bce0822",
+          "bytes": 4152
+        },
+        {
+          "path": "apply_sentence_alignment_fix.py",
+          "sha256": "75fe8e7987c7389157df3436dece9083a590c817679593af44cc565a510caa82",
+          "bytes": 3089
+        }
+      ]
+    },
+    {
+      "from": "kekorea_sentence_left_edge_fix",
+      "to": "archive/bugfixes/ui/kekorea_sentence_left_edge_fix",
+      "files": [
+        {
+          "path": "apply_sentence_left_edge_fix.py",
+          "sha256": "c0b8968d02cfa483cf4541b6fb98cbca8288dc95ecda02ca7238c679a624cc7b",
+          "bytes": 5993
+        }
+      ]
+    },
+    {
+      "from": "kekorea_pdf_export_fix",
+      "to": "archive/bugfixes/pdf/kekorea_pdf_export_fix",
+      "files": [
+        {
+          "path": "apply_pdf_export_fix.py",
+          "sha256": "c084cac2f4dcc19017a2f4b669d62d231b26e55441a7488efd797049477dda2b",
+          "bytes": 10287
+        }
+      ]
+    },
+    {
+      "from": "kekorea_export_review_cleanup",
+      "to": "archive/bugfixes/pdf/kekorea_export_review_cleanup",
+      "files": [
+        {
+          "path": "apply_review_cleanup.py",
+          "sha256": "77f5e5a927a0ef3ea57ce39518a30fd083b850a8a3189e41705785205bbb9586",
+          "bytes": 6061
+        },
+        {
+          "path": "README_적용방법.md",
+          "sha256": "a7bfb1100764a23fcce18e58d2105211d10f4a2088d41adab85394ab8adc466c",
+          "bytes": 2159
+        }
+      ]
+    },
+    {
+      "from": "contract_language_fix_v2",
+      "to": "archive/bugfixes/language/contract_language_fix_v2",
+      "files": [
+        {
+          "path": "apply_contract_language_v2.py",
+          "sha256": "d45859d1975e383b3983b0411c4c20aa86bc5f5a6deb22fdeeeb794212198637",
+          "bytes": 4908
+        },
+        {
+          "path": "README.txt",
+          "sha256": "61be94d9cb6404d94c7a62eea62b50120a2c3bb84b876540ef2b46a35557c741",
+          "bytes": 1469
+        },
+        {
+          "path": "test_contract_language_fallback.py",
+          "sha256": "1a8c7d730902c10cb5f3c9c9ba917813bd284bc2e2efa8d697cb43c9c4d25397",
+          "bytes": 3341
+        }
+      ]
+    },
+    {
+      "from": "apply_contract_language.py",
+      "to": "archive/bugfixes/language/apply_contract_language.py",
+      "files": [
+        {
+          "path": ".",
+          "sha256": "b4356c4b59ffeb6a0c223f9bfe23d84d7d39906490b93b8d255d88fac61fd3c0",
+          "bytes": 5011
+        }
+      ]
+    },
+    {
+      "from": "contract_payment_editor_fix",
+      "to": "archive/bugfixes/conditions/contract_payment_editor_fix",
+      "files": [
+        {
+          "path": "apply_contract_payment_editor.py",
+          "sha256": "9ffc96f5474f7d11bcf5d3ade9ba9bb4c389ff71b1da6e2049f954299546dfee",
+          "bytes": 13858
+        },
+        {
+          "path": "README.txt",
+          "sha256": "1b844cc3d44ea844b3e7f3450bd16539908c8c10abbe3fc3fd4f25c1b51a4fdf",
+          "bytes": 856
+        },
+        {
+          "path": "test_contract_payment_editor.py",
+          "sha256": "0dad5d163a83b3cc6c1e0cad9419a9cea5a35f32d4513590bf68d82607aa62f0",
+          "bytes": 3270
+        }
+      ]
+    },
+    {
+      "from": "kekorea_clause_terms_fix",
+      "to": "archive/bugfixes/conditions/kekorea_clause_terms_fix",
+      "files": [
+        {
+          "path": "apply_clause_terms_fix.py",
+          "sha256": "299aab441d67ffaae6bd7659db6b90cbc9ea6bc54cf9bb9f63096c56dbcd51d8",
+          "bytes": 8948
+        },
+        {
+          "path": "clause_terms.py",
+          "sha256": "5e4a86b38dfecfe649c00169a74ce98b37b08ed5126ae05e4dd4b326a46e5f2f",
+          "bytes": 2553
+        },
+        {
+          "path": "test_contract_clause_term_bridge.py",
+          "sha256": "adef8dec6a19a313525bc86eefdfc1ee5dd94be143d3fa701c64df44f7e9bb41",
+          "bytes": 3045
+        }
+      ]
+    },
+    {
+      "from": "contract_rag_review_patch",
+      "to": "archive/bugfixes/references/contract_rag_review_patch",
+      "files": [
+        {
+          "path": "apply_contract_rag_review.py",
+          "sha256": "e1ad2cb963d7388a5e8c9cfc7802ac06bdee4e4409615dcfcd35069755549f54",
+          "bytes": 5916
+        },
+        {
+          "path": "contract_review.py",
+          "sha256": "dce963ed9aac004285079d6897f3a5fd3c595a1266d2f053cdb7f44368efdeb3",
+          "bytes": 4890
+        },
+        {
+          "path": "README.txt",
+          "sha256": "38d5f2b37842fe6bb7f943033cf2ac305e54a1eafdfb595348b2a8b0e97dfd4e",
+          "bytes": 1629
+        },
+        {
+          "path": "test_contract_rag_review.py",
+          "sha256": "38f96e438c1a1e4ea6d0890a67e9e5f753a4fa69d5d1286e785e97bc48dc5898",
+          "bytes": 2533
+        }
+      ]
+    },
+    {
+      "from": "kekorea_shared_library_bridge",
+      "to": "archive/bugfixes/references/kekorea_shared_library_bridge",
+      "files": [
+        {
+          "path": "apply_shared_library_bridge.py",
+          "sha256": "a9be408778305d95ae5280c6d9c05ae98afd6981cac38679bedd81e684d7fa6a",
+          "bytes": 7303
+        },
+        {
+          "path": "backup_20261109_102238/Quotation_KEKOREA/contracts/library_ui.py",
+          "sha256": "f55f74a06c787139c68cbed7186a26f0e8fc605421d26a6e2751c1c9d05822ff",
+          "bytes": 6507
+        },
+        {
+          "path": "backup_20261109_102238/Quotation_KEKOREA/Presentation/README.md",
+          "sha256": "f1e5ef4ad1f42666631c3fff902d3b38cb6b268253b55d956ee59440d25e8394",
+          "bytes": 12446
+        },
+        {
+          "path": "backup_20261109_102238/Quotation_KEKOREA/README.md",
+          "sha256": "c94d37f97bfd3a403baa99a67ab0030d18288adc19d42336cee399b8323a63b0",
+          "bytes": 92785
+        },
+        {
+          "path": "backup_20261109_102238/Quotation_KEKOREA/README_CONTRACTS.md",
+          "sha256": "5f32869bc8053b3224b959e9ac222bd134ef1d32b1c86a59c0a29f6feb292041",
+          "bytes": 23482
+        },
+        {
+          "path": "backup_20261109_102238/Quotation_KEKOREA/Team/README.md",
+          "sha256": "9723c95f546d9a6f65b1179f8c08d5618320ec5456ad8afce4279a92e0b35dc0",
+          "bytes": 34960
+        },
+        {
+          "path": "backup_20261109_102238/README.md",
+          "sha256": "e6096afa1fc5fe228769e7d5f64d38c8f94d13c3ed975a8db04afd1b1b8e9cb2",
+          "bytes": 9993
+        },
+        {
+          "path": "promote_reference.py",
+          "sha256": "54f69b609bbc1363a19e3b1fb0fbb0b98e5beef56cddc676436d77e5c3f1c7ee",
+          "bytes": 1930
+        },
+        {
+          "path": "test_shared_library_bridge.py",
+          "sha256": "8902429610dea74e951202b33a9659ea64c6ff7247331707a6db938fe3c01836",
+          "bytes": 3035
+        }
+      ]
+    },
+    {
+      "from": "kekorea_risk_review_v2",
+      "to": "archive/bugfixes/risk_review/kekorea_risk_review_v2",
+      "files": [
+        {
+          "path": "apply_risk_review_v2.py",
+          "sha256": "f2813855bbf4e3594040f2bfd0a38d7403a1b705c12aadacd5c743303359134c",
+          "bytes": 7898
+        },
+        {
+          "path": "backup_20261106_170455/Quotation_KEKOREA/contracts/ui.py",
+          "sha256": "35905a560feba3f6126ee4aa5ac4401e9c5af4aecd18be1c909df08d49732f02",
+          "bytes": 94183
+        },
+        {
+          "path": "backup_20261106_170455/Quotation_KEKOREA/Presentation/README.md",
+          "sha256": "2c69651abd088a48aeaab2d926619dc6471492804eb98dbdc1c910f39c66ae72",
+          "bytes": 7333
+        },
+        {
+          "path": "backup_20261106_170455/Quotation_KEKOREA/README.md",
+          "sha256": "a433671f5378fb25327677ede3e48aecd31ecd76c8890a48a57cc1a1acf36be1",
+          "bytes": 87522
+        },
+        {
+          "path": "backup_20261106_170455/Quotation_KEKOREA/README_CONTRACTS.md",
+          "sha256": "414e3fdd46894c5eb1a15c923e2976c4f8dd6372302b41756b39146799678e40",
+          "bytes": 17865
+        },
+        {
+          "path": "backup_20261106_170455/Quotation_KEKOREA/Team/README.md",
+          "sha256": "63b05c058afef7f9e34466358fed7ac3fd6550ec7e0d848ece942030d254b976",
+          "bytes": 29881
+        },
+        {
+          "path": "backup_20261106_170455/README.md",
+          "sha256": "bb921fc1d37d2e9fb426c3697b5e9f2b701a8274c91d0f57a4d10f267b0c7d0f",
+          "bytes": 4933
+        },
+        {
+          "path": "README_적용방법.md",
+          "sha256": "6f1d4b711a24d66ca115cdb5cf75c9edd282a84bdfe3bba3abd48e62e06c5e38",
+          "bytes": 4286
+        },
+        {
+          "path": "risk_review_ui.py",
+          "sha256": "5bcb6376a84a088d3b76736653144dc6054bfcebc6e5dc673a06f2386d580c7a",
+          "bytes": 14494
+        },
+        {
+          "path": "risk_review_workspace.py",
+          "sha256": "d4b266b5dbf51184a64e87295f880640d3e92c6a6a1eff4e55b255f20e27f5d7",
+          "bytes": 7729
+        },
+        {
+          "path": "self_test_patch.py",
+          "sha256": "e4ec330d494fb8c279f29c11aac2aac8e0ea2d0a3425ac22fc4979da7fc7e5de",
+          "bytes": 3895
+        },
+        {
+          "path": "test_contract_risk_review_v2.py",
+          "sha256": "01433b857f11f144ae85f7c6a226dd8c4709da1369e0a2d8fc66c6d488ef89aa",
+          "bytes": 6113
+        }
+      ]
+    },
+    {
+      "from": "kekorea_risk_preview_visibility_fix",
+      "to": "archive/bugfixes/risk_review/kekorea_risk_preview_visibility_fix",
+      "files": [
+        {
+          "path": "__pycache__/apply_fix.cpython-313.pyc",
+          "sha256": "38a2b3e448e930fe0d2123a526f33d3c60497abe9c32bcc489272144a19b3364",
+          "bytes": 8958
+        },
+        {
+          "path": "apply_fix.py",
+          "sha256": "ffa154e4983127a1aee1dc8734d8236a26715cd0968a4e9aa53ce3f9eb865bd7",
+          "bytes": 7305
+        },
+        {
+          "path": "backup_20261106_173036/Quotation_KEKOREA/contracts/ui.py",
+          "sha256": "52b1bcf2ff395a8ab64013f281b553330c394be1e4272f75c75a989f34e9c5ef",
+          "bytes": 90437
+        },
+        {
+          "path": "backup_20261106_173036/Quotation_KEKOREA/Presentation/README.md",
+          "sha256": "262ecec22a1ce124e4183a70bb135dc87d3923bbbcb420f65e91e32980c475d0",
+          "bytes": 7802
+        },
+        {
+          "path": "backup_20261106_173036/Quotation_KEKOREA/README.md",
+          "sha256": "9d565fb7918a20a33ec752ea72e670acd18e0178882ae10b9ce2d92b46642036",
+          "bytes": 88047
+        },
+        {
+          "path": "backup_20261106_173036/Quotation_KEKOREA/README_CONTRACTS.md",
+          "sha256": "dc168e59f4349760c6bd5b074803c9675858caeb91358cfd9c9b72b5b90fc79c",
+          "bytes": 18661
+        },
+        {
+          "path": "backup_20261106_173036/Quotation_KEKOREA/Team/README.md",
+          "sha256": "fc7fdde74ce09ac912ef48eacda16a8a73944edc4027f66519dd15c69db112c0",
+          "bytes": 30345
+        },
+        {
+          "path": "backup_20261106_173036/README.md",
+          "sha256": "1efe8c30d3ca19a2996aeac7a35d273cdcb4153b7fcc28bf3bb5c1bee4e3a81b",
+          "bytes": 5377
+        }
+      ]
+    },
+    {
+      "from": "contract_workflow_fix",
+      "to": "archive/bugfixes/workflow/contract_workflow_fix",
+      "files": [
+        {
+          "path": "apply_contract_flow_fix.py",
+          "sha256": "6fcad93f9b67931da46b59346e3745af94e344e031a95893617eba658d4a2c2b",
+          "bytes": 9184
+        },
+        {
+          "path": "README.txt",
+          "sha256": "eb3da37a91e045aa719e26aee26996fd617aa61fd476198d5afeb2d5c812f502",
+          "bytes": 1678
+        },
+        {
+          "path": "test_contract_flow.py",
+          "sha256": "488f92333eb9594e7dfa655837ebb83cebb59e5120b133a46c097b9a99ce6b5a",
+          "bytes": 2377
+        }
+      ]
+    },
+    {
+      "from": "ci_draft_regression_fix",
+      "to": "archive/bugfixes/workflow/ci_draft_regression_fix",
+      "files": [
+        {
+          "path": "apply_ci_draft_fix.py",
+          "sha256": "82e42d3fb7bc3b900d6f01430cf22c3b1fcf2727364c467d3a369d95b15e88c5",
+          "bytes": 3886
+        },
+        {
+          "path": "README_적용방법.md",
+          "sha256": "d84ad34b7af0caaaab485bcb75476bd1d34d2c4792b7f483a65083e8972b8e20",
+          "bytes": 939
+        }
+      ]
+    },
+    {
+      "from": "kekorea_note_revision_fix",
+      "to": "archive/bugfixes/workflow/kekorea_note_revision_fix",
+      "files": [
+        {
+          "path": "apply_note_revision_fix.py",
+          "sha256": "0462fe08c06a933222f125bd5ce7a2c739e6ebc5149da02e160e636ebd0de11f",
+          "bytes": 8855
+        },
+        {
+          "path": "backup_20261106_175130/Quotation_KEKOREA/contracts/ui.py",
+          "sha256": "36f918da3d90eb262edb237363a918fc55f2eb16f57141eda3ea6d90d46f7ac1",
+          "bytes": 91559
+        },
+        {
+          "path": "backup_20261106_175130/Quotation_KEKOREA/Presentation/README.md",
+          "sha256": "49f080215dbc5546842205e42940ab003f18ee6566a89444da3b437cf77ea221",
+          "bytes": 9319
+        },
+        {
+          "path": "backup_20261106_175130/Quotation_KEKOREA/README.md",
+          "sha256": "127ba3094b80eebe15abd8393bea1a6feb34a3718df37ba3f891fe43afae51f8",
+          "bytes": 89564
+        },
+        {
+          "path": "backup_20261106_175130/Quotation_KEKOREA/README_CONTRACTS.md",
+          "sha256": "35b7a92c4781c41a4439fde03e27af2a1b825e661e9b14b4f0964a829fc01761",
+          "bytes": 20178
+        },
+        {
+          "path": "backup_20261106_175130/Quotation_KEKOREA/Team/README.md",
+          "sha256": "cdf72b80eccc1b7342f6e111efc9e37febdaceb210d5f611c897b2805d210274",
+          "bytes": 31862
+        },
+        {
+          "path": "backup_20261106_175130/README.md",
+          "sha256": "cb4ce857f2a7097f597d373cfb504748d3366b322377cf3de2fe055c54641360",
+          "bytes": 6894
+        }
+      ]
+    },
+    {
+      "from": "kekorea_unified_final_fix",
+      "to": "archive/bugfixes/workflow/kekorea_unified_final_fix",
+      "files": [
+        {
+          "path": "apply_unified_final_fix.py",
+          "sha256": "4ba25ff2e2da6096add4160b8637c163d9a5e94f3c8fbaade10487a70b3b618e",
+          "bytes": 10781
+        },
+        {
+          "path": "backup_20261109_094537/Quotation_KEKOREA/contracts/risk_review_ui.py",
+          "sha256": "8182864872fc91be9eb619ad1998cc1b2dbc3e4988173cadce89679bd466d90c",
+          "bytes": 14737
+        },
+        {
+          "path": "backup_20261109_094537/Quotation_KEKOREA/contracts/ui.py",
+          "sha256": "c3102b3d33bc3498095c031a67e02ab4ba6f936ff5ffb0391fa5763793fa8c9e",
+          "bytes": 98964
+        },
+        {
+          "path": "backup_20261109_094537/Quotation_KEKOREA/Presentation/README.md",
+          "sha256": "eda430741fd26567c2db4f2e7bd7d8e37bb256032e0b7a4be563c317c3beb5ae",
+          "bytes": 11363
+        },
+        {
+          "path": "backup_20261109_094537/Quotation_KEKOREA/README.md",
+          "sha256": "f8c4f4006df8bd585b615bb248cb95134b74847c96e85f881dad118539fe3ba1",
+          "bytes": 91702
+        },
+        {
+          "path": "backup_20261109_094537/Quotation_KEKOREA/README_CONTRACTS.md",
+          "sha256": "4cf8de1ae56a325d919ba274d99e3fe11a809181ea60f356be0c1b2fe6f9ec97",
+          "bytes": 22399
+        },
+        {
+          "path": "backup_20261109_094537/Quotation_KEKOREA/Team/README.md",
+          "sha256": "ff974edc2fb7d7b140b4c627962b6908777ea0eefeb733422fbc67dd4c613ca6",
+          "bytes": 33877
+        },
+        {
+          "path": "backup_20261109_094537/README.md",
+          "sha256": "c9c0b1f50e8d8ce9d37b6dccb0da7c7351b1acc618adab037ddd3a72385bc9e1",
+          "bytes": 8910
+        },
+        {
+          "path": "contract_final_merge.py",
+          "sha256": "a6bff45d215fe6a90564551f06ae2d481b16b871fa62dc63e0dd1a9d5618444c",
+          "bytes": 3545
+        },
+        {
+          "path": "README_적용방법.md",
+          "sha256": "c2268f7bc9a672ee104685d55557a08916a9210d5d2d5eed9284746b37bf64e5",
+          "bytes": 2708
+        },
+        {
+          "path": "test_contract_unified_final.py",
+          "sha256": "c73aee78f4391685af87908b12db7bc573681127d470ea5556830c0be587cfb3",
+          "bytes": 4957
+        }
+      ]
+    },
+    {
+      "from": "kekorea_ocr_json_fix",
+      "to": "archive/bugfixes/ocr/kekorea_ocr_json_fix",
+      "files": [
+        {
+          "path": "__pycache__/apply_ocr_json_fix.cpython-313.pyc",
+          "sha256": "4d9b3eb18e699f5a387adb97899f21c03ddb603e55a8c95924905c94228af1a0",
+          "bytes": 4001
+        },
+        {
+          "path": "apply_ocr_json_fix.py",
+          "sha256": "ab6196d73e5f4d44f350a188f82b9605c2f44d772b03e53e93a618b884b434ec",
+          "bytes": 3279
+        }
+      ]
+    },
+    {
+      "from": "kekorea_clause_terms_test_fix",
+      "to": "archive/bugfixes/testing/kekorea_clause_terms_test_fix",
+      "files": [
+        {
+          "path": "apply_test_fix.py",
+          "sha256": "e1e5450603fdff6d1b41c5a33f21ca0e9eeaacd363014353b74083ea7bb74697",
+          "bytes": 1484
+        }
+      ]
+    },
+    {
+      "from": "kekorea_risk_review_test_fix",
+      "to": "archive/bugfixes/testing/kekorea_risk_review_test_fix",
+      "files": [
+        {
+          "path": "apply_test_fix.py",
+          "sha256": "c572a56e2afb6b10c7a1aae91e565baf66cb34fc2f5068858e4b6cdbc9885bc9",
+          "bytes": 1526
+        },
+        {
+          "path": "README_적용방법.md",
+          "sha256": "d1054b0b022c0c2eaaafb517d4c20ac500ad78a378ebd19170d6e0225fb03edd",
+          "bytes": 1846
+        }
+      ]
+    },
+    {
+      "from": "kekorea_test_fix",
+      "to": "archive/bugfixes/testing/kekorea_test_fix",
+      "files": [
+        {
+          "path": "__pycache__/apply_two_test_fixes.cpython-313.pyc",
+          "sha256": "5dc85c1f5e20f4eaf1868b83be80808cae0e44eb783ae1bfb0441a0ad09d5b11",
+          "bytes": 6078
+        },
+        {
+          "path": "apply_two_test_fixes.py",
+          "sha256": "d0edc8061715aaaf1239630d118921cdb7a86231afad4b162e753f6a65979e30",
+          "bytes": 5072
+        }
+      ]
+    },
+    {
+      "from": "fix_contract_library_test.py",
+      "to": "archive/bugfixes/testing/fix_contract_library_test.py",
+      "files": [
+        {
+          "path": ".",
+          "sha256": "130a1eab6d6a0d74120027a0eaf27ffdb7725ae89559cf03b1c5e1509b9676cd",
+          "bytes": 1451
+        }
+      ]
+    },
+    {
+      "from": "taste_contract_readme_update",
+      "to": "archive/bugfixes/documentation/taste_contract_readme_update",
+      "files": [
+        {
+          "path": "apply_taste_contract_update.py",
+          "sha256": "5fe3aec309b92d5092fd4dae0008c321946a28c830eaf7753bd012e67aacbd43",
+          "bytes": 19641
+        },
+        {
+          "path": "backup_20261106_151513/Quotation_KEKOREA/AGENTS.md",
+          "sha256": "5f1ec5708695558bdb6c35278471990317a976436e6b4b3b9f7b8cb6fc409a90",
+          "bytes": 5297
+        },
+        {
+          "path": "backup_20261106_151513/Quotation_KEKOREA/contracts/ui.py",
+          "sha256": "0416633058d26526dd5de0db26b4ace29a236078717bf27d33bd1cb30f3ab13c",
+          "bytes": 74886
+        },
+        {
+          "path": "backup_20261106_151513/Quotation_KEKOREA/Presentation/README.md",
+          "sha256": "9b47b2045bb5a56170d289b34ac961975496dc2a8038051c17703cf2db41f7bc",
+          "bytes": 3740
+        },
+        {
+          "path": "backup_20261106_151513/Quotation_KEKOREA/README.md",
+          "sha256": "5ee3e1b992fd1fa3d050c28c63b1bdab686b92dbd74ae5727399c9e87e7d52cd",
+          "bytes": 80331
+        },
+        {
+          "path": "backup_20261106_151513/Quotation_KEKOREA/README_CONTRACTS.md",
+          "sha256": "a0d287a785cf693f18f257ba4970823bd5a7c2ddcd7c71de9cb566b0b96b9085",
+          "bytes": 11157
+        },
+        {
+          "path": "backup_20261106_151513/Quotation_KEKOREA/Team/README.md",
+          "sha256": "7128db3d617f6ecde567823db096cd660378f105e42b5812d83653b4b832468e",
+          "bytes": 25485
+        },
+        {
+          "path": "backup_20261106_151513/README.md",
+          "sha256": "34e01eb600b31b1c053997ae05fbff40d07c47a49a97424390977ccf6a0a6a77",
+          "bytes": 1406
+        },
+        {
+          "path": "check_readme_sync.py",
+          "sha256": "9ad87e36618231b50d8ae0251212fee8b308010150fc28f3e01f337b67ccc5de",
+          "bytes": 1779
+        },
+        {
+          "path": "README_적용방법.md",
+          "sha256": "2aaf395f070eb64455e4575017c3cf300064f2eee976e3c237fd9b49c88210ae",
+          "bytes": 4746
+        },
+        {
+          "path": "review_summary.py",
+          "sha256": "1882310eb82d505ac0390e0a888eba6fa7ec2a5e78d2829d2bceb71d0a9d508e",
+          "bytes": 4145
+        },
+        {
+          "path": "test_contract_review_summary.py",
+          "sha256": "26cfb5c1751c8278216cfed31131e5f6b02e06a4e49e811d27beb4726f820d14",
+          "bytes": 2361
+        },
+        {
+          "path": "test_readme_sync_guard.py",
+          "sha256": "472ea6efa1837658034614543006ba74a7f67a75629afcd1c0c024bb875b5119",
+          "bytes": 960
+        }
+      ]
+    },
+    {
+      "from": ".local_contract_ui_backup_20261106_163707",
+      "to": "archive/backups/.local_contract_ui_backup_20261106_163707",
+      "files": [
+        {
+          "path": "README_0.md",
+          "sha256": "877af3c0ab881c92ebe5a261123157bd31664c714a04a6ec34742ac9b941c621",
+          "bytes": 4550
+        },
+        {
+          "path": "README_1.md",
+          "sha256": "87a273db7f5c506483c7e8180d65be71109d12a3b3290d750d4637a1a1242c2f",
+          "bytes": 87136
+        },
+        {
+          "path": "README_2.md",
+          "sha256": "dba484a055fc13b538f017618385c6a58ba23609fb1867a3594cfeeb719a2720",
+          "bytes": 17458
+        },
+        {
+          "path": "README_3.md",
+          "sha256": "967c76281bc0c9cddf596d35000cf2255e9b2951a7f1b69b8c7a1159affb507b",
+          "bytes": 29574
+        },
+        {
+          "path": "README_4.md",
+          "sha256": "f4de2a945c00e9462aaa753bedf35c0e0e55579187f6f34972579801fb278a60",
+          "bytes": 6971
+        },
+        {
+          "path": "ui.py",
+          "sha256": "1351ae964615747d8c9f925e7e073259e9cd53910b2d9532e361e40029be6342",
+          "bytes": 92699
+        }
+      ]
+    },
+    {
+      "from": "clause_terms_fix_backup_20261109_105838",
+      "to": "archive/backups/clause_terms_fix_backup_20261109_105838",
+      "files": [
+        {
+          "path": "Quotation_KEKOREA/contracts/draft_exports.py",
+          "sha256": "31a729fe8edd60f11bf6bf016066ad73fa8f061abd2e7e9a5feb425ce61bbfea",
+          "bytes": 5946
+        },
+        {
+          "path": "Quotation_KEKOREA/contracts/ui.py",
+          "sha256": "aa2e96a66fb90a88b4f4698714c4f648e409468798b8c6aaec3a2a8342814816",
+          "bytes": 103252
+        },
+        {
+          "path": "Quotation_KEKOREA/Presentation/README.md",
+          "sha256": "1ceb91cf7fb9c05d91928d05cef168a11d7c1bd13107be9a78bce927aaf41602",
+          "bytes": 14483
+        },
+        {
+          "path": "Quotation_KEKOREA/README.md",
+          "sha256": "c5d8f4e11ad16523338f2da0cdd64ea57076765c2fe968f64fdd97e98b8523e6",
+          "bytes": 94822
+        },
+        {
+          "path": "Quotation_KEKOREA/README_CONTRACTS.md",
+          "sha256": "64bed26e621637c7d9e96f7dd9b436e46eef0b86ac468835d077237e7563d28a",
+          "bytes": 25519
+        },
+        {
+          "path": "Quotation_KEKOREA/Team/README.md",
+          "sha256": "2e92b2f2c7a88b532b34f336c4f8149137b206a682599487125389c167a9e2a9",
+          "bytes": 36997
+        },
+        {
+          "path": "README.md",
+          "sha256": "f677f1d7e46828a7699c2255b741e75b8cd4a43493b1d25a4f7a53ae9fee4424",
+          "bytes": 12030
+        }
+      ]
+    },
+    {
+      "from": "kekorea_alignment_backup_20261109_103434",
+      "to": "archive/backups/kekorea_alignment_backup_20261109_103434",
+      "files": [
+        {
+          "path": "README.md.1",
+          "sha256": "fb078f04c1cc457e2e19c9d2f1a57466d36d63093520ce4099f1b8416f7b0c93",
+          "bytes": 11143
+        },
+        {
+          "path": "README.md.2",
+          "sha256": "a87e530f660a06cf1a27a276b3297ea2bdd7c32aca33ebc0ceb34416bc96644c",
+          "bytes": 93935
+        },
+        {
+          "path": "README.md.4",
+          "sha256": "064570502eff271c402dcad2db1713df76c19140538d46dea14dd335f25bbb34",
+          "bytes": 36110
+        },
+        {
+          "path": "README.md.5",
+          "sha256": "cb158fd610ab4c4b46f9d8430f551d1a330527cae81f6dd8853ffd11b91d2475",
+          "bytes": 13596
+        },
+        {
+          "path": "README_CONTRACTS.md.3",
+          "sha256": "fe33be85e6926330166ad6b79a758ca55e27c8f9227026dbea4be539c96bfedb",
+          "bytes": 24632
+        },
+        {
+          "path": "ui.py",
+          "sha256": "ff5032a7e2cf47c46c0828b8d0f93e9ee6aec213190a4ef824e10942d10ed098",
+          "bytes": 100176
+        }
+      ]
+    },
+    {
+      "from": "kekorea_export_review_cleanup_backup",
+      "to": "archive/backups/kekorea_export_review_cleanup_backup",
+      "files": [
+        {
+          "path": "20261106_173616/Quotation_KEKOREA/contracts/ui.py",
+          "sha256": "8f58eecb6b8a35530c2a2efab06527ef06b8207265b0fc56161a0c998de10615",
+          "bytes": 91154
+        },
+        {
+          "path": "20261106_173616/Quotation_KEKOREA/Presentation/README.md",
+          "sha256": "6f4dafd44855ca8b56e02d1bd73880982ca2b3a09dada9988842de4e32a38087",
+          "bytes": 8415
+        },
+        {
+          "path": "20261106_173616/Quotation_KEKOREA/README.md",
+          "sha256": "077cad2c1a086900bf58e06a00e1d0d385b720b5818cb2cdb49f2f9c6d895be4",
+          "bytes": 88660
+        },
+        {
+          "path": "20261106_173616/Quotation_KEKOREA/README_CONTRACTS.md",
+          "sha256": "a6c90cdbb5f7fb070bf43df8fb6ba1228b47aae2c0b1ae8b3730a7cd6cb7a64c",
+          "bytes": 19274
+        },
+        {
+          "path": "20261106_173616/Quotation_KEKOREA/Team/README.md",
+          "sha256": "2cf8b02d78ba70c344509885162f9445c30e4d6eacaf22f22a592d732dc3c943",
+          "bytes": 30958
+        },
+        {
+          "path": "20261106_173616/README.md",
+          "sha256": "8160d2d36eb7357b3e542e59fcc0c8bfad4b1ae88be24fbeca79507053a7e532",
+          "bytes": 5990
+        }
+      ]
+    },
+    {
+      "from": "kekorea_pdf_export_fix_backup",
+      "to": "archive/backups/kekorea_pdf_export_fix_backup",
+      "files": [
+        {
+          "path": "20261109_093148/Quotation_KEKOREA/contracts/ui.py",
+          "sha256": "c1369355edfa07f49f992429b8092c1b433576bdc02bfb095679466abe644aa6",
+          "bytes": 94262
+        },
+        {
+          "path": "20261109_093148/Quotation_KEKOREA/Presentation/README.md",
+          "sha256": "26260c955287260e937f3844e12314674e1605977f5794679071c3b83cf5b0c3",
+          "bytes": 10158
+        },
+        {
+          "path": "20261109_093148/Quotation_KEKOREA/README.md",
+          "sha256": "ddcd1763fda602e9feb440fb101898e119474e246cb632cdaf877d9051f05c51",
+          "bytes": 90403
+        },
+        {
+          "path": "20261109_093148/Quotation_KEKOREA/README_CONTRACTS.md",
+          "sha256": "855b463f3be6ceb848a56bea9745638e0b8ad8ccdd9afbf0d3d855fd814f9a82",
+          "bytes": 21017
+        },
+        {
+          "path": "20261109_093148/Quotation_KEKOREA/Team/README.md",
+          "sha256": "74da0794e1d1893a5f513699d04aee18bcc593731c5bc51410d296bb13f42c7b",
+          "bytes": 32701
+        },
+        {
+          "path": "20261109_093148/README.md",
+          "sha256": "720d9e331134e50a0de65e75f78de4f6727728a738be44235796bccf1ccb7f63",
+          "bytes": 7733
+        }
+      ]
+    },
+    {
+      "from": "kekorea_sentence_left_edge_fix_backup_20261109_105239",
+      "to": "archive/backups/kekorea_sentence_left_edge_fix_backup_20261109_105239",
+      "files": [
+        {
+          "path": "Quotation_KEKOREA/contracts/ui.py",
+          "sha256": "1efb1679438a6bdbc6e1c9270dc2a947c9ce643862802d90fdec0252f0f377ab",
+          "bytes": 101098
+        },
+        {
+          "path": "Quotation_KEKOREA/Presentation/README.md",
+          "sha256": "a6d61faf973ca96490501b079d4d917b152e2e1a90e0e23ec40eda58341debff",
+          "bytes": 14026
+        },
+        {
+          "path": "Quotation_KEKOREA/README.md",
+          "sha256": "34828812e0e726f245eb0c728e9df8fa2c40b96eed7185f94cc85d1529ef7558",
+          "bytes": 94365
+        },
+        {
+          "path": "Quotation_KEKOREA/README_CONTRACTS.md",
+          "sha256": "4773f0db976790c74f38839bad9fac634f64d934a2f7ab05cefbe13960dac80c",
+          "bytes": 25062
+        },
+        {
+          "path": "Quotation_KEKOREA/Team/README.md",
+          "sha256": "450239cea9a4845312465e7daaaf23a13303dd8fce037fa326082e9574982c48",
+          "bytes": 36540
+        },
+        {
+          "path": "README.md",
+          "sha256": "5fbb789f91c5d00842e8facc35a2b959b872a1b438ea41d38d924f71d163f654",
+          "bytes": 11573
+        }
+      ]
+    },
+    {
+      "from": "test_results.txt",
+      "to": "logs/tests/test_results.txt",
+      "files": [
+        {
+          "path": ".",
+          "sha256": "28fd13b17423849fd6e4dccd5a1845494d91487ad1f79d2765dfd4f5a406db54",
+          "bytes": 309022
+        }
+      ]
+    },
+    {
+      "from": "contract_test_full.log",
+      "to": "logs/tests/contract_test_full.log",
+      "files": [
+        {
+          "path": ".",
+          "sha256": "1cd17451629da4119a17854af6da1ced10ac9991b2ea2e02795458be7fcd6ed7",
+          "bytes": 708974
+        }
+      ]
+    }
+  ]
+}
