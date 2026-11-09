@@ -213,14 +213,7 @@ def render_risk_review(repo, snapshot, state_key, env):
                 st.markdown(f"**{_clause_title(snapshot, sentence_id)}**")
                 st.write(previews.get(sentence_id, source))
                 st.caption('선택한 수정 문장이 미리보기에 반영됐습니다.')
-            if st.button('선택한 수정안 비교·승인', key=f'risk_review_changes_{contract_id}_{revision}'):
-                try:
-                    proposal = preview_proposal(snapshot, previews)
-                    st.session_state['contract_pending_proposal'] = proposal
-                    st.session_state['contract_pending_proposal_key'] = state_key
-                    st.rerun()
-                except (ValueError, RuntimeError, ContractRepositoryError) as exc:
-                    st.error(str(exc))
+            st.caption('선택한 위험 수정안은 아래 최종 수정 요청 버튼에서 문장 메모와 함께 비교·승인합니다.')
 
 
 def _switch_page(state, page_key, selected_key, page):

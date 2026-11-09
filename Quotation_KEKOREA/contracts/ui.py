@@ -13,6 +13,7 @@ from Quotation_KEKOREA.contracts.editing import (
 from Quotation_KEKOREA.contracts.exports import export_contract
 from Quotation_KEKOREA.contracts.draft_exports import export_draft
 from Quotation_KEKOREA.contracts.workspace import collect_notes, propose_notes_revision
+from Quotation_KEKOREA.contracts.final_merge import merge_revision_requests
 from Quotation_KEKOREA.contracts.risk_review_ui import render_risk_review
 from Quotation_KEKOREA.contracts.models import new_snapshot, validate_snapshot
 from Quotation_KEKOREA.contracts.library import search_library
@@ -534,6 +535,28 @@ def _render_draft(repo, snapshot, state_key, env):
         outline:2px solid #0877c9;outline-offset:2px;}
     .st-key-contract_document_paper button[kind="primary"] {background:#e7f2fa;
         border-left:3px solid #0877c9;color:#092b4c;}
+    /* Long clause readability: never shrink below a usable font size or clip text. */
+    .st-key-contract_document_paper [class*="st-key-contract_sentence_display_"] {
+        position:relative;min-width:0;}
+    .st-key-contract_document_paper [class*="st-key-contract_sentence_display_"] [data-testid="stButton"] button {
+        height:auto!important;max-height:none!important;min-height:2rem;
+        white-space:normal!important;overflow:visible!important;text-overflow:clip!important;
+        width:100%;align-items:flex-start;}
+    .st-key-contract_document_paper [class*="st-key-contract_sentence_display_"] [data-testid="stButton"] button p {
+        display:block!important;white-space:pre-wrap!important;overflow:visible!important;
+        max-height:none!important;text-overflow:clip!important;overflow-wrap:anywhere;
+        word-break:break-word;font-size:clamp(.8rem,1vw,1rem)!important;
+        line-height:1.7!important;}
+    .st-key-contract_document_paper .contract-full-sentence-hover {
+        display:none;position:absolute;left:0;top:100%;z-index:50;
+        width:min(38rem,80vw);max-height:65vh;overflow-y:auto;pointer-events:none;
+        background:#fffdf6;color:#172b3a;border:1px solid #a6bdcc;
+        border-radius:8px;box-shadow:0 12px 35px rgba(0,0,0,.17);
+        padding:1rem;white-space:pre-wrap;overflow-wrap:anywhere;
+        font:normal max(.875rem,11pt)/1.7 Georgia,"Malgun Gothic",serif;}
+    .st-key-contract_document_paper [class*="st-key-contract_sentence_display_"]:has(button:hover) .contract-full-sentence-hover,
+    .st-key-contract_document_paper [class*="st-key-contract_sentence_display_"]:has(button:focus-visible) .contract-full-sentence-hover {
+        display:block;}
     @media(max-width:640px) {.st-key-contract_document_surface {padding:.25rem;}
         .st-key-contract_document_paper {padding:1rem;}}
     </style>""", unsafe_allow_html=True)
@@ -560,14 +583,23 @@ def _render_draft(repo, snapshot, state_key, env):
                     # Keeps document text aligned with a Word-style comment gutter.
                     text_col, note_col = st.columns([7, 3], gap="medium", vertical_alignment="top")
                     with text_col:
-                        if sentence_id in preview_texts:
-                            st.caption("✎ AI 추천 수정안 미리보기 · 확정 저장 전")
-                        if st.button(displayed_text, key=f"contract_sentence_{contract_id}_{sentence_id}",
-                                     help="클릭해 이 문장의 메모를 열거나 선택합니다.",
-                                     type='primary' if is_open else 'secondary', use_container_width=True):
-                            if sentence_id not in opened:
-                                opened.append(sentence_id)
-                            st.rerun()
+                        with st.container(key=f"contract_sentence_display_{contract_id}_{sentence_id}"):
+                            if sentence_id in preview_texts:
+                                st.caption("✎ AI 추천 수정안 미리보기 · 확정 저장 전")
+                            if st.button(displayed_text, key=f"contract_sentence_{contract_id}_{sentence_id}",
+                                         help=(displayed_text if len(displayed_text) > 180 else
+                                               "클릭해 이 문장의 메모를 열거나 선택합니다."),
+                                         type='primary' if is_open else 'secondary', use_container_width=True):
+                                if sentence_id not in opened:
+                                    opened.append(sentence_id)
+                                st.rerun()
+                            # Full original text on mouse hover / keyboard focus for very long sentences.
+                            # escape() prevents user-supplied contract text from injecting markup.
+                            if len(displayed_text) > 180:
+                                st.markdown(
+                                    '<div class="contract-full-sentence-hover" role="tooltip">'
+                                    + escape(displayed_text).replace('\n', '<br/>') + '</div>',
+                                    unsafe_allow_html=True)
                     with note_col:
                         if not is_open:
                             st.caption("✎ 메모 추가 · 문장 클릭")
@@ -629,7 +661,8 @@ def _render_draft(repo, snapshot, state_key, env):
                                 buffers[sentence_id] = note
                                 opened.remove(sentence_id)
                                 st.rerun()
-    _batch_request_panel(repo, snapshot, state_key, env, pending, buffers)
+    # 2026-11-09 통합 최종 수정 요청 UI: the final action is placed after AI risk review.
+    return pending, buffers
 
 
 def _note_row(snapshot, sentence_id, instruction, saved_notes):
@@ -691,19 +724,28 @@ def _batch_request_panel(repo, snapshot, state_key, env, pending, buffers):
                               on_click=_restore_previous_revision_note,
                               args=(snapshot['contract_id'], snapshot['revision'],
                                     sentence_id, old['instruction']))
-    st.caption("버튼을 누르면 메모를 저장하고 AI에 한 번에 전달합니다. 본문은 수정안 비교·승인 후에 변경됩니다.")
+    preview_state = st.session_state.get(f"contract_risk_preview_{snapshot['contract_id']}") or {}
+    risk_previews = (preview_state.get('sentences', {})
+                     if preview_state.get('revision') == snapshot['revision'] else {})
+    risk_previews = {sid: str(value).strip() for sid, value in risk_previews.items()
+                     if str(value or '').strip()}
+    st.caption(f'현재 revision의 문장 메모 {len(notes)}건 + 위험 검토 선택안 {len(risk_previews)}건을 함께 검토합니다.')
+    st.caption('최종 수정 요청은 AI 수정안을 준비하는 단계입니다. 본문은 비교·승인 후 새 revision으로 저장됩니다.')
     consent = st.session_state.get(f"contract_ai_consent_{snapshot['contract_id']}", False)
     existing_proposal = st.session_state.get('contract_pending_proposal') or {}
-    other_proposal = (existing_proposal.get('contract_id') == snapshot['contract_id']
-                      and not existing_proposal.get('note_ids'))
-    if not notes:
-        st.info('현재 revision에 적용할 수정 메모가 없습니다. 문장 옆에 새 메모를 작성하거나, '
-                '위의 이전 메모를 펼쳐 현재 revision으로 다시 가져오세요.')
+    other_proposal = existing_proposal.get('contract_id') == snapshot['contract_id']
+    if not notes and not risk_previews:
+        st.info('현재 revision에 수정할 내용이 없습니다. 문장 옆 메모 또는 위의 AI 위험 검토에서 추천안을 적용하세요.')
     if notes and not consent:
-        st.caption('BOX 1의 AI 전송 동의를 선택해야 수정 요청을 보낼 수 있습니다.')
-    if notes and other_proposal:
-        st.caption('먼저 아래 조건 수정안을 적용하거나 취소해 주세요. 작성한 문장 메모는 유지됩니다.')
-    if st.button('최종 수정 요청', type='primary', disabled=not notes or not consent or other_proposal,
+        st.caption('문장 메모의 AI 통합 수정에는 BOX 1의 AI 전송 동의가 필요합니다.')
+    if other_proposal:
+        st.caption('이미 생성한 수정안이 있습니다. 아래에서 비교·승인하거나 취소한 다음 요청하세요.')
+    overlap = set(n['sentence_id'] for n in notes) & set(risk_previews)
+    if overlap:
+        st.warning('같은 문장에 메모와 위험 검토 추천안이 함께 있습니다: '
+                   + ', '.join(sorted(overlap)) + '. 한쪽을 제거하거나 메모를 통합하세요.')
+    if st.button('최종 수정 요청', type='primary',
+                 disabled=(not (notes or risk_previews) or (notes and not consent) or other_proposal or bool(overlap)),
                  key=f"contract_batch_request_{snapshot['contract_id']}_{snapshot['revision']}"):
         try:
             # Persist all edited notes first. A failure prevents any AI request or contract revision.
@@ -714,8 +756,10 @@ def _batch_request_panel(repo, snapshot, state_key, env, pending, buffers):
                 if not str(instruction).strip() and sentence_id in saved_notes:
                     dismissed = dict(saved_notes[sentence_id], status='dismissed')
                     repo.save_annotation(dismissed)
-            with st.spinner('모든 메모를 함께 검토해 수정안을 작성하고 있습니다...'):
-                proposal = propose_notes_revision(snapshot, notes, env=env)
+            with st.spinner('문장 메모와 위험 검토 추천안을 하나의 수정안으로 통합하고 있습니다...'):
+                proposal = merge_revision_requests(
+                    snapshot, notes, risk_previews,
+                    propose_notes=propose_notes_revision, env=env)
             repo.save_annotation({
                 'id': proposal['id'].replace('proposal_', ''), 'contract_id': snapshot['contract_id'],
                 'sentence_id': 'batch-revision', 'base_revision': snapshot['revision'],
@@ -1449,10 +1493,7 @@ def render_contract_page(page, env):
         if not snapshot.get('clauses'):
             st.info("BOX 1에서 초안을 만들면 이곳에서 문장을 클릭해 수정 메모를 남길 수 있습니다.")
         else:
-            _render_draft(repo, snapshot, state_key, env)
-        proposal = st.session_state.get('contract_pending_proposal')
-        if proposal and proposal.get('contract_id') == active_id:
-            _proposal_panel(repo, snapshot, proposal, state_key)
+            pending, buffers = _render_draft(repo, snapshot, state_key, env)
         if snapshot.get('clauses'):
             render_risk_review(repo, snapshot, state_key, env)
             with st.expander("Revision 기록 및 복원", expanded=False):
@@ -1478,6 +1519,11 @@ def render_contract_page(page, env):
                         st.rerun()
                     except (ValueError, RevisionConflict, ContractRepositoryError) as exc:
                         st.error(str(exc))
+            # Final action follows the risk panel and revision history.
+            _batch_request_panel(repo, snapshot, state_key, env, pending, buffers)
+            proposal = st.session_state.get('contract_pending_proposal')
+            if proposal and proposal.get('contract_id') == active_id:
+                _proposal_panel(repo, snapshot, proposal, state_key)
             _export_panel(repo, snapshot, env)
 
     with st.expander("저장·복사·언어 버전 관리", expanded=False):
