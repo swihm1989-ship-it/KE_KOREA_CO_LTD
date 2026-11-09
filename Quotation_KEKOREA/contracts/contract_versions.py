@@ -20,6 +20,38 @@ _NUMBER = re.compile(
 _PROTECTED = re.compile(r'\b(?:USD|KRW|EUR|CNY|IDR|SGD|EXW|FOB|CIF|CFR|DAP|DDP|FCA|CPT|CIP|DPU|KG|MT|PCS|TT|T/T|SWIFT)\b', re.I)
 
 
+_MONTH_NAME_VALUES = {
+    'january': 1, 'jan': 1, 'february': 2, 'feb': 2,
+    'march': 3, 'mar': 3, 'april': 4, 'apr': 4,
+    'may': 5, 'june': 6, 'jun': 6, 'july': 7, 'jul': 7,
+    'august': 8, 'aug': 8, 'september': 9, 'sep': 9, 'sept': 9,
+    'october': 10, 'oct': 10, 'november': 11, 'nov': 11,
+    'december': 12, 'dec': 12,
+}
+_MONTH_WORD_RE = re.compile(
+    r'\b(?:January|February|March|April|May|June|July|August|September|'
+    r'October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sept|Sep|Oct|Nov|Dec)\b\.?',
+    re.I,
+)
+
+
+def _normalize_month_words(text):
+    """Map English date-month names to numeric month tokens for comparison.
+
+    Only convert month names in a recognizable date context, to avoid
+    mistaking the legal modal verb 'may' for the month May.
+    """
+    def convert(match):
+        before, after = text[:match.start()], text[match.end():]
+        has_following_day = re.match(r'\s+\d{1,2}(?:st|nd|rd|th)?\b', after, re.I)
+        has_preceding_day = re.search(r'\b\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?$', before, re.I)
+        has_following_year = re.match(r'\s+(?:of\s+)?\d{4}\b', after, re.I)
+        if has_following_day or has_preceding_day or has_following_year:
+            return str(_MONTH_NAME_VALUES[match.group(0).rstrip('.').lower()])
+        return match.group(0)
+    return _MONTH_WORD_RE.sub(convert, text)
+
+
 def _numbers(text):
     """Canonical numeric tokens, including repeated values and percent markers.
 
@@ -28,7 +60,7 @@ def _numbers(text):
     (e.g. M10) are not mistaken for quantities.
     """
     normalized = []
-    for match in _NUMBER.finditer(str(text or '')):
+    for match in _NUMBER.finditer(_normalize_month_words(str(text or ''))):
         raw = match.group('value').replace(',', '')
         value = format(Decimal(raw).normalize(), 'f')
         normalized.append(value + ('%' if match.group('percent') else ''))
