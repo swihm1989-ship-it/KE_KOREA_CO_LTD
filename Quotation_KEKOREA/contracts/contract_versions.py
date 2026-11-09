@@ -6,17 +6,33 @@ translate company names or automatically approve unconfirmed conditions.
 from copy import deepcopy
 from decimal import Decimal
 import re
+from collections import Counter
 from uuid import uuid4
 
 from Quotation_KEKOREA.contracts.models import validate_snapshot
 from Quotation_KEKOREA.contracts.service import _call
 
-_NUMBER = re.compile(r'(?<!\w)(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?%?')
+_NUMBER = re.compile(
+    # Korean syllables are Unicode word chars. Using (?<!\w) incorrectly hides
+    # e.g. the number in "30일" and "계약금의30%".
+    r'(?<![A-Za-z0-9_])(?P<value>(?:[0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\.[0-9]+)?)(?P<percent>\s*%)?'
+)
 _PROTECTED = re.compile(r'\b(?:USD|KRW|EUR|CNY|IDR|SGD|EXW|FOB|CIF|CFR|DAP|DDP|FCA|CPT|CIP|DPU|KG|MT|PCS|TT|T/T|SWIFT)\b', re.I)
 
 
 def _numbers(text):
-    return sorted(_NUMBER.findall(str(text or '')))
+    """Canonical numeric tokens, including repeated values and percent markers.
+
+    1,000 == 1000 == 1000.00; 30% == 30 %; 30% != 30.
+    Hangul-adjacent numbers are always captured; letter-prefixed product codes
+    (e.g. M10) are not mistaken for quantities.
+    """
+    normalized = []
+    for match in _NUMBER.finditer(str(text or '')):
+        raw = match.group('value').replace(',', '')
+        value = format(Decimal(raw).normalize(), 'f')
+        normalized.append(value + ('%' if match.group('percent') else ''))
+    return sorted(normalized)
 
 
 def copy_contract(snapshot):
@@ -110,8 +126,19 @@ def translate_contract(snapshot, language, *, env, caller=None):
             raise ValueError('번역 결과의 문장 수나 대응 관계가 달라 새 계약을 만들지 않았습니다.')
         for row,(key,source) in zip(translated,batch):
             target=row['text'].strip()
-            if _numbers(source)!=_numbers(target):
-                raise ValueError('숫자/금액이 바뀐 번역을 거부했습니다: '+key)
+            source_nums, target_nums = _numbers(source), _numbers(target)
+            if source_nums != target_nums:
+                # Show differences, but never approve a changed number automatically.
+                source_only = list((Counter(source_nums) - Counter(target_nums)).elements())
+                target_only = list((Counter(target_nums) - Counter(source_nums)).elements())
+                raise ValueError(
+                    '번역 숫자/금액 불일치: ' + key
+                    + '\n원문에만 있는 숫자: ' + ', '.join(source_only or ['없음'])
+                    + '\n번역문에만 있는 숫자: ' + ', '.join(target_only or ['없음'])
+                    + '\n원문: ' + str(source)[:350]
+                    + '\n번역: ' + target[:350]
+                    + '\n원본 계약은 변경되지 않았습니다. 해당 문장을 검토한 뒤 다시 번역해 주세요.'
+                )
             src_codes=sorted(x.upper() for x in _PROTECTED.findall(source))
             dst_codes=sorted(x.upper() for x in _PROTECTED.findall(target))
             if src_codes!=dst_codes:

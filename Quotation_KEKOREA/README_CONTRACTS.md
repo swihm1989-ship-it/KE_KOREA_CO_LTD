@@ -286,3 +286,6 @@ contracts/risk_review_workspace.py는 기존 contracts/review.py의 검증을 �
 - AI review issues provided as text remain unconfirmed, while malformed opaque issues fail closed and preserve user notes.
 - Legacy error messages retain the original invalid severity for audit and compatibility.
 - Run full regressions before deployment; no login bypass environment variable is introduced.
+
+### 2026-11-09 번역 숫자 검증 오탐 보정
+- 한국어/영어 계약서 버전 번역 시 `30일`처럼 한글에 붙은 숫자도 추출합니다. `1,000`/`1000`/`1000.00` 등 값이 같은 표기만 정규화하고 비율(`30%`/`30`) 및 실제 금액·기한의 불일치는 계속 차단합니다. 불일치가 있으면 조항 위치, 숫자 차이, 원문·번역문을 알려주고 원본은 보존합니다. 새 계약서가 정상 생성된 것은 번역의 법률적 정확성까지 보증하지 않습니다.
