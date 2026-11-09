@@ -1,5 +1,6 @@
 """Stage structured facts recovered from draft clauses without certifying them."""
 from copy import deepcopy
+from Quotation_KEKOREA.contracts.normalize_terms import normalize_term_keys
 
 
 def clause_evidence(snapshot):
@@ -15,6 +16,10 @@ def clause_evidence(snapshot):
 def merge_clause_candidates(snapshot, analysis):
     """Return an UNSAVED editor candidate. Never replace nonempty known values."""
     staged = deepcopy(snapshot)
+    analysis, conflicts = normalize_term_keys(analysis)
+    # Preserve ambiguities for human review. Never auto-certify any extraction.
+    if conflicts:
+        staged['clause_extraction_conflicts'] = conflicts
     existing = {str(t.get('key')): t for t in staged.get('terms', [])}
     for candidate in analysis.get('terms', []):
         key, value = str(candidate.get('key') or ''), str(candidate.get('value') or '').strip()

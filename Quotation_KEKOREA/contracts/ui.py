@@ -1023,6 +1023,8 @@ def _run_editor(repo, snapshot, state_key, env):
     editor_snapshot = st.session_state.get(candidate_key) or snapshot
     if candidate_key in st.session_state:
         st.info('본문에서 찾은 조건이 입력표에 AI 제안으로 나타납니다. 실제 값과 당사자 정보를 검토하고 상태를 확정한 뒤 기존 저장 버튼을 누르세요. 아직 원본은 변경되지 않았습니다.')
+        for conflict in editor_snapshot.get('clause_extraction_conflicts', []):
+            st.warning(f"서로 다른 추출값이 발견되었습니다: {conflict['key']} · {conflict['first']} / {conflict['other']}. 원문을 확인하세요.")
         if st.button('불러온 후보 취소', key=f"contract_clause_cancel_{snapshot['contract_id']}_{snapshot['revision']}"):
             st.session_state.pop(candidate_key, None)
             st.session_state[editor_version_key] = st.session_state.get(editor_version_key, 0) + 1
