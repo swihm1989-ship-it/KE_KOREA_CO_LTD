@@ -242,7 +242,7 @@ def analyze_trade(messages, current_snapshot, reference_context, *, env, client=
         "For example 단가/harga satuan/unit price => unit_price; 월 물량/jumlah bulanan/monthly quantity => quantity; 인도조건/syarat pengiriman/delivery terms => delivery; 대금 지급/syarat pembayaran/payment terms => payment_trigger. "
         "Put buyer and seller LEGAL ENTITY NAMES only under parties with buyer/seller roles, not as terms. Preserve source wording, exact units, figures, currency and uncertainty. Do not translate company names or infer missing facts. "
         "Each party has legal_name, country, address, representative, roles (array of buyer/seller/client/intermediary/commission_payer/fundraiser/investor). "
-        "Keep buyer/seller distinct from commission payer and intermediary. Each term has key, value, unit, currency, status, source_refs; use status suggested for extracted values and missing for absent values, never confirmed. "
+        "Keep buyer/seller distinct from commission payer and intermediary. Each term has key, value, unit, currency, status, source_refs; use status suggested for extracted values and missing for absent values, never confirmed. For EVERY party and term, source_refs MUST be a JSON array; use [] if no exact source quote is available, NEVER null, a string or a placeholder. Each cited source is an object: {"kind":"user","quote":"exact text","message_id":"optional existing message ID"} or {"kind":"reference","document_id":"existing reference ID","quote":"exact text"}. Only cite literal exact substrings from available user messages or selected reference extracts. Do not fabricate source IDs, quotes, evidence or assertions. "
         "For clause-to-term extraction, distinguish unit price from contract total, quantity amount from unit of measure, and Incoterm/location from delivery schedule/notice obligations. "
         "Use ISO currency codes only when explicitly sourced; do not assume $ means USD. Cite exact source phrases for ambiguous claims and retain uncertainty rather than inventing data. "
         "Never interpret a procedural delivery notice as contradictory to EXW, FOB, CIF or other Incoterms without actual inconsistent obligations. "
@@ -299,28 +299,49 @@ def analyze_trade(messages, current_snapshot, reference_context, *, env, client=
         normalized_source = " ".join(str(source or "").split())
         return bool(normalized_quote) and normalized_quote in normalized_source
 
-    for owner in [*data["parties"], *data["terms"]]:
-        source_refs = owner.get("source_refs", [])
-        if not isinstance(source_refs, list):
-            raise ValueError("Contract AI returned invalid source references.")
-        for source_ref in source_refs:
-            if not isinstance(source_ref, dict):
-                raise ValueError("Contract AI returned invalid source references.")
-            kind = source_ref.get("kind")
-            quote = source_ref.get("quote")
-            if kind == "reference":
-                source = reference_by_id.get(str(source_ref.get("document_id") or ""))
-                if source is None or not quote_matches(quote, source):
-                    raise ValueError("Contract AI cited text not found in the selected reference material.")
-            elif kind == "user":
-                message_id = source_ref.get("message_id")
-                source = message_by_id.get(str(message_id)) if message_id else None
-                valid_quote = (quote_matches(quote, source) if source is not None
-                               else any(quote_matches(quote, item) for item in message_texts))
-                if not valid_quote:
-                    raise ValueError("Contract AI cited text not found in the user conversation.")
+    for owner_type, owners in (("party", data["parties"]), ("term", data["terms"])):
+        for owner_index, owner in enumerate(owners):
+            owner_label = f"{owner_type}[{owner_index}]"
+            raw_refs = owner.get("source_refs")
+            if raw_refs is None or raw_refs == "":
+                source_refs = []
+            elif isinstance(raw_refs, dict):
+                source_refs = [raw_refs]
+            elif isinstance(raw_refs, str):
+                source_refs = [raw_refs]
+            elif isinstance(raw_refs, list):
+                source_refs = raw_refs
             else:
-                raise ValueError("Contract AI returned an unsupported source reference kind.")
+                raise ValueError(f"Contract AI returned invalid source references for {owner_label}: {type(raw_refs).__name__}.")
+            verified_refs = []
+            for source_ref in source_refs:
+                if source_ref is None or isinstance(source_ref, str):
+                    if isinstance(source_ref, str) and not source_ref.strip():
+                        continue
+                    data["issues"].append({
+                        "code": "unverified_ai_source_ref", "severity": "confirm",
+                        "message": f"AI source for {owner_label} was not a verifiable citation. Confirm the extracted information against the original input."
+                    })
+                    continue
+                if not isinstance(source_ref, dict):
+                    raise ValueError(f"Contract AI returned an invalid source reference for {owner_label}: {type(source_ref).__name__}.")
+                kind = source_ref.get("kind")
+                quote = source_ref.get("quote")
+                if kind == "reference":
+                    source = reference_by_id.get(str(source_ref.get("document_id") or ""))
+                    if source is None or not quote_matches(quote, source):
+                        raise ValueError(f"Contract AI cited text not found in the selected reference material ({owner_label}).")
+                elif kind == "user":
+                    message_id = source_ref.get("message_id")
+                    source = message_by_id.get(str(message_id)) if message_id else None
+                    valid_quote = (quote_matches(quote, source) if source is not None
+                                   else any(quote_matches(quote, item) for item in message_texts))
+                    if not valid_quote:
+                        raise ValueError(f"Contract AI cited text not found in the user conversation ({owner_label}).")
+                else:
+                    raise ValueError(f"Contract AI returned an unsupported source reference kind for {owner_label}.")
+                verified_refs.append(source_ref)
+            owner["source_refs"] = verified_refs
     return _localize_contract_followups(data, response_language, env=env,
                                           opener=client or urllib.request.urlopen)
 
