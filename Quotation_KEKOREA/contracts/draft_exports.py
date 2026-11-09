@@ -27,48 +27,13 @@ def export_draft(snapshot, *, formats=('docx', 'pdf'), env=None):
         raise ValueError('지원하지 않는 초안 형식입니다.')
     korean = snapshot['language'] == 'ko'
     label = 'DRAFT / 검토용' if korean else 'DRAFT / FOR REVIEW'
-    notice = ('서명용이 아닙니다. 본문은 미확정 제안을 포함하며, 아래 부록과 함께 검토해야 합니다.'
-              if korean else 'NOT FOR SIGNATURE. Text may contain unconfirmed proposals; read with the unresolved-items appendix.')
-    issues = validate_rules(snapshot, for_export=True, env=env)
-    cards = review_cards(issues, language=snapshot['language'])
-    lines = [(snapshot.get('title') or 'Contract', True), (notice, False)]
-    term_map = {}
-    for term in snapshot.get('terms', []):
-        for identifier in (term.get('key'), term.get('id')):
-            if identifier:
-                term_map[str(identifier)] = term
+    # Export only the authored clauses. Review issues stay inside BOX 2/the review panel.
+    # Never inject [확인 필요] or append audit data to the contract document.
+    lines = [(snapshot.get('title') or 'Contract', True)]
     for clause in sorted(snapshot['clauses'], key=lambda c: c.get('order', 0)):
         lines.append((clause.get('title') or '', True))
         for sentence in clause.get('sentences', []):
-            # Scope markers to directly linked, unconfirmed terms only. All other
-            # unresolved concerns remain in the complete appendix and DRAFT notice.
-            linked = [term_map.get(str(identifier)) for identifier in sentence.get('term_ids', [])]
-            unresolved = any(term is None or term.get('status') != 'confirmed'
-                             or not str(term.get('value') or '').strip() for term in linked)
-            raw_text = sentence['text']
-            already_marked = ('[서명 전 확인]' in raw_text or '[확인 필요]' in raw_text
-                              or '[TBD' in raw_text or '[TO CONFIRM]' in raw_text)
-            # A populated but unapproved candidate remains in the TBD appendix,
-            # rather than being redundantly marked on every prose sentence.
-            # A genuinely missing linked value still gets an inline warning.
-            missing_linked = any(term is None or not str(term.get('value') or '').strip()
-                                 for term in linked)
-            prefix = ('[확인 필요] ' if korean else '[TBD / UNCONFIRMED] ') if missing_linked and not already_marked else ''
-            lines.append((prefix + raw_text, False))
-    lines.append(('미확정 사항 부록 / TBD' if korean else 'Unresolved items / TBD', True))
-    if cards:
-        for card in cards:
-            lines.append((f"[{card['kind']}] {card['summary']}", False))
-        lines.append(('구조화된 조건과 원문 쟁점은 앱의 BOX 2 및 상세 근거에서 확인하세요. '
-                      '이 요약은 법률 검토 완료나 사용자 확정을 뜻하지 않습니다.' if korean else
-                      'Review the structured terms and original findings in BOX 2. This summary is not confirmation or legal certification.', False))
-        # Retain exact issue evidence in the appendix, never translate or certify it.
-        for issue in issues:
-            raw = str(issue.get('message') or issue.get('key') or '')
-            lines.append((('[미확정 원문] ' if korean else '[UNCONFIRMED SOURCE] ') + raw, False))
-    else:
-        lines.append(('자동 검사상 미확정 항목 없음. 이 출력은 계속 검토용입니다.' if korean else
-                      'No outstanding automatic checks; this output remains a review draft.', False))
+            lines.append((sentence['text'], False))
     result = {}
     for extension in formats:
         content = _draft_docx(lines, label) if extension == 'docx' else _draft_pdf(lines, label, korean)

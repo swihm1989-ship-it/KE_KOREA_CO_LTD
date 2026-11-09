@@ -7,6 +7,8 @@ import re
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Inches, Pt
+from pathlib import Path
+from reportlab.platypus import Image as PdfImage
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import A4
@@ -32,7 +34,7 @@ def _plain_lines(snapshot):
     return lines
 
 
-def _docx(snapshot):
+def _docx(snapshot, seal_bytes=None):
     document = Document()
     section = document.sections[0]
     section.top_margin = Inches(0.75)
@@ -51,20 +53,26 @@ def _docx(snapshot):
             paragraph = document.add_paragraph(sentence["text"])
             paragraph.paragraph_format.space_after = Pt(6)
             paragraph.paragraph_format.widow_control = True
-    document.add_page_break()
-    document.add_heading("서명" if snapshot.get("language") == "ko" else "SIGNATURES", level=1)
-    for party in snapshot.get("parties", []):
-        roles = ", ".join(party.get("roles", []))
-        document.add_heading(party.get("legal_name") or roles, level=2)
-        document.add_paragraph("By: __________________________________")
-        document.add_paragraph("Name / Title: __________________________")
-        document.add_paragraph("Date: __________________________________")
+    if _has_authored_signature_clause(snapshot):
+        if seal_bytes is not None:
+            document.add_picture(io.BytesIO(seal_bytes), width=Inches(1.1))
+    else:
+        document.add_page_break()
+        document.add_heading("서명" if snapshot.get("language") == "ko" else "SIGNATURES", level=1)
+        for party in snapshot.get("parties", []):
+            roles = ", ".join(party.get("roles", []))
+            document.add_heading(party.get("legal_name") or roles, level=2)
+            if seal_bytes is not None and _is_ke_korea_party(party):
+                document.add_picture(io.BytesIO(seal_bytes), width=Inches(1.1))
+            document.add_paragraph("By: __________________________________")
+            document.add_paragraph("Name / Title: __________________________")
+            document.add_paragraph("Date: __________________________________")
     output = io.BytesIO()
     document.save(output)
     return output.getvalue()
 
 
-def _pdf(snapshot):
+def _pdf(snapshot, seal_bytes=None):
     font_name = "Helvetica"
     if snapshot.get("language") == "ko":
         font_name = "HYGothic-Medium"
@@ -87,15 +95,27 @@ def _pdf(snapshot):
             story.extend(sentences[1:])
         else:
             story.append(heading)
-    story.append(PageBreak())
-    story.append(Paragraph("서명" if snapshot.get("language") == "ko" else "SIGNATURES",
-                           heading_style))
-    for party in snapshot.get("parties", []):
-        label = party.get("legal_name") or ", ".join(party.get("roles", []))
-        story.extend([Paragraph(escape(label), heading_style),
-                      Paragraph("By: __________________________________", body_style),
-                      Paragraph("Name / Title: __________________________", body_style),
-                      Paragraph("Date: __________________________________", body_style), Spacer(1, 16)])
+    if _has_authored_signature_clause(snapshot):
+        if seal_bytes is not None:
+            stamp = PdfImage(io.BytesIO(seal_bytes))
+            stamp.drawHeight = 68
+            stamp.drawWidth = 68 * stamp.imageWidth / stamp.imageHeight
+            story.append(stamp)
+    else:
+        story.append(PageBreak())
+        story.append(Paragraph("서명" if snapshot.get("language") == "ko" else "SIGNATURES",
+                               heading_style))
+        for party in snapshot.get("parties", []):
+            label = party.get("legal_name") or ", ".join(party.get("roles", []))
+            story.append(Paragraph(escape(label), heading_style))
+            if seal_bytes is not None and _is_ke_korea_party(party):
+                stamp = PdfImage(io.BytesIO(seal_bytes))
+                stamp.drawHeight = 68
+                stamp.drawWidth = 68 * stamp.imageWidth / stamp.imageHeight
+                story.append(stamp)
+            story.extend([Paragraph("By: __________________________________", body_style),
+                          Paragraph("Name / Title: __________________________", body_style),
+                          Paragraph("Date: __________________________________", body_style), Spacer(1, 16)])
     output = io.BytesIO()
     def page_footer(canvas, doc):
         canvas.saveState()
@@ -108,15 +128,15 @@ def _pdf(snapshot):
     return output.getvalue()
 
 
-def export_contract(snapshot, *, formats=("docx", "pdf")):
+def export_contract(snapshot, *, formats=("docx", "pdf"), seal_bytes=None):
     if not snapshot.get("clauses"):
         raise ValueError("A contract draft is required before export.")
     result = {}
     for file_format in formats:
         if file_format == "docx":
-            content = _docx(snapshot)
+            content = _docx(snapshot, seal_bytes=seal_bytes)
         elif file_format == "pdf":
-            content = _pdf(snapshot)
+            content = _pdf(snapshot, seal_bytes=seal_bytes)
         else:
             raise ValueError(f"Unsupported contract export format: {file_format}")
         result[file_format] = {
@@ -131,3 +151,14 @@ def export_contract(snapshot, *, formats=("docx", "pdf")):
 def _safe_name(snapshot):
     value = re.sub(r"[^\w-]+", "-", str(snapshot.get("title") or "contract").strip(), flags=re.UNICODE)
     return value.strip("-")[:80] or "contract"
+
+
+def _has_authored_signature_clause(snapshot):
+    titles = {'서명', '서명란', 'signatures', 'signature', 'signing'}
+    return any(str(c.get('title') or '').strip().casefold() in titles
+               for c in snapshot.get('clauses', []))
+
+def _is_ke_korea_party(party):
+    """Never place KE KOREA's company seal on another signatory."""
+    name = re.sub(r'[^a-z0-9]', '', str(party.get('legal_name') or '').casefold())
+    return name in {'kekorea', 'kekorealtd', 'kekoreacoltd', 'kekoreacolimited'}

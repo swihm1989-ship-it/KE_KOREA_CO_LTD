@@ -35,7 +35,8 @@ LABELS = {
     "term_or_deal_scope": "적용 기간 또는 특정 거래 범위",
     "fundraiser": "유치 담당자", "project": "투자 대상 프로젝트/법인",
     "funding_type": "자금 형태",
-    "payment_trigger": "수수료 지급 트리거 (실제 입금 대상·계좌 포함)",
+    # The sale UI uses a dedicated label; commission policy is in its own workflow.
+    "payment_trigger": "매매대금 또는 수수료 지급 조건",
     "late_interest_legal_review": "연체이율 적용 검토 (지급자 국가·준거법·커미션 채무)",
     "late_interest_source": "연체이율 검토 근거 (법령·검토 문서 및 확인일)",
 }

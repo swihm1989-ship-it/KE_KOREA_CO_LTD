@@ -77,7 +77,7 @@ class WorkspaceActionsTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             build_batch_proposal(example_snapshot(), [note(revision=1)], proposer=no_call, env={})
 
-    def test_draft_has_labels_unresolved_appendix_and_no_signature_page(self):
+    def test_draft_has_only_contract_content_and_no_signature_page(self):
         from Quotation_KEKOREA.contracts.draft_exports import export_draft
         snapshot = example_snapshot()
         before = deepcopy(snapshot)
@@ -90,13 +90,14 @@ class WorkspaceActionsTests(unittest.TestCase):
         self.assertIn('두 번째 계약 문장입니다.', text)
         self.assertNotIn('[확인 필요] 첫 번째 계약 문장입니다.', text)
         self.assertNotIn('[확인 필요] 두 번째 계약 문장입니다.', text)
-        self.assertIn('[필수 확인]', text)
-        self.assertIn('미확정 사항', text)
+        self.assertNotIn('[필수 확인]', text)
+        self.assertNotIn('미확정 사항', text)
+        self.assertNotIn('[미확정 원문]', text)
         self.assertNotIn('By: ___', text)
         with fitz.open(stream=outputs['pdf']['content'], filetype='pdf') as pdf:
             for page in pdf:
                 self.assertIn('DRAFT', page.get_text())
-            self.assertIn('미확정 사항', ''.join(p.get_text() for p in pdf))
+            self.assertNotIn('미확정 사항', ''.join(p.get_text() for p in pdf))
         self.assertIn('-DRAFT-', outputs['pdf']['filename'])
         self.assertEqual(snapshot, before)
 
@@ -105,14 +106,15 @@ class WorkspaceActionsTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             export_draft(new_snapshot('empty', 'sale', 'ko'), env={})
 
-    def test_english_draft_preserves_korean_original_evidence_in_pdf(self):
+    def test_english_draft_does_not_leak_review_evidence_in_pdf(self):
         from Quotation_KEKOREA.contracts.draft_exports import export_draft
         snapshot = example_snapshot()
         snapshot['language'] = 'en'
         output = export_draft(snapshot, formats=('pdf',), env={})['pdf']['content']
         with fitz.open(stream=output, filetype='pdf') as pdf:
             text = '\n'.join(page.get_text() for page in pdf)
-        self.assertIn('계약일 또는 효력 발생 기준', text)
+        self.assertNotIn('계약일 또는 효력 발생 기준', text)
+        self.assertIn('첫 번째 계약 문장입니다.', text)
 
 
 class ReviewCardsTests(unittest.TestCase):

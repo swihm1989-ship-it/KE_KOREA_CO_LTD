@@ -177,3 +177,11 @@ PDF/DOCX를 메모리에서 만든 후 비공개 저장소 저장이 실패한 �
 - 저장·복사·언어 버전 메뉴의 복사 기능은 마지막 저장된 revision의 거래조건, 당사자, 본문 조항을 새 계약에 복제한다. 원본 계약과 자료는 변경되지 않으며, 원본 계약에 귀속된 참고자료 인용은 복사하지 않는다.
 - 한국어/영어 새 버전 만들기는 사용자가 AI 전송에 명시 동의했을 때 현재 계약 조항과 설명형 조건을 번역하고, 숫자/금액/표준단위/Incoterms 코드 변화가 발생하면 새 계약 생성을 중지한다. 변환 직후 BOX 3에서 본문을 검토·수정할 수 있다.
 - 회사 법인명·품목코드·원본 출처를 추측하거나 변조하지 않는다. 실제 사용/최종 날인 전 양국어 법률 문구를 사용자/전문가가 대조해야 한다. DB 연결/전체 회귀 테스트/운영 배포는 별도 검증 필요.
+
+## Contract PDF export completion (2026-11-09)
+
+- Integrated the final PDF/DOCX rendering changes into the contract workflow.
+- Added explicit FINAL approval and validated company-seal handling.
+- Updated export rules and regression tests to distinguish draft output from final execution copies.
+- Draft files contain contract clauses without automatic review appendices.
+- The corresponding implementation is in contracts/draft_exports.py, contracts/exports.py, and contracts/final_policy.py.

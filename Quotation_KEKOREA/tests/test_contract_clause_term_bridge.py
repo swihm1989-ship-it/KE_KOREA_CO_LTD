@@ -44,7 +44,8 @@ class ClauseTermBridgeTests(unittest.TestCase):
         doc = Document(BytesIO(result['docx']['content']))
         paragraphs = [p.text for p in doc.paragraphs]
         self.assertIn('월 물량은 50,000KG로 한다.', paragraphs)
-        self.assertIn('[확인 필요] 계약일은 추후 정한다.', paragraphs)
+        self.assertIn('계약일은 추후 정한다.', paragraphs)
+        self.assertNotIn('[확인 필요] 계약일은 추후 정한다.', paragraphs)
         self.assertNotIn('[확인 필요] 월 물량은 50,000KG로 한다.', paragraphs)
 
 

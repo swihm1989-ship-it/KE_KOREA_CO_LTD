@@ -415,7 +415,8 @@ try:
                 "KEKOREA_USD_BENEFICIARY", "KEKOREA_USD_BANK_NAME", "KEKOREA_USD_BRANCH",
                 "KEKOREA_USD_SWIFT", "KEKOREA_USD_ACCOUNT_NUMBER", "KEKOREA_USD_BANK_ADDRESS",
                 "KEKOREA_COMPANY_SEAL_BASE64", "CONTRACT_OPENAI_MODEL",
-                "CONTRACT_LIBRARY_ADMIN_TOKEN", "CONTRACT_LIBRARY_EMBEDDING_MODEL"):
+                "CONTRACT_LIBRARY_ADMIN_TOKEN", "CONTRACT_LIBRARY_EMBEDDING_MODEL",
+                "CONTRACT_FINAL_SEAL_PASSWORD"):
         if key in st.secrets:
             cloud_secrets[key] = st.secrets[key]
 except Exception:
