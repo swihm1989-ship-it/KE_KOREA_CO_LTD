@@ -76,6 +76,23 @@ class ThreeBoxUiTests(unittest.TestCase):
         self.assertEqual(indices, sorted(indices))
         self.assertEqual(len(self.at.dataframe), 2)
 
+    def test_party_roles_render_only_in_parties_and_unit_is_suggested(self):
+        from Quotation_KEKOREA.contracts.ui import _term_rows, _party_rows
+        snapshot = self.repo.revisions['sample'][0]['snapshot']
+        snapshot['terms'] = [{'key': 'quantity', 'value': '50000',
+                              'unit': 'KG/월', 'status': 'confirmed'}]
+        snapshot['parties'] = [{'legal_name': 'KE KOREA CO. LTD',
+                                'roles': ['seller'], 'status': 'suggested'},
+                               {'legal_name': 'OCI Co. Ltd.',
+                                'roles': ['buyer'], 'status': 'suggested'}]
+        terms = {row['key']: row for row in _term_rows(snapshot)}
+        self.assertNotIn('buyer', terms)
+        self.assertNotIn('seller', terms)
+        self.assertEqual(terms['unit']['value'], 'KG')
+        self.assertEqual(terms['unit']['status'], 'AI 제안')
+        self.assertEqual(terms['payment_trigger']['항목'], '매매대금 지급 조건')
+        self.assertEqual(len(_party_rows(snapshot)), 2)
+
     def test_sentence_notes_reload_without_cross_contamination(self):
         self.run_app()
         self.save_note('s1', '첫 문장만 간결하게')
@@ -116,16 +133,14 @@ class ThreeBoxUiTests(unittest.TestCase):
         self.assertEqual([s['text'] for s in saved['clauses'][0]['sentences']], ['첫째 수정', '둘째 수정'])
         self.assertTrue(self.button('최종 수정 요청').disabled)
 
-    def test_draft_private_export_allowed_while_final_stays_blocked(self):
+    def test_draft_is_ready_without_storage_and_final_stays_blocked(self):
         self.run_app()
-        with patch('Quotation_KEKOREA.contracts.ui.export_contract') as final_export:
-            self.assertTrue(self.button('최종 계약서 PDF').disabled)
-            self.button('검토용 초안 PDF').click()
-            self.run_app()
-            final_export.assert_not_called()
-        self.assertEqual(len(self.repo.exports), 1)
-        self.assertIn('/exports/draft/', self.repo.exports[0]['storage_path'])
-        self.assertEqual(self.repo.exports[0]['revision'], 1)
+        self.assertTrue(self.button('최종 계약서 PDF').disabled)
+        self.assertFalse(self.repo.exports)
+        self.assertFalse(self.repo.files)
+        draft = self.at.session_state['contract_direct_draft_sample']
+        self.assertTrue(draft['outputs']['pdf']['content'].startswith(b'%PDF-'))
+        self.assertTrue(draft['outputs']['docx']['content'].startswith(b'PK'))
 
     def test_default_review_has_no_duplicated_english_error_checkbox(self):
         self.run_app()
@@ -216,32 +231,54 @@ class ThreeBoxUiTests(unittest.TestCase):
         self.run_app()
         self.assertEqual(self.repo.records['sample']['current_revision'], 1)
 
-    def test_final_download_uses_existing_validation_and_renderer(self):
+    def test_final_download_uses_current_revision_approval_and_verified_seal(self):
+        # Old test expected an enabled button without the explicit approval,
+        # administrator authorization or KE KOREA party now required for stamping.
         from Quotation_KEKOREA.contracts.rules import COMMON_REQUIRED, TYPE_REQUIRED, validate_snapshot
+        from streamlit.testing.v1 import AppTest
+        from unittest.mock import patch
         snapshot = self.repo.revisions['sample'][0]['snapshot']
         snapshot['issues'] = []
         snapshot['terms'] = [dict(key=key, value='Agreed value', status='confirmed')
                              for key in COMMON_REQUIRED + TYPE_REQUIRED['sale'] if key not in {'buyer', 'seller'}]
-        snapshot['parties'] = [dict(id=role, legal_name=role + ' Example Ltd', country='KR', address='Seoul',
-                                   roles=[role], status='confirmed') for role in ('buyer', 'seller')]
+        snapshot['parties'] = [dict(id='seller', legal_name='KE KOREA CO. LTD', country='KR', address='Seoul',
+                                   roles=['seller'], status='confirmed'),
+                               dict(id='buyer', legal_name='OCI Co. Ltd.', country='KR', address='Seoul',
+                                   roles=['buyer'], status='confirmed')]
         self.assertEqual(validate_snapshot(snapshot, for_export=True), [])
+        self.at = AppTest.from_string(
+            "from Quotation_KEKOREA.contracts.ui import render_contract_page\n"
+            "render_contract_page('계약서 만들기', {'CONTRACT_FINAL_SEAL_PASSWORD':'test-password'})")
+        self.at.session_state['contract_active_id'] = 'sample'
+        self.run_app()
+        self.assertTrue(self.button('최종 계약서 PDF').disabled)
+        self.at.checkbox(key='contract_final_approved_sample_1').check()
+        self.at.text_input(key='contract_final_seal_access_sample_1').set_value('test-password')
         self.run_app()
         self.assertFalse(self.button('최종 계약서 PDF').disabled)
-        self.button('최종 계약서 PDF').click()
-        self.run_app()
+        # Verify workflow wiring with a synthetic renderer result, never a real seal.
+        def mock_renderer(snap, *, formats, seal_bytes):
+            self.assertEqual(snap['revision'], 1)
+            self.assertEqual(formats, ('pdf',))
+            self.assertEqual(seal_bytes, b'test-seal-bytes')
+            return {'pdf': {'filename': 'test-final.pdf', 'content': b'%PDF-1.4\n%%EOF',
+                            'sha256': 'testhash', 'revision': 1}}
+        with patch('Quotation_KEKOREA.contracts.ui._verified_contract_seal',
+                   return_value=b'test-seal-bytes'), patch(
+                   'Quotation_KEKOREA.contracts.ui.export_contract', side_effect=mock_renderer):
+            self.button('최종 계약서 PDF').click()
+            self.run_app()
         self.assertEqual(len(self.repo.exports), 1)
         self.assertIn('/exports/final/', self.repo.exports[0]['storage_path'])
         self.assertNotIn('-DRAFT-', self.repo.exports[0]['storage_path'])
 
-    def test_failed_draft_export_record_is_cleaned_up(self):
+    def test_draft_never_calls_private_storage(self):
         from Quotation_KEKOREA.contracts.repository import ContractRepositoryError
-        self.run_app()
-        with patch.object(self.repo, 'save_export', side_effect=ContractRepositoryError('synthetic failure')):
-            self.button('검토용 초안 PDF').click()
+        with patch.object(self.repo, 'save_export', side_effect=ContractRepositoryError('blocked')):
             self.run_app()
-        self.assertFalse(self.repo.files)
         self.assertFalse(self.repo.exports)
-        self.assertNotIn('contract_output_draft_sample_1_pdf', self.at.session_state)
+        self.assertFalse(self.repo.files)
+        self.assertTrue(self.at.session_state['contract_direct_draft_sample']['outputs']['pdf']['content'])
 
     def test_annotation_log_failure_does_not_hide_committed_revision(self):
         from Quotation_KEKOREA.contracts.repository import ContractRepositoryError

@@ -107,8 +107,14 @@ class ContractWorkspaceUiTests(unittest.TestCase):
         next(item for item in self.at.button if item.label == 'Example FI').click()
         self.run_app()
         self.assertIn('## Example FI', [item.value for item in self.at.markdown])
-        self.assertTrue(any('투자 대상 프로젝트/법인' in item.value['항목'].tolist()
-                            for item in self.at.dataframe if '항목' in item.value.columns))
+        self.run_app()
+        self.assertIn('## Example FI', [item.value for item in self.at.markdown])
+        self.assertTrue(any(
+            'project' in item.value['key'].tolist()
+            and 'Project' in item.value['항목'].tolist()
+            for item in self.at.dataframe
+            if {'key', '항목'}.issubset(item.value.columns)
+        ))
 
     def test_saved_contract_list_renders_without_undefined_options(self):
         self.seed('first', 'sale', 'First contract')

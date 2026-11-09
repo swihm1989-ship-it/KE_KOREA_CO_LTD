@@ -1,7 +1,12 @@
 from Quotation_KEKOREA.contracts.clause_terms import clause_evidence, merge_clause_candidates
+from Quotation_KEKOREA.contracts.latest_instruction import (
+    candidate_from_latest, instruction_hash, is_explicit_change, latest_unapplied_request,
+)
 """Streamlit UI for private contract drafting, review, revision and export."""
 import hashlib
+import hmac
 import re
+from pathlib import Path
 from copy import deepcopy
 from html import escape
 from uuid import NAMESPACE_URL, uuid4, uuid5
@@ -12,6 +17,9 @@ from Quotation_KEKOREA.contracts.editing import (
     RevisionConflict, apply_proposal, restore_revision,
 )
 from Quotation_KEKOREA.contracts.exports import export_contract
+from Quotation_KEKOREA.contracts.contract_versions import copy_contract, translate_contract, localized_term_label
+from Quotation_KEKOREA.contracts.final_policy import final_document_blockers
+from Quotation_KEKOREA.agent.branding import resolve_company_seal, COMPANY_SEAL_SHA256
 from Quotation_KEKOREA.contracts.draft_exports import export_draft
 from Quotation_KEKOREA.contracts.workspace import collect_notes, propose_notes_revision
 from Quotation_KEKOREA.contracts.final_merge import merge_revision_requests
@@ -151,24 +159,34 @@ def _rows(value):
 
 
 def _term_rows(snapshot):
-    terms = {term.get("key"): term for term in snapshot.get("terms", [])}
-    keys = list(dict.fromkeys(list(TYPE_REQUIRED[snapshot["contract_type"]]) +
-                              list(terms.keys())))
+    """Present canonical commercial terms; signatory roles live in parties, not terms."""
+    terms = {str(t.get('key')): t for t in snapshot.get('terms', []) if t.get('key')}
+    party_keys = {'buyer', 'seller', 'client', 'intermediary',
+                  'commission_payer', 'fundraiser', 'investor'}
+    keys = [key for key in dict.fromkeys(list(TYPE_REQUIRED[snapshot['contract_type']]) + list(terms))
+            if key not in party_keys]
     if snapshot['contract_type'] in COMMISSION_TYPES:
-        keys = list(dict.fromkeys(keys + ['payment_trigger', 'late_interest_legal_review', 'late_interest_source']))
+        keys = list(dict.fromkeys(keys + ['payment_trigger', 'late_interest_legal_review',
+                                         'late_interest_source']))
     rows = []
     for key in keys:
         term = terms.get(key, {})
-        rows.append({
-            "key": key,
-            "항목": LABELS.get(key, key.replace("_", " ")),
-            "value": term.get("value") or "",
-            "unit": term.get("unit") or "",
-            "currency": term.get("currency") or "",
-            "status": _editor_status(term.get("status", "missing"), term.get('value')),
-        })
+        value = term.get('value') or ''
+        status = term.get('status', 'missing')
+        # Display-only candidate; persist only after a person presses the existing save button.
+        if key == 'unit' and not str(value).strip():
+            qty_unit = str(terms.get('quantity', {}).get('unit') or '').strip().upper()
+            matched = re.match(r'^\s*(KG|MT|PCS|TON|LB)(?:\s*(?:/|PER|당)|$)', qty_unit)
+            if matched:
+                value = matched.group(1)
+                status = 'suggested'
+        label = ('매매대금 지급 조건' if key == 'payment_trigger' and
+                 snapshot['contract_type'] == 'sale' else LABELS.get(key, key.replace('_', ' ')))
+        label = localized_term_label(key, snapshot.get('language', 'ko'), label)
+        rows.append({'key': key, '항목': label, 'value': value,
+                     'unit': term.get('unit') or '', 'currency': term.get('currency') or '',
+                     'status': _editor_status(status, value)})
     return rows
-
 
 def _party_rows(snapshot):
     return [{
@@ -420,6 +438,9 @@ def _proposal_panel(repo, snapshot, proposal, state_key):
                         type="primary", key=f"proposal_apply_{proposal['id']}"):
         try:
             updated = apply_proposal(snapshot, proposal, selected_ids)
+            if (proposal.get('approved_chat_hash') and
+                    set(selected_ids) == {change['id'] for change in proposal.get('changes', [])}):
+                updated['last_approved_chat_hash'] = proposal['approved_chat_hash']
             if proposal.get("note_ids"):
                 # Only fully approved requests are consumed. Others remain visible
                 # as prior-revision notes for explicit re-review, never silent reuse.
@@ -885,87 +906,100 @@ def _review_panel(repo, snapshot, state_key, issues):
                     st.write(issue.get('message', ''))
 
 
-def _export_panel(repo, snapshot, env):
-    issues = validate_rules(snapshot, for_export=True, env=env)
-    st.markdown("#### 문서 다운로드")
-    st.caption("검토용 DRAFT PDF/Word는 미확정 정보가 있어도 만들 수 있습니다. "
-               "FINAL은 필수 조건을 실제로 확인해야 생성됩니다. 검토 목록을 숨겨도 최종 검증 결과는 달라지지 않습니다.")
-    draft_col, final_col = st.columns(2)
-    for column, mode, title in ((draft_col, 'draft', '검토용 초안'), (final_col, 'final', '최종 계약서')):
-        with column:
-            st.markdown(f"**{'DRAFT / 검토용' if mode == 'draft' else 'FINAL / 최종 검증'}**")
-            if mode == 'final' and issues:
-                st.caption(f"최종 확인이 필요한 항목 {len(issues)}건. BOX 2에서 실제 조건을 입력·확정하고, "
-                           "필요하면 아래 '고급 검토 기록'에서 AI 쟁점 근거를 확인하세요.")
-            for extension in ('pdf', 'docx'):
-                if st.button(f"{title} {extension.upper()}",
-                             disabled=bool(issues) if mode == 'final' else False,
-                             key=f"contract_export_{mode}_{snapshot['contract_id']}_{snapshot['revision']}_{extension}"):
-                    try:
-                        # Separate paths; final validation is always recomputed here.
-                        if mode == 'final' and validate_rules(snapshot, for_export=True, env=env):
-                            raise ValueError("최종 검증을 통과하지 못했습니다.")
-                        outputs = (export_draft(snapshot, formats=(extension,), env=env) if mode == 'draft'
-                                   else export_contract(snapshot, formats=(extension,)))
-                        # Render first, then save privately. Do not conflate a valid PDF
-                        # with a failed Supabase upload or export-record write.
-                        local_key = f"contract_unsaved_output_{mode}_{snapshot['contract_id']}_{snapshot['revision']}_{extension}"
-                        saved_key = f"contract_output_{mode}_{snapshot['contract_id']}_{snapshot['revision']}_{extension}"
-                        try:
-                            _persist_contract_outputs(repo, snapshot, outputs, mode)
-                        except ContractRepositoryError as storage_exc:
-                            # _persist_contract_outputs already performs its normal
-                            # partial-upload rollback. Keep bytes only in this session,
-                            # not in the DB or a public location.
-                            st.session_state[local_key] = outputs[extension]
-                            st.session_state.pop(saved_key, None)
-                            st.warning("파일은 생성됐지만 비공개 저장소 기록에 실패했습니다. "
-                                       "아래 '직접 다운로드'로 받을 수 있습니다. "
-                                       f"서버 저장 실패 원인: {storage_exc}")
-                        else:
-                            st.session_state.pop(local_key, None)
-                            st.session_state[saved_key] = outputs[extension]
-                            st.success("현재 revision의 파일을 비공개 저장했습니다.")
-                    except (ValueError, RuntimeError, ContractRepositoryError) as exc:
-                        st.error(f"파일 생성 단계에서 실패했습니다. {exc}")
-                output = st.session_state.get(f"contract_output_{mode}_{snapshot['contract_id']}_{snapshot['revision']}_{extension}")
-                if output and not (mode == 'final' and issues):
-                    st.download_button(f"{title} {extension.upper()} 다운로드", data=output['content'],
-                                       file_name=output['filename'], mime=_contract_mime(extension),
-                                       key=f"contract_download_{mode}_{snapshot['contract_id']}_{snapshot['revision']}_{extension}")
-                local_output = st.session_state.get(
-                    f"contract_unsaved_output_{mode}_{snapshot['contract_id']}_{snapshot['revision']}_{extension}")
-                if local_output and not (mode == 'final' and issues):
-                    st.download_button(f"{title} {extension.upper()} 직접 다운로드 (서버 미저장)",
-                                       data=local_output['content'], file_name=local_output['filename'],
-                                       mime=_contract_mime(extension),
-                                       key=f"contract_local_download_{mode}_{snapshot['contract_id']}_{snapshot['revision']}_{extension}")
-    try:
-        current_exports = [item for item in repo.list_exports(snapshot['contract_id'])
-                           if item.get('revision') == snapshot['revision']]
-    except ContractRepositoryError as exc:
-        st.caption(f"비공개 출력 기록을 조회하지 못했습니다. 서버 저장 상태를 확인해 주세요: {exc}")
-        current_exports = []
-    if current_exports:
-        with st.expander("현재 revision의 비공개 출력 기록", expanded=False):
-            for item in current_exports:
-                draft = '/exports/draft/' in item['storage_path']
-                if not draft and issues:
-                    continue
-                label = 'DRAFT / 검토용' if draft else 'FINAL'
-                if st.button(f"{label} · {item['format'].upper()} 파일 다시 받기",
-                             key=f"contract_saved_export_{item['id']}"):
-                    try:
-                        content = repo.download_private_file('kekorea-contracts', item['storage_path'])
-                        st.download_button(f"{label} 다운로드", data=content,
-                                           file_name=item['storage_path'].rsplit('/', 1)[-1],
-                                           mime=_contract_mime(item['format']), key=f"contract_redownload_{item['id']}")
-                    except ContractRepositoryError as exc:
-                        st.error(str(exc))
-    # Optional audit/reconciliation controls are still reachable, but never
-    # interrupt DRAFT download or masquerade as the FINAL export validator.
-    _review_panel(repo, snapshot, f"contract_snapshot_{snapshot['contract_id']}", issues)
+def _verified_contract_seal(env):
+    """Load only the configured verified PNG, never a public URL or placeholder stamp."""
+    root = Path(__file__).resolve().parents[1]
+    path, blob, error = resolve_company_seal(root, env)
+    if blob is None and path.is_file():
+        blob = path.read_bytes()
+    if (not blob or not blob.startswith(b'\x89PNG\r\n\x1a\n')
+            or hashlib.sha256(blob).hexdigest() != COMPANY_SEAL_SHA256):
+        raise ValueError('검증된 KE KOREA 직인을 불러오지 못했습니다: '+str(error or '이미지 검증 실패'))
+    return blob
 
+
+def _export_panel(repo, snapshot, env):
+    st.markdown('#### 문서 다운로드')
+    st.caption('DRAFT와 FINAL 파일에는 BOX 3의 저장된 계약 조항만 포함됩니다. 내부 AI 검토사항은 화면에만 남습니다.')
+    issues = validate_rules(snapshot, for_export=True, env=env)
+    draft_col, final_col = st.columns(2)
+    with draft_col:
+        st.markdown('**DRAFT / 검토용**')
+        st.caption('저장소 업로드 없이 한 번 클릭하여 PDF 또는 Word를 내려받습니다.')
+        if any(c.get('sentences') for c in snapshot.get('clauses', [])):
+            fingerprint = hashlib.sha256(repr((snapshot.get('title'), snapshot.get('language'),
+                snapshot.get('revision'), snapshot.get('clauses'))).encode('utf-8')).hexdigest()
+            cache_key = f"contract_direct_draft_{snapshot['contract_id']}"
+            cached = st.session_state.get(cache_key)
+            if not isinstance(cached, dict) or cached.get('fingerprint') != fingerprint:
+                try:
+                    outputs = export_draft(snapshot, formats=('pdf', 'docx'), env=env)
+                except (ValueError, RuntimeError) as exc:
+                    st.error(f'계약서 렌더링 실패: {exc}')
+                    outputs = None
+                if outputs is not None:
+                    st.session_state[cache_key] = {'fingerprint': fingerprint, 'outputs': outputs}
+                else:
+                    st.session_state.pop(cache_key, None)
+            cached = st.session_state.get(cache_key)
+            if cached and cached.get('fingerprint') == fingerprint:
+                for ext in ('pdf', 'docx'):
+                    output = cached['outputs'][ext]
+                    st.download_button(f'검토용 초안 {ext.upper()}', data=output['content'],
+                                       file_name=output['filename'], mime=_contract_mime(ext),
+                                       key=f"contract_direct_draft_download_{snapshot['contract_id']}_{fingerprint}_{ext}")
+        else:
+            st.caption('BOX 3에 실제 계약 조항을 먼저 생성하세요.')
+    with final_col:
+        st.markdown('**FINAL / 최종 계약서**')
+        blockers = final_document_blockers(snapshot)
+        if issues:
+            st.caption(f'내부 검토사항 {len(issues)}건은 PDF에 출력되지 않습니다. 최종 승인 전 내용을 확인하세요.')
+        for message in blockers[:6]:
+            st.error(message)
+        approval_key = f"contract_final_approved_{snapshot['contract_id']}_{snapshot['revision']}"
+        approved = st.checkbox('현재 revision의 계약 본문 및 당사자를 확인하고 최종 파일을 승인합니다.',
+                               key=approval_key)
+        password = st.text_input('FINAL 회사 직인 사용 암호', type='password',
+                                 key=f"contract_final_seal_access_{snapshot['contract_id']}_{snapshot['revision']}")
+        configured = str(env.get('CONTRACT_FINAL_SEAL_PASSWORD') or '')
+        authorized = bool(configured) and hmac.compare_digest(str(password), configured)
+        if not configured:
+            st.caption('관리자: 비공개 Streamlit Secrets에 CONTRACT_FINAL_SEAL_PASSWORD를 설정하세요.')
+        disabled = bool(blockers) or not approved or not authorized
+        for ext in ('pdf', 'docx'):
+            button_key = f"contract_export_final_{snapshot['contract_id']}_{snapshot['revision']}_{ext}"
+            if st.button(f'최종 계약서 {ext.upper()}', disabled=disabled, key=button_key):
+                try:
+                    if final_document_blockers(snapshot) or not approved or not authorized:
+                        raise ValueError('현재 계약 본문 승인과 직인 사용 권한 확인이 필요합니다.')
+                    outputs = export_contract(snapshot, formats=(ext,), seal_bytes=_verified_contract_seal(env))
+                    local_key=f"contract_unsaved_output_final_{snapshot['contract_id']}_{snapshot['revision']}_{ext}"
+                    saved_key=f"contract_output_final_{snapshot['contract_id']}_{snapshot['revision']}_{ext}"
+                    # Never misreport a successful render as a successful upload.
+                    try:
+                        _persist_contract_outputs(repo, snapshot, outputs, 'final')
+                    except ContractRepositoryError:
+                        st.session_state[local_key] = outputs[ext]
+                        st.session_state.pop(saved_key, None)
+                        st.info('최종 파일 생성 완료. 서버 보관은 실패하여 브라우저에서 직접 다운로드할 수 있습니다.')
+                    else:
+                        st.session_state[saved_key] = outputs[ext]
+                        st.session_state.pop(local_key, None)
+                        st.success('최종 계약서 파일 생성 및 비공개 보관 완료')
+                except (ValueError, RuntimeError, ContractRepositoryError) as exc:
+                    st.error(f'최종 문서 생성 실패: {exc}')
+            for key, label in ((f"contract_output_final_{snapshot['contract_id']}_{snapshot['revision']}_{ext}",
+                                f'최종 계약서 {ext.upper()} 다운로드'),
+                               (f"contract_unsaved_output_final_{snapshot['contract_id']}_{snapshot['revision']}_{ext}",
+                                f'최종 계약서 {ext.upper()} 직접 다운로드')):
+                output = st.session_state.get(key)
+                if output and not disabled:
+                    st.download_button(label, data=output['content'], file_name=output['filename'],
+                                       mime=_contract_mime(ext),
+                                       key=f'contract_download_{key}')
+    # Findings remain available in the app, not in exported document pages.
+    _review_panel(repo, snapshot, f"contract_snapshot_{snapshot['contract_id']}", issues)
 
 def _contract_mime(extension):
     return ('application/vnd.openxmlformats-officedocument.wordprocessingml.document'
@@ -1002,7 +1036,7 @@ def _persist_contract_outputs(repo, snapshot, outputs, mode):
 
 def _run_editor(repo, snapshot, state_key, env):
     st.markdown('<span id="contract-terms"></span>', unsafe_allow_html=True)
-    st.markdown("#### 거래금액·수수료·지급·기간·법률 및 기타 조건")
+    st.markdown("#### Commercial terms, payment, term and law" if snapshot.get("language") == "en" else "#### 거래금액·수수료·지급·기간·법률 및 기타 조건")
     candidate_key = f"contract_clause_candidates_{snapshot['contract_id']}_{snapshot['revision']}"
     editor_version_key = f"contract_terms_editor_version_{snapshot['contract_id']}_{snapshot['revision']}"
     st.caption('계약서 본문과 구조화 조건표는 별도 데이터입니다. 이미 본문에 있는 정보만 AI가 다시 추출해 입력 후보로 보여줍니다.')
@@ -1038,11 +1072,11 @@ def _run_editor(repo, snapshot, state_key, env):
         _term_rows(editor_snapshot), key=state_key_terms, hide_index=True,
         num_rows="dynamic", width="stretch",
         column_config={
-            "key": st.column_config.TextColumn("내부 키", disabled=True),
-            "항목": st.column_config.TextColumn("조건 항목", disabled=True),
-            "value": st.column_config.TextColumn("값"),
-            "unit": st.column_config.TextColumn("단위"),
-            "currency": st.column_config.TextColumn("통화"),
+            "key": st.column_config.TextColumn("Internal key" if snapshot.get("language") == "en" else "내부 키", disabled=True),
+            "항목": st.column_config.TextColumn("Term" if snapshot.get("language") == "en" else "조건 항목", disabled=True),
+            "value": st.column_config.TextColumn("Value" if snapshot.get("language") == "en" else "값"),
+            "unit": st.column_config.TextColumn("Unit" if snapshot.get("language") == "en" else "단위"),
+            "currency": st.column_config.TextColumn("Currency" if snapshot.get("language") == "en" else "통화"),
             "status": st.column_config.SelectboxColumn(
                 "상태", options=["확인 필요", "AI 제안", "확정", "TBD 유지"],
                 required=True, help="확정은 명시적으로 승인한 값만 선택하세요. TBD는 최종본을 차단하는 미확정 상태입니다."),
@@ -1050,17 +1084,17 @@ def _run_editor(repo, snapshot, state_key, env):
     )
     st.caption("확정=사용자 승인, AI 제안=미승인 후보, 확인 필요·TBD 유지=미확정. 검토용 초안은 가능하며 최종본만 검증합니다.")
     st.markdown('<span id="contract-parties"></span>', unsafe_allow_html=True)
-    st.markdown("#### 당사자 및 역할")
+    st.markdown("#### Contract parties and roles" if snapshot.get("language") == "en" else "#### 당사자 및 역할")
     party_rows = st.data_editor(
         _party_rows(editor_snapshot), key=f"contract_parties_table_{snapshot['contract_id']}_{snapshot['revision']}_{st.session_state.get(editor_version_key, 0)}",
         hide_index=True, num_rows="dynamic", use_container_width=True,
         column_config={
             "id": st.column_config.TextColumn("ID", disabled=True),
-            "legal_name": st.column_config.TextColumn("법인명"),
-            "country": st.column_config.TextColumn("국가"),
-            "address": st.column_config.TextColumn("주소"),
-            "representative": st.column_config.TextColumn("대표/서명권자"),
-            "roles": st.column_config.TextColumn("역할 (쉼표 구분)"),
+            "legal_name": st.column_config.TextColumn("Legal name" if snapshot.get("language") == "en" else "법인명"),
+            "country": st.column_config.TextColumn("Country" if snapshot.get("language") == "en" else "국가"),
+            "address": st.column_config.TextColumn("Address" if snapshot.get("language") == "en" else "주소"),
+            "representative": st.column_config.TextColumn("Representative / signatory" if snapshot.get("language") == "en" else "대표/서명권자"),
+            "roles": st.column_config.TextColumn("Roles (comma-separated)" if snapshot.get("language") == "en" else "역할 (쉼표 구분)"),
             "status": st.column_config.SelectboxColumn(
                 "상태", options=["확인 필요", "AI 제안", "확정", "TBD 유지"], required=True),
         },
@@ -1156,6 +1190,33 @@ def _contract_chat(repo, snapshot, state_key, env):
             key=f"contract_context_refs_{snapshot['contract_id']}")
     consent = st.checkbox("입력한 거래 내용과 선택한 참고 문구·승인된 샘플 메모를 설정된 OpenAI API로 전송하는 데 동의합니다.",
                           key=f"contract_ai_consent_{snapshot['contract_id']}")
+    if snapshot.get('clauses'):
+        newest_request = latest_unapplied_request(messages, snapshot)
+        if newest_request:
+            with st.expander('최근 수정 명령과 저장된 계약 내용 대조', expanded=True):
+                st.caption('마지막 승인 revision이 기준입니다. 대화 요청은 자동 반영되지 않습니다.')
+                st.write('최근 변경 지시: ' + newest_request)
+                if st.button('최근 변경 지시를 현재 revision에 다시 적용할 후보로 분석',
+                             disabled=not consent,
+                             key=f"contract_recheck_latest_{snapshot['contract_id']}_{snapshot['revision']}"):
+                    try:
+                        with st.spinner('최근 변경 지시를 비교합니다...'):
+                            extracted = analyze_trade([{'role': 'user', 'content': newest_request, 'amendment_only': True}], snapshot, [], env=env)
+                        if extracted['contract_type'] != snapshot['contract_type']:
+                            raise ValueError('계약 유형이 일치하지 않습니다.')
+                        candidate = candidate_from_latest(snapshot, extracted)
+                        edits = _changed_terms(snapshot, candidate)
+                        if edits:
+                            st.session_state[f"contract_pending_analysis_{snapshot['contract_id']}"] = {
+                                'snapshot': candidate, 'changes': edits,
+                                'base_revision': snapshot['revision'],
+                                'latest_text': newest_request,
+                                'chat_hash': instruction_hash(newest_request)}
+                            st.rerun()
+                        else:
+                            st.info('변경할 조건값을 찾지 못했습니다. BOX 3 조항도 확인하세요.')
+                    except (ValueError, RuntimeError, ContractRepositoryError) as exc:
+                        st.error(f'최근 변경 지시 분석 실패: {exc}')
     prompt = st.chat_input(
         "거래 내용, 추가 조건 또는 답변을 입력하세요",
         key=f"contract_prompt_{snapshot['contract_id']}",
@@ -1177,8 +1238,12 @@ def _contract_chat(repo, snapshot, state_key, env):
                 for message in library_result['notices']:
                     st.warning(message)
             prior_messages = messages + [{"role": "user", "content": prompt.strip()}]
+            # Latest explicit amendment is reviewed separately from old chat history.
+            is_amendment = bool(snapshot.get('clauses')) and is_explicit_change(prompt.strip())
+            analysis_messages = ([{'role': 'user', 'content': prompt.strip(), 'amendment_only': True}]
+                                 if is_amendment else prior_messages)
             with st.spinner("AI가 거래조건을 분석하고 있습니다..."):
-                analysis = analyze_trade(prior_messages, snapshot, [
+                analysis = analyze_trade(analysis_messages, snapshot, [
                     {**ref, 'extracted_text': ref['extracted_text'][:12000], 'source_locations': []}
                     for ref in selected_context], env=env)
             if analysis["contract_type"] != snapshot["contract_type"]:
@@ -1189,7 +1254,8 @@ def _contract_chat(repo, snapshot, state_key, env):
                 prompt, prior_messages, has_clauses=bool(snapshot.get("clauses")))
             analysis["questions"] = ([] if make_draft else
                                      select_new_questions(analysis.get("questions", []), prior_messages))
-            updated = apply_analysis(snapshot, analysis)
+            updated = (candidate_from_latest(snapshot, analysis) if is_amendment
+                       else apply_analysis(snapshot, analysis))
             updated['library_sources'] = library_result['sources']
             updated["reference_ids"] = sorted(set(
                 updated.get("reference_ids", []) + selected_refs
@@ -1211,6 +1277,8 @@ def _contract_chat(repo, snapshot, state_key, env):
                     "snapshot": updated,
                     "changes": _changed_terms(snapshot, updated),
                     "base_revision": snapshot["revision"],
+                    "latest_text": prompt.strip() if is_amendment else None,
+                    "chat_hash": instruction_hash(prompt.strip()) if is_amendment else None,
                 }
                 st.info("기존 초안은 유지했습니다. 분석 결과는 별도 후보로 저장되며, 아래에서 선택적으로 수정안 생성 후 적용하세요.")
             else:
@@ -1253,6 +1321,9 @@ def _contract_chat(repo, snapshot, state_key, env):
                     st.rerun()
                 return
             st.write("선택한 분석 후보만 수정안으로 만들며, 기존 조건/본문은 사용자가 적용할 때까지 바뀌지 않습니다.")
+            if pending.get('latest_text'):
+                st.caption('최신 수정 요청: ' + str(pending['latest_text']))
+                st.warning('선택한 변경을 비교·승인하여 새 revision으로 저장해야 재접속 후 반영됩니다.')
             selected_changes = []
             candidate_snapshot = pending["snapshot"]
             party_map = {role: party for party in candidate_snapshot.get("parties", [])
@@ -1295,6 +1366,8 @@ def _contract_chat(repo, snapshot, state_key, env):
                     unique_changes = {change["key"]: change for change in selected_changes}
                     proposal = propose_term_revision(
                         snapshot, list(unique_changes.values()), env=env)
+                    if pending.get('chat_hash'):
+                        proposal['approved_chat_hash'] = pending['chat_hash']
                     st.session_state["contract_pending_proposal"] = proposal
                     st.session_state["contract_pending_proposal_key"] = state_key
                     repo.save_annotation({
@@ -1609,37 +1682,35 @@ def render_contract_page(page, env):
             _export_panel(repo, snapshot, env)
 
     with st.expander("저장·복사·언어 버전 관리", expanded=False):
-        st.markdown("### 저장·복사·삭제")
+        st.markdown("### 계약서 복사와 언어 버전")
+        st.caption("복사는 현재 저장된 최신 revision의 조건과 조항을 그대로 사용합니다. "
+                   "언어 버전은 번역 후 새 계약과 BOX 3 미리보기를 바로 만듭니다. 원본 계약은 변경하지 않습니다.")
         copy_col, language_col = st.columns(2)
-        if copy_col.button("거래 조건 초기화 후 새 계약으로 복사",
+        if copy_col.button("현재 계약 조건과 본문 그대로 새 계약으로 복사",
                            key=f"contract_copy_{active_id}"):
             try:
-                copied = deepcopy(snapshot)
-                copied["clauses"] = []
-                copied["issues"] = []
-                copied["reference_ids"] = []
-                copied["omissions"] = {}
-                copied["parties"] = []
-                copied["terms"] = [{
-                    "id": f"term_{uuid4().hex}", "key": term.get("key"),
-                    "value": None, "unit": None, "currency": None,
-                    "status": "missing", "source_refs": [],
-                } for term in snapshot.get("terms", [])]
+                copied = copy_contract(snapshot)
                 _new_contract(repo, f"{snapshot.get('title', 'Contract')} (copy)",
-                              snapshot["contract_type"], snapshot["language"], copied)
+                              snapshot['contract_type'], snapshot['language'], copied)
                 st.rerun()
             except (ValueError, ContractRepositoryError) as exc:
                 st.error(str(exc))
         new_language = "en" if snapshot["language"] == "ko" else "ko"
+        st.caption("언어 변환 시 계약 조항과 BOX 2의 설명형 조건도 번역합니다. "
+                   "금액·수량·법인명·품목코드·거래조건은 변경하지 않습니다.")
+        translation_consent = language_col.checkbox(
+            "계약 본문 및 조건의 AI 번역 전송 동의",
+            key=f"contract_translate_consent_{active_id}")
         if language_col.button(f"{'English' if new_language == 'en' else '한국어'} 버전 새로 만들기",
+                               disabled=not translation_consent,
                                key=f"contract_language_version_{active_id}"):
             try:
-                translated = deepcopy(snapshot)
-                translated["clauses"] = []
-                translated["issues"] = []
-                translated["language"] = new_language
-                _new_contract(repo, f"{snapshot.get('title', 'Contract')} ({new_language})",
-                              snapshot["contract_type"], new_language, translated)
+                if not snapshot.get('clauses'):
+                    raise ValueError("먼저 기존 계약서의 BOX 3 본문을 저장해 주세요.")
+                with st.spinner("계약 조항과 조건을 번역하고 내용 일치 여부를 검사합니다..."):
+                    translated = translate_contract(snapshot, new_language, env=env)
+                _new_contract(repo, translated.get('title') or snapshot.get('title','Contract'),
+                              snapshot['contract_type'], new_language, translated)
                 st.rerun()
-            except (ValueError, ContractRepositoryError) as exc:
-                st.error(str(exc))
+            except (ValueError, RuntimeError, ContractRepositoryError) as exc:
+                st.error("번역본을 만들지 않았습니다. 원본은 그대로 유지됩니다: " + str(exc))
