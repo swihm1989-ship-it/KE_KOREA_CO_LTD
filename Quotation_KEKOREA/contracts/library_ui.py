@@ -9,6 +9,7 @@ from Quotation_KEKOREA.contracts.library import (
     publish_sample, read_manifest, register_sample, set_sample_active,
 )
 from Quotation_KEKOREA.contracts.repository import ContractRepositoryError
+from Quotation_KEKOREA.contracts.promote_reference import promote_contract_reference
 
 
 def show_library_sources(sources):
@@ -44,6 +45,37 @@ def render_library_admin(repo, env):
             st.session_state.pop('_sample_admin_session', None)
             st.rerun()
         st.caption('원본과 추출 내용은 관리자 전용입니다. 검색에는 승인한 익명화 참고 메모만 사용됩니다.')
+        # Explicitly promote a previously saved per-contract reference. Admin-only.
+        # No source deletion and no AI retrieval before reviewed guidance approval.
+        current_contract_id = st.session_state.get('contract_active_id')
+        if current_contract_id:
+            with st.expander('현재 계약의 참고자료를 공통 라이브러리에 등록', expanded=False):
+                references = [r for r in repo.contract_references(current_contract_id)
+                              if str(r.get('filename') or '').lower().endswith(('.pdf', '.docx'))]
+                if not references:
+                    st.caption('현재 계약에 등록된 PDF/DOCX 참고자료가 없습니다.')
+                else:
+                    options = {str(r['id']): r for r in references}
+                    with st.form(f'promote_contract_reference_{current_contract_id}'):
+                        selected = st.selectbox('공통 등록할 기존 참고자료', list(options),
+                                                format_func=lambda v: options[v].get('filename', v))
+                        common_title = st.text_input('공통 라이브러리 표시 제목 (거래처·개인정보 제외)')
+                        common_types = st.multiselect('재사용할 계약 유형',
+                                                      ['sale', 'trade_commission', 'investment_commission'])
+                        common_language = st.selectbox('참고자료 언어', ['ko', 'en'])
+                        confirmed = st.checkbox('회사 공통 재사용에 적합한 자료이며, 원본은 관리자만 열람하고 승인 전 AI 검색에 사용하지 않는 데 동의합니다.')
+                        do_promote = st.form_submit_button('공통 라이브러리에 승인 대기로 등록')
+                    if do_promote:
+                        try:
+                            if not confirmed or not common_title.strip() or not common_types:
+                                raise ValueError('명시적 동의, 공통 제목, 계약 유형을 모두 입력해 주세요.')
+                            record = promote_contract_reference(
+                                repo, current_contract_id, selected, title=common_title,
+                                contract_types=common_types, language=common_language)
+                            st.success('공통 라이브러리에 승인 대기로 등록했습니다. 아래에서 익명화 메모를 검토·승인해야 다른 계약의 AI 검색에 활용됩니다.')
+                            st.rerun()
+                        except (ValueError, RuntimeError, ContractRepositoryError) as exc:
+                            st.error(str(exc))
         with st.form('library_upload'):
             uploaded = st.file_uploader('새 공통 샘플 (PDF/DOCX/HWP5)', type=['pdf', 'docx', 'hwp'])
             title = st.text_input('공개 참고 제목', help='기존 거래처나 개인 이름을 넣지 마세요.')
