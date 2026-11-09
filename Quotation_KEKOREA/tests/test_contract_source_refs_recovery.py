@@ -21,7 +21,7 @@ class SourceReferenceRecoveryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,"not found"):
             self.call([{"kind":"user","quote":"fictional text"}])
     def test_invalid_nested_ref_rejected(self):
-        with self.assertRaisesRegex(ValueError,r"term\\[0\\]"):
+        with self.assertRaisesRegex(ValueError,r"term\[0\]"):
             self.call([42])
     def test_prompt_requires_arrays(self):
         recorded={}
