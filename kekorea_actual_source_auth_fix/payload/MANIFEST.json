@@ -1,0 +1,19 @@
+{
+  "source": {
+    "Quotation_KEKOREA/app.py": "266a1512b2373ffadec96616849463b8da97f1f66743feec32b4f83d3f7bacb4",
+    "Quotation_KEKOREA/contracts/ui.py": "d70d1083aa5eba2a813bc643a49805dee48afd94674214fc6ba43f6b4400e74f",
+    "Quotation_KEKOREA/contracts/service.py": "49f91feb56d587c42fc81c141919690ce4efd1d530528397a80cb9a76ec2f2f5",
+    "Quotation_KEKOREA/contracts/workspace.py": "63bacc982ca998d7fb07a0b5c5831fa21021289781cdc0bb140fdb40ec1b133d"
+  },
+  "output": {
+    "Auth/session.py": "c63c659eb147bb2eeff49a446ccabd1403da429a653af89cf134255ea6602158",
+    "Auth/__init__.py": "cf44f950bbe7ec9c435c5ef2c63b6b9358b513b7c837af604e6240d8573e38e3",
+    "Auth/gate.py": "61f90e6dc53c000951f270334af257a38d0d9656872443b8e4c0511191cc31bc",
+    "Quotation_KEKOREA/app.py": "f00372eeeb95f0e75c1da3f8ae96884a72cf8a7c0366ba20951f45e53847b550",
+    "Quotation_KEKOREA/contracts/service.py": "86a79378356fd714cfddb3f5150f3dbb79ff92a928435983b7bd9d75e329c62b",
+    "Quotation_KEKOREA/contracts/ui.py": "16d80695fe42ec1a5f07c56a6cc39ef9fd39dc33054de463e29852cc2ccb9355",
+    "Quotation_KEKOREA/contracts/workspace.py": "63bacc982ca998d7fb07a0b5c5831fa21021289781cdc0bb140fdb40ec1b133d",
+    "Quotation_KEKOREA/tests/test_kekorea_auth_and_issue_fix.py": "a2d89dbe5036ac489693155e851d21d744497737ea16e37d484d6547e2a113f0"
+  },
+  "version": "2026-11-09-from-user-zip"
+}
