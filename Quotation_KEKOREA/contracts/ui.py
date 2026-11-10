@@ -1030,11 +1030,23 @@ def _export_panel(repo, snapshot, env):
             st.caption('BOX 3에 실제 계약 조항을 먼저 생성하세요.')
     with final_col:
         st.markdown('**FINAL / 최종 계약서**')
-        blockers = final_document_blockers(snapshot)
+        # A user may export the actual saved wording without being forced to
+        # accept every AI suggestion. Unresolved wording is never silently erased
+        # or treated as an agreed commercial fact.
+        strict_blockers = final_document_blockers(snapshot)
+        has_unresolved = any('BOX 3에 임시 확인 문구' in message for message in strict_blockers)
+        allow_unresolved = False
+        if has_unresolved:
+            st.warning('본문에 [서명 전 확인] 등 미확정 문구가 있습니다. 조항은 그대로 출력되며, 그 내용이 합의되었다는 뜻은 아닙니다.')
+            allow_unresolved = st.checkbox(
+                '미확정 문구가 남아 있는 현재 계약 본문을 그대로 최종 파일로 내보내는 데 동의합니다.',
+                key=f"contract_final_allow_unresolved_{snapshot['contract_id']}_{snapshot['revision']}",
+            )
+        blockers = final_document_blockers(snapshot, allow_unresolved_text=allow_unresolved)
         if issues:
-            st.caption(f'내부 검토사항 {len(issues)}건은 PDF에 출력되지 않습니다. 최종 승인 전 내용을 확인하세요.')
+            st.caption(f'AI 검토사항 {len(issues)}건은 권고사항이며 전부 선택할 필요는 없습니다. 파일에는 현재 저장된 본문만 포함됩니다.')
         if blockers:
-            st.warning(f'FINAL 생성 전 수정할 계약 본문/당사자 항목: {len(blockers)}건. BOX 3에서 남은 항목을 수정한 뒤 새 revision을 승인하세요.')
+            st.warning(f'최종 파일 생성 전 확인이 필요한 조건 {len(blockers)}건')
         for message in blockers:
             st.error(message)
         approval_key = f"contract_final_approved_{snapshot['contract_id']}_{snapshot['revision']}"
@@ -1059,7 +1071,7 @@ def _export_panel(repo, snapshot, env):
             button_key = f"contract_export_final_{snapshot['contract_id']}_{snapshot['revision']}_{ext}"
             if st.button(f'최종 계약서 {ext.upper()}', disabled=disabled, key=button_key):
                 try:
-                    if final_document_blockers(snapshot) or not approved or not authorized:
+                    if final_document_blockers(snapshot, allow_unresolved_text=allow_unresolved) or not approved or not authorized:
                         raise ValueError('현재 계약 본문 승인과 직인 사용 권한 확인이 필요합니다.')
                     outputs = export_contract(snapshot, formats=(ext,), seal_bytes=_verified_contract_seal(env))
                     local_key=f"contract_unsaved_output_final_{snapshot['contract_id']}_{snapshot['revision']}_{ext}"
@@ -1167,10 +1179,10 @@ def _run_editor(repo, snapshot, state_key, env):
             "currency": st.column_config.TextColumn("Currency" if snapshot.get("language") == "en" else "통화"),
             "status": st.column_config.SelectboxColumn(
                 "상태", options=["확인 필요", "AI 제안", "확정", "TBD 유지"],
-                required=True, help="확정은 명시적으로 승인한 값만 선택하세요. TBD는 최종본을 차단하는 미확정 상태입니다."),
+                required=True, help="확정은 명시적으로 승인한 값만 선택하세요. 미확정 항목도 경고를 확인한 후 현재 본문 그대로 출력할 수 있습니다."),
         },
     )
-    st.caption("확정=사용자 승인, AI 제안=미승인 후보, 확인 필요·TBD 유지=미확정. 검토용 초안은 가능하며 최종본만 검증합니다.")
+    st.caption("확정=사용자 승인, AI 제안=미승인 후보, 확인 필요·TBD 유지=미확정. 모든 AI 제안을 승인할 필요는 없으며 미확정 문구는 별도 동의 후 본문 그대로 출력할 수 있습니다.")
     st.markdown('<span id="contract-parties"></span>', unsafe_allow_html=True)
     st.markdown("#### Contract parties and roles" if snapshot.get("language") == "en" else "#### 당사자 및 역할")
     party_rows = st.data_editor(
