@@ -149,7 +149,12 @@ def _call(instructions, user_data, *, env, opener=urllib.request.urlopen, timeou
             f"Contract AI request failed (HTTP {exc.code}){detail}; "
             "the existing draft was not changed."
         ) from None
-    except (urllib.error.URLError, TimeoutError):
+    except (urllib.error.URLError, TimeoutError) as exc:
+        if isinstance(exc, TimeoutError) or isinstance(getattr(exc, "reason", None), TimeoutError):
+            raise RuntimeError(
+                f"Contract AI timed out after {timeout} seconds; "
+                "the existing draft was not changed. Please try again."
+            ) from None
         raise RuntimeError("Contract AI could not be reached; the existing draft was not changed.") from None
     except (UnicodeDecodeError, json.JSONDecodeError):
         raise RuntimeError("Contract AI returned an invalid response; the existing draft was not changed.") from None
@@ -260,7 +265,7 @@ def analyze_trade(messages, current_snapshot, reference_context, *, env, client=
         "record it as suggested instead of asking again. After a user answers follow-ups, "
         "return zero more questions. Lack of a bank account, registered address, or legal opinion "
         "should be recorded as a missing item for signature, not prevent an initial draft.",
-        user_data, env=env, opener=client or urllib.request.urlopen)
+        user_data, env=env, opener=client or urllib.request.urlopen, timeout=180)
     if data.get("contract_type") not in CONTRACT_TYPES:
         raise ValueError("Contract AI did not return a supported contract type.")
     for field in ("parties", "terms", "questions", "issues"):
