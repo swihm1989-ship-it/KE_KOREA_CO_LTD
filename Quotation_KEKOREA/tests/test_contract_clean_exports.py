@@ -43,6 +43,11 @@ class CleanContractExportTests(unittest.TestCase):
     def test_final_blocks_authored_placeholder_without_silently_deleting(self):
         errors=final_document_blockers(sample('월 인도일은 [서명 전 확인]으로 한다.'))
         self.assertTrue(errors)
+        colon = final_document_blockers(sample('[서명 전 확인: 배상 한도는 양 당사자가 서면 합의한다.]'))
+        self.assertTrue(colon)
+        self.assertEqual(final_document_blockers(
+            sample('[서명 전 확인: 배상 한도는 양 당사자가 서면 합의한다.]'),
+            allow_unresolved_text=True), [])
 
     def test_user_may_explicitly_export_unresolved_authored_text(self):
         original = sample('배상 한도는 [서명 전 확인]으로 한다.')
