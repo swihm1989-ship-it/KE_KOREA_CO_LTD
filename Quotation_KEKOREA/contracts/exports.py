@@ -57,7 +57,7 @@ def _stamp_width_height(image, target_width=283.46, max_height=115):
 def _setup_docx_fonts(document):
     from docx.oxml.ns import qn
     for name, size, bold in (("Normal", 10, False), ("Title", 18, True),
-                             ("Heading 1", 12, True), ("Heading 2", 12, True)):
+                             ("Heading 1", 18, True), ("Heading 2", 12, True)):
         style = document.styles[name]
         style.font.name = "Malgun Gothic"
         style.font.size = Pt(size)
@@ -90,6 +90,8 @@ def _docx_signature_section(document, snapshot, seal_bytes):
     """Keep both signers together, and place the authorized seal on its signature row."""
     heading = document.add_heading("서명" if snapshot.get("language") == "ko" else "SIGNATURES", level=1)
     heading.paragraph_format.keep_with_next = True
+    heading.paragraph_format.space_before = Pt(18)
+    heading.paragraph_format.space_after = Pt(14)
     blocks = signature_blocks(snapshot)
     table = document.add_table(rows=0, cols=2)
     table.autofit = False
@@ -102,6 +104,11 @@ def _docx_signature_section(document, snapshot, seal_bytes):
             row.cells[0].text = " "
             row.cells[1].text = ""
             content_rows.append(row)
+        label_row = table.add_row()
+        label_row.cells[0].text = block['label']
+        for para in label_row.cells[0].paragraphs:
+            para.style = document.styles['Heading 2']
+        content_rows.append(label_row)
         fields = (
             ("Company", block['company']), ("Name / Title", block['name_title']),
             ("Date", block['date']), ("Signature", "________________________")
@@ -120,7 +127,7 @@ def _docx_signature_section(document, snapshot, seal_bytes):
         row_pr.append(OxmlElement('w:cantSplit'))
         for cell in row.cells:
             for paragraph in cell.paragraphs:
-                paragraph.paragraph_format.space_after = Pt(3)
+                paragraph.paragraph_format.space_after = Pt(5)
                 paragraph.paragraph_format.keep_with_next = index < len(content_rows) - 1
 
 
@@ -134,13 +141,15 @@ def _docx(snapshot, seal_bytes=None):
     _setup_docx_fonts(document)
     title = document.add_paragraph(snapshot.get("title") or "Contract", style="Title")
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    title.paragraph_format.space_after = Pt(20)
     for title, sentences in authored_clauses_for_final(snapshot):
         if title:
             heading = document.add_heading(title, level=2)
             heading.paragraph_format.keep_with_next = True
         for sentence in sentences:
             paragraph = document.add_paragraph(sentence["text"])
-            paragraph.paragraph_format.space_after = Pt(6)
+            paragraph.paragraph_format.space_after = Pt(9)
+            paragraph.paragraph_format.line_spacing = 1.55
             paragraph.paragraph_format.widow_control = True
     _docx_signature_section(document, snapshot, seal_bytes)
     output = io.BytesIO()
@@ -151,11 +160,20 @@ def _docx(snapshot, seal_bytes=None):
 def _pdf_signature_section(snapshot, heading_style, body_style, seal_bytes):
     """Flowable signature section; use current page if it all fits, else next."""
     blocks = signature_blocks(snapshot)
+    signature_style = ParagraphStyle(
+        "ContractSignatures", parent=heading_style, fontSize=18, leading=25,
+        spaceBefore=16, spaceAfter=14,
+    )
+    label_style = ParagraphStyle(
+        "ContractSignerLabel", parent=heading_style, fontSize=12, leading=18,
+        spaceBefore=8, spaceAfter=8,
+    )
     section = [Paragraph("서명" if snapshot.get("language") == "ko" else "SIGNATURES",
-                         heading_style)]
+                         signature_style)]
     for index, block in enumerate(blocks):
         if index:
-            section.append(Spacer(1, 12))
+            section.append(Spacer(1, 14))
+        section.append(Paragraph(escape(block['label']), label_style))
         for field, value in (
             ("Company", block['company']), ("Name / Title", block['name_title']),
             ("Date", block['date'])
@@ -184,12 +202,12 @@ def _pdf(snapshot, seal_bytes=None):
     font_name, bold_font = _pdf_font_pair()
     styles = getSampleStyleSheet()
     title_style = ParagraphStyle("ContractTitle", parent=styles["Title"], fontName=bold_font,
-                                 fontSize=18, leading=25, alignment=TA_CENTER, spaceAfter=24)
+                                 fontSize=18, leading=26, alignment=TA_CENTER, spaceAfter=22)
     heading_style = ParagraphStyle("ContractHeading", parent=styles["Heading2"], fontName=bold_font,
-                                   fontSize=12, leading=18, textColor=colors.HexColor("#092b4c"),
-                                   spaceBefore=12, spaceAfter=6, keepWithNext=True)
+                                   fontSize=12, leading=19, textColor=colors.black,
+                                   spaceBefore=16, spaceAfter=9, keepWithNext=True)
     body_style = ParagraphStyle("ContractBody", parent=styles["BodyText"], fontName=font_name,
-                                fontSize=10, leading=16, spaceAfter=7, splitLongWords=True)
+                                fontSize=10, leading=17, spaceAfter=10, splitLongWords=True)
     story = [Paragraph(escape(snapshot.get("title") or "Contract"), title_style)]
     for title, authored_sentences in authored_clauses_for_final(snapshot):
         sentences = [Paragraph(escape(sentence["text"]).replace("\n", "<br/>"), body_style)
