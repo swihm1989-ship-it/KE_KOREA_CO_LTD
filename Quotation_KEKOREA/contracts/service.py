@@ -243,6 +243,9 @@ def analyze_trade(messages, current_snapshot, reference_context, *, env, client=
         "Put buyer and seller LEGAL ENTITY NAMES only under parties with buyer/seller roles, not as terms. Preserve source wording, exact units, figures, currency and uncertainty. Do not translate company names or infer missing facts. "
         "Each party has legal_name, country, address, representative, roles (array of buyer/seller/client/intermediary/commission_payer/fundraiser/investor). "
         "Keep buyer/seller distinct from commission payer and intermediary. Each term has key, value, unit, currency, status, source_refs; use status suggested for extracted values and missing for absent values, never confirmed. "
+        "For every party and term, source_refs must be an array of objects, or [] if there is no citation; never null, a string, or a single object. "
+        "Each citation must be {kind: user, message_id: the provided message id if available, quote: exact user text} "
+        "or {kind: reference, document_id: a provided reference id, quote: exact reference text}. Never invent IDs or quotes. "
         "For clause-to-term extraction, distinguish unit price from contract total, quantity amount from unit of measure, and Incoterm/location from delivery schedule/notice obligations. "
         "Use ISO currency codes only when explicitly sourced; do not assume $ means USD. Cite exact source phrases for ambiguous claims and retain uncertainty rather than inventing data. "
         "Never interpret a procedural delivery notice as contradictory to EXW, FOB, CIF or other Incoterms without actual inconsistent obligations. "
@@ -301,8 +304,15 @@ def analyze_trade(messages, current_snapshot, reference_context, *, env, client=
 
     for owner in [*data["parties"], *data["terms"]]:
         source_refs = owner.get("source_refs", [])
+        # Accept unambiguous JSON variations without dropping any citation.
+        # Singleton objects still undergo the same source/quote checks below.
+        if source_refs is None:
+            source_refs = []
+        elif isinstance(source_refs, dict):
+            source_refs = [source_refs]
         if not isinstance(source_refs, list):
             raise ValueError("Contract AI returned invalid source references.")
+        owner["source_refs"] = source_refs
         for source_ref in source_refs:
             if not isinstance(source_ref, dict):
                 raise ValueError("Contract AI returned invalid source references.")

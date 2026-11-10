@@ -171,11 +171,29 @@ def translate_contract(snapshot, language, *, env, caller=None):
                     + '\n번역: ' + target[:350]
                     + '\n원본 계약은 변경되지 않았습니다. 해당 문장을 검토한 뒤 다시 번역해 주세요.'
                 )
-            src_codes=sorted(x.upper() for x in _PROTECTED.findall(source))
-            dst_codes=sorted(x.upper() for x in _PROTECTED.findall(target))
-            if src_codes!=dst_codes:
-                raise ValueError('통화/단위/Incoterms 변경이 감지돼 새 계약을 만들지 않았습니다: '+key)
-            updates[key]=target
+            
+            src_codes = sorted(x.upper() for x in _PROTECTED.findall(source))
+            dst_codes = sorted(x.upper() for x in _PROTECTED.findall(target))
+
+            if src_codes != dst_codes:
+                source_only = list(
+                    (Counter(src_codes) - Counter(dst_codes)).elements()
+                )
+                target_only = list(
+                    (Counter(dst_codes) - Counter(src_codes)).elements()
+                )
+
+                raise ValueError(
+                    f"계약서 번역 검토 필요: {key}\n"
+                    f"원문에만 있는 약어: {source_only}\n"
+                    f"번역문에만 있는 약어: {target_only}\n"
+                    f"원문: {source[:500]}\n"
+                    f"번역문: {target[:500]}\n"
+                    "기존 계약서는 변경되지 않았습니다."
+                )
+
+            updates[key] = target
+
     result['title']=updates.get('title',result.get('title','Contract'))
     for ci,clause in enumerate(result['clauses']):
         clause['title']=updates.get(f'clause:{ci}:title',clause.get('title',''))

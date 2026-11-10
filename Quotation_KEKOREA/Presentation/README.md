@@ -219,3 +219,10 @@ uv run --with-requirements .\Quotation_KEKOREA\requirements.txt python -m stream
 - 한국어 `2026년 11월 10일`과 영어 `November 10, 2026`의 달 표기를 같은 값으로 비교합니다. 날짜 맥락의 영어 월 이름/약어만 숫자로 정규화합니다.
 - 원래 금액·수량·비율·날짜의 실제 값 변경은 계속 차단하고, 불일치 시 원문/번역문과 차이를 보여줍니다. 원본 계약은 보존됩니다.
 - 회귀 테스트: `Quotation_KEKOREA/tests/test_contract_translation_month_names.py`. 실모델 응답·운영 Streamlit은 별도 검증이 필요합니다.
+
+
+### 2026-11-10 Analysis source-reference compatibility
+
+- Analysis normalizes null source_refs to [] and a single citation object to a one-item list. The AI request now specifies citation array/object shapes. Existing quote, document ID and source-kind validation still rejects fabricated citations and ambiguous formats such as strings.
+- Both response variations reproduced the screenshot error locally. The original production response was unavailable, so its exact shape remains unconfirmed.
+- Service regressions: 14 passed. Full-suite results will be recorded after verification. Live model and deployed Streamlit behavior remain unverified.

@@ -147,6 +147,50 @@ class ContractServiceTests(unittest.TestCase):
                           {"revision": 1}, source, env=env,
                           client=self.opener_for(response))
 
+    def test_analysis_normalizes_absent_and_single_source_references(self):
+        quote = 'Price is USD 0.225 per PCS.'
+        citation = {'kind': 'user', 'message_id': 'm1', 'quote': quote}
+        for refs in (None, citation):
+            with self.subTest(refs=refs):
+                response = {
+                    'contract_type': 'sale',
+                    'parties': [{'legal_name': 'Example', 'roles': ['seller'],
+                                 'source_refs': refs}],
+                    'terms': [{'key': 'unit_price', 'value': '0.225', 'currency': 'USD',
+                               'unit': 'PCS', 'status': 'suggested', 'source_refs': refs}],
+                    'questions': [], 'issues': [],
+                }
+                original = json.dumps(response, sort_keys=True)
+                result = analyze_trade(
+                    [{'id': 'm1', 'role': 'user', 'content': quote}],
+                    {'contract_type': 'sale'}, [],
+                    env={'OPENAI_API_KEY': 'test', 'OPENAI_MODEL': 'test'},
+                    client=self.opener_for(response))
+                expected = [] if refs is None else [citation]
+                self.assertEqual(result['parties'][0]['source_refs'], expected)
+                self.assertEqual(result['terms'][0]['source_refs'], expected)
+                self.assertEqual(result['terms'][0]['value'], '0.225')
+                self.assertEqual(json.dumps(response, sort_keys=True), original)
+
+    def test_analysis_rejects_malformed_or_fabricated_source_references(self):
+        for refs in ('Price is USD 0.225.', ['m1'], [None], {},
+                     {'kind': 'user', 'quote': 'Price is USD 9.'},
+                     {'kind': 'reference', 'document_id': 'missing', 'quote': 'Price.'}):
+            with self.subTest(refs=refs):
+                response = {
+                    'contract_type': 'sale', 'parties': [],
+                    'terms': [{'key': 'unit_price', 'value': '0.225',
+                               'status': 'suggested', 'source_refs': refs}],
+                    'questions': [], 'issues': [],
+                }
+                snapshot = {'contract_type': 'sale', 'revision': 1}
+                with self.assertRaises(ValueError):
+                    analyze_trade(
+                        [{'id': 'm1', 'role': 'user', 'content': 'Price is USD 0.225.'}],
+                        snapshot, [], env={'OPENAI_API_KEY': 'test', 'OPENAI_MODEL': 'test'},
+                        client=self.opener_for(response))
+                self.assertEqual(snapshot, {'contract_type': 'sale', 'revision': 1})
+
     def test_korean_input_can_generate_english_only_and_preserve_ids(self):
         snapshot = new_snapshot("contract-1", "sale", "en")
         sentence = {"id": "sentence-1", "text": "The price is USD 4 per PCS.",
