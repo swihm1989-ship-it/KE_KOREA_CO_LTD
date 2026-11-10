@@ -92,6 +92,28 @@ class DraftingTests(unittest.TestCase):
             generate_reviewed_draft(self.snapshot, [], env=ENV,
                                     client=self.opener(omit_clause_review=True))
 
+    def test_progress_reports_actual_ai_stages_without_extra_calls(self):
+        events = []
+        generate_reviewed_draft(
+            self.snapshot, [], env=ENV, client=self.opener(complete=True),
+            progress_callback=events.append,
+        )
+        self.assertEqual([c['drafting_task'] for c in self.calls], ['draft', 'audit'])
+        self.assertIn('AI 계약서 초안 작성 (API 응답 대기)', events)
+        self.assertIn('AI 초안 품질 검토 (API 응답 대기)', events)
+        self.assertEqual(events[-1], '검증된 초안 결과 정리')
+
+    def test_progress_failure_does_not_save_partial_draft(self):
+        events = []
+        original = deepcopy(self.snapshot)
+        with self.assertRaises(RuntimeError):
+            generate_reviewed_draft(
+                self.snapshot, [], env=ENV, client=self.opener(fail_audit=True),
+                progress_callback=events.append,
+            )
+        self.assertIn('AI 초안 품질 검토 (API 응답 대기)', events)
+        self.assertEqual(self.snapshot, original)
+
     def test_complete_draft_needs_only_generation_and_audit(self):
         generate_reviewed_draft(self.snapshot, [], env=ENV, client=self.opener(complete=True))
         self.assertEqual([c['drafting_task'] for c in self.calls], ['draft', 'audit'])
