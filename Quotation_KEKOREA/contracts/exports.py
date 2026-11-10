@@ -8,7 +8,7 @@ from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
 from docx.oxml import OxmlElement
-from docx.shared import Inches, Pt
+from docx.shared import Inches, Pt, Cm
 from pathlib import Path
 from reportlab.platypus import Image as PdfImage
 from reportlab.platypus import Table as PdfTable, TableStyle
@@ -18,6 +18,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import (
     KeepTogether, Paragraph, SimpleDocTemplate, Spacer,
 )
@@ -26,6 +27,49 @@ from reportlab.platypus import (
 from Quotation_KEKOREA.contracts.signature_layout import (
     authored_clauses_for_final, signature_blocks,
 )
+
+def _pdf_font_pair():
+    # Malgun Gothic can be supplied by the host OS; never bundle licensed fonts.
+    regulars = ["/usr/share/fonts/truetype/malgun.ttf",
+                "C:/Windows/Fonts/malgun.ttf",
+                "/usr/share/fonts/truetype/nanum/NanumGothic.ttf"]
+    bolds = ["/usr/share/fonts/truetype/malgunbd.ttf",
+             "C:/Windows/Fonts/malgunbd.ttf",
+             "/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf"]
+    for regular, bold in zip(regulars, bolds):
+        if Path(regular).is_file() and Path(bold).is_file():
+            pdfmetrics.registerFont(TTFont("ContractBodyFont", regular))
+            pdfmetrics.registerFont(TTFont("ContractBoldFont", bold))
+            return "ContractBodyFont", "ContractBoldFont"
+    pdfmetrics.registerFont(UnicodeCIDFont("HYGothic-Medium"))
+    return "HYGothic-Medium", "HYGothic-Medium"
+
+
+def _stamp_width_height(image, target_width=283.46, max_height=115):
+    width = target_width
+    height = width * image.imageHeight / image.imageWidth
+    if height > max_height:
+        width *= max_height / height
+        height = max_height
+    return width, height
+
+
+def _setup_docx_fonts(document):
+    from docx.oxml.ns import qn
+    for name, size, bold in (("Normal", 10, False), ("Title", 18, True),
+                             ("Heading 1", 12, True), ("Heading 2", 12, True)):
+        style = document.styles[name]
+        style.font.name = "Malgun Gothic"
+        style.font.size = Pt(size)
+        style.font.bold = bold
+        rpr = style.element.get_or_add_rPr()
+        fonts = rpr.rFonts
+        if fonts is None:
+            fonts = OxmlElement("w:rFonts")
+            rpr.insert(0, fonts)
+        for attribute in ("w:ascii", "w:hAnsi", "w:eastAsia", "w:cs"):
+            fonts.set(qn(attribute), "Malgun Gothic")
+
 
 def _plain_lines(snapshot):
     lines = [snapshot.get("title") or "Contract", ""]
@@ -49,8 +93,8 @@ def _docx_signature_section(document, snapshot, seal_bytes):
     blocks = signature_blocks(snapshot)
     table = document.add_table(rows=0, cols=2)
     table.autofit = False
-    table.columns[0].width = Inches(4.5)
-    table.columns[1].width = Inches(1.7)
+    table.columns[0].width = Cm(6.25)
+    table.columns[1].width = Cm(10.0)
     content_rows = []
     for index, block in enumerate(blocks):
         if index:
@@ -69,7 +113,7 @@ def _docx_signature_section(document, snapshot, seal_bytes):
             row.cells[1].vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
             if field == "Signature" and seal_bytes is not None and _is_ke_korea_party(block['party']):
                 row.cells[1].paragraphs[0].add_run().add_picture(
-                    io.BytesIO(seal_bytes), width=Inches(1.6))
+                    io.BytesIO(seal_bytes), width=Cm(10.0))
             content_rows.append(row)
     for index, row in enumerate(content_rows):
         row_pr = row._tr.get_or_add_trPr()
@@ -87,10 +131,8 @@ def _docx(snapshot, seal_bytes=None):
     section.bottom_margin = Inches(0.75)
     section.left_margin = Inches(0.85)
     section.right_margin = Inches(0.85)
-    normal = document.styles["Normal"]
-    normal.font.name = "Malgun Gothic" if snapshot.get("language") == "ko" else "Arial"
-    normal.font.size = Pt(10)
-    title = document.add_heading(snapshot.get("title") or "Contract", level=0)
+    _setup_docx_fonts(document)
+    title = document.add_paragraph(snapshot.get("title") or "Contract", style="Title")
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
     for title, sentences in authored_clauses_for_final(snapshot):
         if title:
@@ -122,12 +164,11 @@ def _pdf_signature_section(snapshot, heading_style, body_style, seal_bytes):
         stamp = ""
         if seal_bytes is not None and _is_ke_korea_party(block['party']):
             stamp = PdfImage(io.BytesIO(seal_bytes))
-            stamp.drawWidth = min(142, 48 * stamp.imageWidth / stamp.imageHeight)
-            stamp.drawHeight = stamp.drawWidth * stamp.imageHeight / stamp.imageWidth
+            stamp.drawWidth, stamp.drawHeight = _stamp_width_height(stamp)
             stamp.hAlign = 'LEFT'
         signature = PdfTable(
             [[Paragraph("Signature: __________________________", body_style), stamp]],
-            colWidths=[305, 165], hAlign='LEFT')
+            colWidths=[155, 315], hAlign='LEFT')
         signature.setStyle(TableStyle([
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
             ('LEFTPADDING', (0, 0), (-1, -1), 0),
@@ -140,18 +181,15 @@ def _pdf_signature_section(snapshot, heading_style, body_style, seal_bytes):
 
 
 def _pdf(snapshot, seal_bytes=None):
-    font_name = "Helvetica"
-    if snapshot.get("language") == "ko":
-        font_name = "HYGothic-Medium"
-        pdfmetrics.registerFont(UnicodeCIDFont(font_name))
+    font_name, bold_font = _pdf_font_pair()
     styles = getSampleStyleSheet()
-    title_style = ParagraphStyle("ContractTitle", parent=styles["Title"], fontName=font_name,
-                                 fontSize=16, leading=22, alignment=TA_CENTER, spaceAfter=24)
-    heading_style = ParagraphStyle("ContractHeading", parent=styles["Heading2"], fontName=font_name,
-                                   fontSize=11, leading=16, textColor=colors.HexColor("#092b4c"),
+    title_style = ParagraphStyle("ContractTitle", parent=styles["Title"], fontName=bold_font,
+                                 fontSize=18, leading=25, alignment=TA_CENTER, spaceAfter=24)
+    heading_style = ParagraphStyle("ContractHeading", parent=styles["Heading2"], fontName=bold_font,
+                                   fontSize=12, leading=18, textColor=colors.HexColor("#092b4c"),
                                    spaceBefore=12, spaceAfter=6, keepWithNext=True)
     body_style = ParagraphStyle("ContractBody", parent=styles["BodyText"], fontName=font_name,
-                                fontSize=9.5, leading=15, spaceAfter=7, splitLongWords=True)
+                                fontSize=10, leading=16, spaceAfter=7, splitLongWords=True)
     story = [Paragraph(escape(snapshot.get("title") or "Contract"), title_style)]
     for title, authored_sentences in authored_clauses_for_final(snapshot):
         sentences = [Paragraph(escape(sentence["text"]).replace("\n", "<br/>"), body_style)
