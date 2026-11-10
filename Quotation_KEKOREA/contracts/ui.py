@@ -24,6 +24,7 @@ from Quotation_KEKOREA.contracts.draft_exports import export_draft
 from Quotation_KEKOREA.contracts.workspace import collect_notes, propose_notes_revision
 from Quotation_KEKOREA.contracts.final_merge import merge_revision_requests
 from Quotation_KEKOREA.contracts.risk_review_ui import render_risk_review
+from Quotation_KEKOREA.contracts.bulk_cleanup import candidate_sentences, propose_bulk_signature_cleanup
 from Quotation_KEKOREA.contracts.models import new_snapshot, validate_snapshot
 from Quotation_KEKOREA.contracts.legacy_recovery import (
     prepare_duplicate_term_recovery, has_legacy_duplicate_term_keys,
@@ -1497,6 +1498,46 @@ def _contract_chat(repo, snapshot, state_key, env):
                 st.write(f"- {question}")
 
 
+def _bulk_cleanup_panel(snapshot, env):
+    """Separate optional action; never overwrites pending risk or note proposals."""
+    targets = candidate_sentences(snapshot)
+    if not targets:
+        return
+    with st.expander("AI 일괄 문장 정리 · 서명 전 확인 문구", expanded=False):
+        st.caption(
+            f"현재 계약서에서 일괄 정리 후보 {len(targets)}문장을 찾았습니다. "
+            "합의되지 않은 거래조건은 AI가 임의로 확정하지 않으며, "
+            "기존 AI 핵심 위험 검토와 문장 메모는 그대로 유지됩니다."
+        )
+        existing = st.session_state.get('contract_pending_proposal') or {}
+        busy = bool(existing and existing.get('contract_id') == snapshot['contract_id'])
+        preview = st.session_state.get(f"contract_risk_preview_{snapshot['contract_id']}") or {}
+        risk_selected = bool(preview.get('revision') == snapshot['revision']
+                             and preview.get('sentences'))
+        if risk_selected:
+            st.info(
+                "AI 핵심 위험 검토에서 선택한 미저장 수정안이 있습니다. "
+                "기존 추천안을 먼저 비교·승인하거나 취소한 뒤 일괄 정리를 실행하세요."
+            )
+        if busy:
+            st.info("검토 중인 수정 제안이 있습니다. 먼저 적용하거나 취소해 주세요.")
+        if st.button(
+            "AI 일괄 문장 정리 제안 만들기",
+            key=f"contract_bulk_cleanup_{snapshot['contract_id']}_{snapshot['revision']}",
+            disabled=busy or risk_selected,
+        ):
+            try:
+                with st.spinner("불필요한 확인 문구만 찾아 일괄 수정안을 작성합니다..."):
+                    proposal = propose_bulk_signature_cleanup(snapshot, env=env)
+                st.session_state['contract_pending_proposal'] = proposal
+                st.session_state['contract_pending_proposal_key'] = (
+                    f"contract_snapshot_{snapshot['contract_id']}"
+                )
+                st.rerun()
+            except (ValueError, RuntimeError, ContractRepositoryError) as exc:
+                st.error(f"AI 문장 정리 실패: {exc}")
+
+
 def render_contract_page(page, env):
     """Render a contract workflow without changing the existing sidebar definition."""
     st.markdown('<div class="ke-header"><div class="ke-eyebrow">KE KOREA · CONTRACT WORKSPACE</div>'
@@ -1771,6 +1812,7 @@ def render_contract_page(page, env):
         else:
             pending, buffers = _render_draft(repo, snapshot, state_key, env)
         if snapshot.get('clauses'):
+            _bulk_cleanup_panel(snapshot, env)
             render_risk_review(repo, snapshot, state_key, env)
             with st.expander("Revision 기록 및 복원", expanded=False):
                 revisions = st.session_state.get("contract_revisions")
