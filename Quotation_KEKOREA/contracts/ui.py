@@ -42,11 +42,14 @@ from Quotation_KEKOREA.contracts.rules import (
     LABELS, TYPE_REQUIRED, apply_analysis, validate_snapshot as validate_rules,
 )
 from Quotation_KEKOREA.contracts.service import (
-    analyze_trade, conversation_response_language, extract_reference_page, language_conflict,
+    conversation_response_language, extract_reference_page, language_conflict,
     propose_revision, propose_term_revision,
 )
 from Quotation_KEKOREA.contracts.flow import should_generate_draft, select_new_questions
-from Quotation_KEKOREA.contracts.ai_graph import generate_contract_draft_graph as generate_draft
+from Quotation_KEKOREA.contracts.ai_graph import (
+    generate_contract_draft_graph as generate_draft,
+    analyze_contract_terms_graph as analyze_trade,
+)
 
 
 TYPE_LABELS = {
