@@ -19,8 +19,8 @@ _NUMBER = re.compile(
 )
 # '제3자' is the legal expression 'third party', not a numeric obligation.
 # Compare the concept separately so omitting third-party protections still fails.
-_KO_THIRD_PARTY = re.compile(r'제\\s*3\\s*자')
-_EN_THIRD_PARTY = re.compile(r'\\bthird[\\s-]+part(?:y|ies)\\b', re.I)
+_KO_THIRD_PARTY = re.compile(r'제\s*3\s*자')
+_EN_THIRD_PARTY = re.compile(r'\bthird[\s-]+part(?:y|ies)\b', re.I)
 
 
 def _third_party_mentions(text):
