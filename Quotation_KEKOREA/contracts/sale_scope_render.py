@@ -19,6 +19,11 @@ def scope_display_items(sentences, language):
         if rows:
             items.append(("table", rows.copy()))
             rows.clear()
+            if pending:
+                notice = ("확인 필요 (미승인 조건): " if language == "ko"
+                          else "Pending confirmation (not yet approved): ")
+                items.append(("paragraph", notice + ", ".join(dict.fromkeys(pending))))
+                pending.clear()
 
     for sentence in sentences:
         text = str(sentence.get("text") or "")
@@ -37,8 +42,4 @@ def scope_display_items(sentences, language):
         flush()
         items.append(("paragraph", text))
     flush()
-    if pending:
-        notice = ("확인 필요 (미승인 조건): " if language == "ko"
-                  else "Pending confirmation (not yet approved): ")
-        items.append(("paragraph", notice + ", ".join(dict.fromkeys(pending))))
     return items
