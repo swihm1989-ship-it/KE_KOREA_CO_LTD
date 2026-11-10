@@ -91,6 +91,136 @@ _INCOTERMS = re.compile(r'(?<![A-Z])(?:EXW|FCA|FAS|FOB|CFR|CIF|CPT|CIP|DAP|DPU|D
 _SCHEDULE = re.compile(r'일정|납기|지연|통지|협의|인수|schedule|delay|notice|notify|coordinate|agree.*date|jadwal|keterlambatan|pemberitahuan', re.I)
 _UNIT = re.compile(r'(?i)(?:/|per\s+|당\s*)(kg|kgs|kilogram|kilograms|mt|metric\s+tons?|tonne?s?|pcs?|units?|wp|watts?)\b')
 
+# A unit explicitly attached to a numeric quantity is evidence, not a guess.
+_QUANTITY_VALUE_UNIT = re.compile(
+    r'(?i)^\s*[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?\s*'
+    r'(kg|kgs|kilograms?|mt|metric\s+tons?|tonnes?|tons?|pcs?|pieces?|units?|mw|wp|watts?)\s*
+    matches={m.upper() for m in _INCOTERMS.findall(str(text or ''))}
+    return matches
+
+
+def _delivery_schedule_only(item):
+    value=' '.join(str(item.get(k) or '') for k in ('value','unit'))
+    return bool(_SCHEDULE.search(value)) and not _extract_incoterm(value)
+
+
+def _first_number(text):
+    match=_NUM.search(str(text or ''))
+    if not match:
+        return None
+    try:
+        return Decimal(match.group(1).replace(',',''))
+    except (InvalidOperation, ValueError):
+        return None
+
+
+def _normalized_measure(item, kind):
+    value=str(item.get('value') or '').strip()
+    unit=str(item.get('unit') or '').strip().casefold()
+    number=_first_number(value)
+    if number is None:
+        return None
+    # Match '2,324,938 PCS' with value='2324938', unit='PCS', without
+    # modifying the original extraction or assuming a missing unit.
+    if kind=='quantity' and not unit:
+        embedded=_QUANTITY_VALUE_UNIT.fullmatch(value)
+        if embedded:
+            unit=embedded.group(1).casefold().replace(' ','')
+    evidence=' '.join((value,unit))
+    found=_UNIT.search(evidence)
+    if found and kind=='unit_price':
+        unit=found.group(1).casefold().replace(' ','')
+    unit=unit.replace(' ','')
+    units={'kgs':'kg','kilogram':'kg','kilograms':'kg','metricton':'mt','metrictons':'mt','ton':'mt','tons':'mt','tonne':'mt','tonnes':'mt','pc':'pcs','piece':'pcs','pieces':'pcs','unit':'pcs','units':'pcs'}
+    unit=units.get(unit,unit)
+    if kind=='quantity':
+        if unit=='mt':return number*1000,'kg'
+        return number,unit
+    if kind=='unit_price':
+        if unit=='mt':return number/1000,'kg'
+        return number,unit
+    return number,unit
+
+
+def _currency(item):
+    text=' '.join(str(item.get(k) or '') for k in ('currency','value'))
+    codes={x.upper() for x in re.findall(r'(?<![A-Z])(?:USD|KRW|EUR|IDR|CNY|RMB|SGD|MYR|INR|JPY|GBP|AUD|CAD)(?![A-Z])',text,re.I)}
+    if len(codes)>1:return None
+    if codes:return next(iter(codes))
+    if '$' in text:return 'UNSPECIFIED_DOLLAR'
+    return ''
+
+
+def _equivalent_terms(a,b,key):
+    if key in {'quantity','unit_price','total_contract_value','total_contract_quantity','monthly_quantity_mt','contract_duration'}:
+        left=_normalized_measure(a,key)
+        right=_normalized_measure(b,key)
+        if left and right:
+            # Unknown or incompatible units should never be treated as equal.
+            if left!=right:return False
+            if key in {'unit_price','total_contract_value'}:
+                return _currency(a)==_currency(b)
+            return True
+    return all(' '.join(str(item.get(k) or '').split()).casefold()==
+               ' '.join(str(b.get(k) or '').split()).casefold()
+               for k in ('value','unit','currency') for item in (a,))
+
+
+def normalize_term_keys(analysis):
+    """Normalize candidate labels, preserve evidence and report real ambiguities.
+
+    Duplicate delivery conditions are only contradictory if they assert
+    incompatible Incoterms; logistics scheduling is kept separately.
+    All extracted values remain suggestions, never user confirmed facts.
+    """
+    result=deepcopy(analysis)
+    seen={}
+    normalized=[]
+    warnings=[]
+    for item in result.get('terms',[]):
+        candidate=deepcopy(item)
+        raw=str(candidate.get('key') or '').strip()
+        key,warning=_canonical_key(candidate)
+        candidate['key']=key
+        candidate['status']='suggested' if str(candidate.get('value') or '').strip() else 'missing'
+        if warning:
+            warnings.append({'key':key,'first':raw,'other':str(candidate.get('value') or ''),
+                             'message':f'Uncertain label {raw!r}: {warning}. Confirm original meaning.'})
+        if key in seen:
+            prev=seen[key]
+            if _equivalent_terms(prev,candidate,key):
+                continue
+            if key=='delivery':
+                first_terms=_extract_incoterm(prev.get('value'))
+                next_terms=_extract_incoterm(candidate.get('value'))
+                if first_terms and _delivery_schedule_only(candidate):
+                    extra=deepcopy(candidate)
+                    extra['key']='delivery_schedule_notes'
+                    normalized.append(extra)
+                    continue
+                if next_terms and _delivery_schedule_only(prev):
+                    extra=deepcopy(prev)
+                    extra['key']='delivery_schedule_notes'
+                    normalized=[extra if x is prev else x for x in normalized]
+                    normalized.append(candidate)
+                    seen[key]=candidate
+                    continue
+                if first_terms and next_terms and first_terms==next_terms:
+                    # Location/scheduling extensions may be complementary,
+                    # but differing places cannot be assumed compatible.
+                    pass
+            first=tuple(str(prev.get(k) or '').strip() for k in ('value','unit','currency'))
+            other=tuple(str(candidate.get(k) or '').strip() for k in ('value','unit','currency'))
+            warnings.append({'key':key,'first':first,'other':other,
+                             'message':f'Conflicting or non-equivalent candidates for {key}; verify source.'})
+            continue
+        seen[key]=candidate
+        normalized.append(candidate)
+    result['terms']=normalized
+    return result,warnings
+
+)
+
 def _extract_incoterm(text):
     matches={m.upper() for m in _INCOTERMS.findall(str(text or ''))}
     return matches
