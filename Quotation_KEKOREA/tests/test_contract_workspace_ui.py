@@ -97,6 +97,21 @@ class ContractWorkspaceUiTests(unittest.TestCase):
         self.assertFalse(self.repo.records)
         self.assertTrue(self.at.error)
 
+    def test_legacy_duplicate_contract_displays_recovery_without_silent_save(self):
+        self.seed('legacy', 'sale', 'Legacy Supply')
+        original = self.repo.revisions['legacy'][0]['snapshot']
+        original['terms'] = [
+            {'id': 't1', 'key': 'quantity', 'value': '10', 'unit': 'PCS', 'status': 'confirmed'},
+            {'id': 't2', 'key': '수량', 'value': '11', 'unit': 'PCS', 'status': 'suggested'},
+        ]
+        self.run_app()
+        next(b for b in self.at.button if b.label == 'Legacy Supply').click()
+        self.run_app()
+        self.assertEqual(len(self.repo.revisions['legacy']), 1)
+        self.assertTrue(any('중복 거래조건' in m.value for m in self.at.warning))
+        self.assertTrue(next(b for b in self.at.button
+                             if b.label == '검토한 중복 조건 복구 저장').disabled)
+
     def test_all_types_can_be_opened_from_one_menu_without_title_decorations(self):
         self.seed('sale', 'sale', 'Example Supply')
         self.seed('investment', 'investment_commission', 'Example FI')
