@@ -46,7 +46,7 @@ from Quotation_KEKOREA.contracts.service import (
     propose_revision, propose_term_revision,
 )
 from Quotation_KEKOREA.contracts.flow import should_generate_draft, select_new_questions
-from Quotation_KEKOREA.contracts.drafting import generate_reviewed_draft as generate_draft
+from Quotation_KEKOREA.contracts.ai_graph import generate_contract_draft_graph as generate_draft
 
 
 TYPE_LABELS = {
