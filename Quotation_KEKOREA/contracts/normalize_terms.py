@@ -12,6 +12,7 @@ _NUM = re.compile(r"([-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)")
 # Maintain this as an exact-alias list rather than fuzzy keyword matching: fuzzy
 # matching may turn 'total price' into 'unit_price' or 'delivery cost' into delivery.
 ALIASES = {
+    'brand': ('manufacturer brand','brand name','manufacturer','브랜드','제조사','제조 브랜드','상표','제조업체명','브랜드명'),
     'products': ('product','product name','product description','product specifications','product specification','goods','commodity','material','item','items','sku','grade','model','product type','description of goods','specification','produk','nama produk','jenis barang','barang','komoditas','spesifikasi barang','spesifikasi produk','품목','제품','제품명','품명','제품 규격','제품 및 필수 규격','상품명','상품','모델명','원자재','규격'),
     'quantity': ('qty','q ty','qtty','quantity','quantities','quantity ordered','order quantity','volume','vol','volume ordered','trade volume','monthly volume','monthly quantity','monthly qty','contract volume','contract quantity','order volume','total qty','net weight','gross weight','weight','tonnage','tonnage quantity','jumlah','kuantitas','jumlah barang','jumlah pesanan','volume bulanan','jumlah bulanan','berat','berat bersih','jumlah total','수량','물량','월 물량','월물량','월간 물량','총 수량','총수량','주문 수량','중량','무게','톤수','발주수량','거래물량'),
     'unit': ('uom','unit of measure','quantity unit','unit of quantity','measurement unit','unit measure','u/m','units','unit type','satuan','satuan jumlah','satuan ukur','unit pengukuran','단위','수량 단위','물량 단위','중량단위','계량 단위'),

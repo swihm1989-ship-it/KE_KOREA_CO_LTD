@@ -9,6 +9,7 @@ from uuid import uuid4
 from Quotation_KEKOREA.contracts.models import CONTRACT_TYPES, validate_snapshot
 from Quotation_KEKOREA.contracts.editing import find_sentence
 from Quotation_KEKOREA.contracts.commission_policy import drafting_guidance, apply_payment_policy
+from Quotation_KEKOREA.contracts.sale_scope_template import apply_sale_scope_template
 
 
 def conversation_response_language(text):
@@ -378,6 +379,10 @@ def generate_draft(snapshot, preferred_clauses, *, env, reference_context=None,
         "Preserve the user's snapshot.title exactly; never add a contract type, prefix, suffix, or translation to it. "
         "Return JSON keys title, clauses, issues. clauses is an ordered array of {id,title,order,sentences}; each sentence is {id,text,term_ids,source_refs}. IDs must be unique stable-looking IDs. "
         "Use the user's transaction_messages for cautions and commercial context; distinguish these from reference document examples. "
+        "For sales, include a topic_key=scope clause, but keep independent obligations in "
+        "their respective clauses: a fixed party-and-trade specification section will "
+        "replace the initial scope paragraph with values from stored trade fields only. "
+        "Never invent brands, prices, Incoterms or payment schedules. "
         "Reconcile material conflicts in issues but do not ask questions before writing the draft. "
         "Draft a ready-to-review, commercially workable agreement with complete neutral operative clauses. "
         "Do NOT prefix entire sentences or routine clauses with [서명 전 확인] / [TO CONFIRM]. "
@@ -469,7 +474,8 @@ def generate_draft(snapshot, preferred_clauses, *, env, reference_context=None,
         raise ValueError("The English draft contains Korean text outside extracted party/term values. The current draft was kept unchanged.")
     if checked["language"] == "ko" and letters and korean_count / len(letters) < 0.45:
         raise ValueError("The Korean draft appears to contain substantial English prose. The current draft was kept unchanged.")
-    return apply_payment_policy(checked, env=env)
+    return apply_sale_scope_template(apply_payment_policy(checked, env=env),
+                                     repair_context=repair_context)
 
 
 def propose_revision(snapshot, sentence_id, instruction, *, env, client=None):
