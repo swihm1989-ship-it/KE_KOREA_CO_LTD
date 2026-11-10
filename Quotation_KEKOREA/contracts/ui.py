@@ -4,6 +4,7 @@ from Quotation_KEKOREA.contracts.latest_instruction import (
 )
 """Streamlit UI for private contract drafting, review, revision and export."""
 import hashlib
+import time
 import hmac
 import re
 from pathlib import Path
@@ -443,6 +444,26 @@ def _references_panel(repo, contract_id, env):
                 if columns[2].button("사용 전환", key=f"preferred_toggle_{clause['id']}"):
                     repo.set_preferred_clause_active(clause["id"], not clause["active"])
                     st.rerun()
+
+
+def _timed_contract_progress(status):
+    """Show timing of completed stages without logging contract terms or API data."""
+    previous = [None]
+    started_at = [time.perf_counter()]
+
+    def tick(stage):
+        now = time.perf_counter()
+        if previous[0] is not None:
+            status.write(f"{previous[0]} · {now - started_at[0]:.1f}초")
+        previous[0] = stage
+        started_at[0] = now
+        status.update(label=f"계약서 AI · {stage}", state="running")
+
+    def finish():
+        if previous[0] is not None:
+            status.write(f"{previous[0]} · {time.perf_counter() - started_at[0]:.1f}초")
+
+    return tick, finish
 
 
 def _render_revision_preview(snapshot, heading):
@@ -1368,8 +1389,7 @@ def _contract_chat(repo, snapshot, state_key, env):
                              and updated["contract_type"] in clause.get("contract_types", [])
                              and clause.get("language") == updated["language"]]
                 with st.status("계약서 AI 실행 단계 준비 중", expanded=True) as draft_status:
-                    def progress(stage):
-                        draft_status.update(label=f"계약서 AI · {stage}", state="running")
+                    progress, finish_timing = _timed_contract_progress(draft_status)
                     try:
                         updated = generate_draft(
                             updated, preferred, env=env, reference_context=selected_context,
@@ -1379,6 +1399,7 @@ def _contract_chat(repo, snapshot, state_key, env):
                     except Exception:
                         draft_status.update(label="계약서 AI 실행 실패 · 기존 초안 유지", state="error")
                         raise
+                    finish_timing()
                     draft_status.update(label="계약서 AI 초안 품질 검토 완료", state="complete")
                 made_draft = True
             if snapshot.get("clauses"):
@@ -1710,8 +1731,7 @@ def render_contract_page(page, env):
                         for message in library_result['notices']:
                             st.warning(message)
                     with st.status("계약서 AI 실행 단계 준비 중", expanded=True) as draft_status:
-                        def progress(stage):
-                            draft_status.update(label=f"계약서 AI · {stage}", state="running")
+                        progress, finish_timing = _timed_contract_progress(draft_status)
                         try:
                             draft = generate_draft(
                                 snapshot, preferred, env=env, reference_context=reference_context,
@@ -1723,6 +1743,7 @@ def render_contract_page(page, env):
                         except Exception:
                             draft_status.update(label="계약서 AI 실행 실패 · 기존 초안 유지", state="error")
                             raise
+                        finish_timing()
                         draft_status.update(label="계약서 AI 초안 품질 검토 완료", state="complete")
                     saved = _save_snapshot(repo, draft, "AI generated contract draft")
                     st.session_state[state_key] = saved
