@@ -108,7 +108,7 @@ class ContractWorkspaceUiTests(unittest.TestCase):
         next(b for b in self.at.button if b.label == 'Legacy Supply').click()
         self.run_app()
         self.assertEqual(len(self.repo.revisions['legacy']), 1)
-        self.assertTrue(any('중복 거래조건' in m.message for m in self.at.warning))
+        self.assertTrue(any('중복 거래조건' in m.value for m in self.at.warning))
         self.assertTrue(next(b for b in self.at.button
                              if b.label == '검토한 중복 조건 복구 저장').disabled)
 
