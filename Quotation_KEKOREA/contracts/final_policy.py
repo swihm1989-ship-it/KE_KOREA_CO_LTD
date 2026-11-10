@@ -2,8 +2,11 @@
 import re
 
 _PLACEHOLDER = re.compile(
-    r'\[(?:서명\s*전\s*확인(?:\s*[:：][^\]]*)?|확인\s*필요(?:\s*[:：][^\]]*)?|'필수\s*확인(?:\s*[:：][^\]]*)?|TBD(?:\s*/[^\]]*)?|'
-    r'TO\s*CONFIRM|TO\s*BE\s*CONFIRMED|PENDING\s*CONFIRMATION)\]', re.I)
+    r'\[(?:서명\s*전\s*확인(?:\s*[:：][^\]]*)?|'
+    r'확인\s*필요(?:\s*[:：][^\]]*)?|'
+    r'필수\s*확인(?:\s*[:：][^\]]*)?|'
+    r'TBD(?:\s*/[^\]]*)?|TO\s*CONFIRM|TO\s*BE\s*CONFIRMED|'
+    r'PENDING\s*CONFIRMATION)\]', re.I)
 
 def final_document_blockers(snapshot, *, allow_unresolved_text=False):
     """Block unsafe final exports; allow authored placeholders only by opt-in.
