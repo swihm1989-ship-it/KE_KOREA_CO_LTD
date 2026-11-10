@@ -179,11 +179,15 @@ class CleanContractExportTests(unittest.TestCase):
     def test_contract_fonts_and_seal_print_dimensions(self):
         from Quotation_KEKOREA.contracts.exports import _stamp_width_height
         import base64
+        from PIL import Image
+        stamp_stream = io.BytesIO()
+        Image.new('RGB', (1000, 400), 'white').save(stamp_stream, format='PNG')
+        realistic_stamp = stamp_stream.getvalue()
         original = sample('The supplier agrees to deliver goods.')
         original['language'] = 'en'
         original['title'] = 'Solar Supply Agreement'
         document = Document(io.BytesIO(
-            export_contract(original, formats=('docx',), seal_bytes=TEST_STAMP)['docx']['content'
+            export_contract(original, formats=('docx',), seal_bytes=realistic_stamp)['docx']['content'
         ]))
         for name, size, bold in [('Normal', 10, False), ('Title', 18, True),
                                  ('Heading 2', 12, True)]:
@@ -194,7 +198,7 @@ class CleanContractExportTests(unittest.TestCase):
         self.assertAlmostEqual(document.inline_shapes[0].width.cm, 10, places=1)
         self.assertAlmostEqual(document.tables[0].columns[1].width.cm, 10, places=1)
         with fitz.open(stream=export_contract(
-            original, formats=('pdf',), seal_bytes=TEST_STAMP)['pdf']['content'
+            original, formats=('pdf',), seal_bytes=realistic_stamp)['pdf']['content'
         ], filetype='pdf') as pdf:
             text_spans = [s for page in pdf for b in page.get_text('dict')['blocks']
                           if 'lines' in b for line in b['lines'] for s in line['spans']]
