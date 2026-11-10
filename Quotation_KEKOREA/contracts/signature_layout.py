@@ -111,7 +111,7 @@ def localized_representative_title(title, language):
     raw = str(title or "").strip()
     if not raw:
         return ""
-    normalized = re.sub(r"\\s+", " ", raw).casefold()
+    normalized = re.sub(r"\s+", " ", raw).casefold()
     target = "en" if language == "en" else "ko" if language == "ko" else None
     if target is None:
         return raw
