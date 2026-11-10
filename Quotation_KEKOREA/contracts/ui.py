@@ -25,7 +25,9 @@ from Quotation_KEKOREA.contracts.workspace import collect_notes, propose_notes_r
 from Quotation_KEKOREA.contracts.final_merge import merge_revision_requests
 from Quotation_KEKOREA.contracts.risk_review_ui import render_risk_review
 from Quotation_KEKOREA.contracts.models import new_snapshot, validate_snapshot
-from Quotation_KEKOREA.contracts.legacy_recovery import prepare_duplicate_term_recovery
+from Quotation_KEKOREA.contracts.legacy_recovery import (
+    prepare_duplicate_term_recovery, has_legacy_duplicate_term_keys,
+)
 from Quotation_KEKOREA.contracts.library import search_library
 from Quotation_KEKOREA.contracts.review_summary import review_cards
 from Quotation_KEKOREA.contracts.library_ui import render_library_admin, show_library_sources
@@ -150,6 +152,8 @@ def _load_snapshot(repo, contract_id):
     snapshot = row.get("snapshot")
     if not isinstance(snapshot, dict):
         raise ContractRepositoryError("Saved contract data is not a valid snapshot.")
+    if has_legacy_duplicate_term_keys(snapshot):
+        raise ValueError("Contract term keys must be unique")
     return validate_snapshot(snapshot), revisions
 
 
@@ -335,8 +339,10 @@ def _new_contract(repo, title, contract_type, language, initial_snapshot=None):
 def _ensure_active_snapshot(repo, active_id):
     state_key = f"contract_snapshot_{active_id}"
     if state_key in st.session_state:
-        snapshot = validate_snapshot(st.session_state[state_key])
-        return snapshot
+        snapshot = st.session_state[state_key]
+        if has_legacy_duplicate_term_keys(snapshot):
+            raise ValueError("Contract term keys must be unique")
+        return validate_snapshot(snapshot)
     snapshot, revisions = _load_snapshot(repo, active_id)
     st.session_state[state_key] = snapshot
     st.session_state["contract_revisions"] = revisions
