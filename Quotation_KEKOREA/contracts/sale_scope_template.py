@@ -44,9 +44,8 @@ def _value(term, language):
     value = str(term['value']).strip()
     if not value:
         return ''
-    if term.get('status') == 'confirmed':
-        return value
-    return _LABELS[language]['proposed'] + value
+    # Approval is stored separately; do not repeat status text in each value.
+    return value
 
 
 def _party(snapshot, role):
@@ -128,6 +127,11 @@ def _text_sentence(text, *, field=None, terms=()):
     }
     if field:
         result['sale_spec_field'] = field
+        populated = [t for t in terms if t and str(t.get('value') or '').strip()]
+        result['sale_spec_status'] = (
+            'suggested' if any(t.get('status') != 'confirmed' for t in populated)
+            else 'confirmed' if populated else 'missing'
+        )
     return result
 
 

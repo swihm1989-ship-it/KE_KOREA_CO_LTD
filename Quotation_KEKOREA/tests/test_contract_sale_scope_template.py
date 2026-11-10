@@ -72,7 +72,10 @@ class SaleScopeTemplateTests(unittest.TestCase):
         lines = [s['text'] for s in clause['sentences']]
         self.assertIn('브랜드: ', lines)
         self.assertIn('인도조건: ', lines)
-        self.assertTrue(any('제안(미확정)' in line and '0.225' in line for line in lines))
+        self.assertFalse(any('제안(미확정)' in line for line in lines))
+        price_row = next(row for row in clause['sentences'] if row.get('sale_spec_field') == 'unit_price')
+        self.assertEqual(price_row['sale_spec_status'], 'suggested')
+        self.assertIn('0.225', price_row['text'])
 
     def test_inserts_fixed_scope_but_preserves_unrelated_liability_clause(self):
         snapshot = fixture()
