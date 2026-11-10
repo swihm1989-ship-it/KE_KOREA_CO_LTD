@@ -101,8 +101,8 @@ class CleanContractExportTests(unittest.TestCase):
         self.assertNotIn('By:', cell_text)
         self.assertIn('Company: KE KOREA CO. LTD', cell_text)
         self.assertIn('Company: TENGYAO TECHNOLOGY CO. LTD', cell_text)
-        self.assertIn('Name / Title: SEOKWON IHM, CEO', cell_text)
-        self.assertIn('Name / Title: ALEX, CEO', cell_text)
+        self.assertIn('Name / Title: SEOKWON IHM, Chief Executive Officer', cell_text)
+        self.assertIn('Name / Title: ALEX, Chief Executive Officer', cell_text)
         self.assertEqual(cell_text.count('Date: 2026-11-10'), 2)
         with fitz.open(stream=outputs['pdf']['content'], filetype='pdf') as pdf:
             page_text = [page.get_text() for page in pdf]
@@ -111,7 +111,7 @@ class CleanContractExportTests(unittest.TestCase):
             self.assertEqual(joined.count('SIGNATURES'), 1)
             self.assertEqual(joined.count('Date: 2026-11-10'), 2)
             self.assertNotIn('By:', joined)
-            self.assertIn('Name / Title: ALEX, CEO', joined)
+            self.assertIn('Name / Title: ALEX, Chief Executive Officer', joined)
             signature_page = next(i for i, text in enumerate(page_text) if 'SIGNATURES' in text)
             self.assertIn('Company: TENGYAO TECHNOLOGY CO. LTD', page_text[signature_page])
             self.assertIn('Company: KE KOREA CO. LTD', page_text[signature_page])
