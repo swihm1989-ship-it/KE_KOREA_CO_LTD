@@ -24,6 +24,7 @@ from reportlab.platypus import (
 )
 
 
+from Quotation_KEKOREA.contracts.sale_scope_render import scope_display_items
 from Quotation_KEKOREA.contracts.signature_layout import (
     authored_clauses_for_final, signature_blocks,
 )
@@ -146,11 +147,27 @@ def _docx(snapshot, seal_bytes=None):
         if title:
             heading = document.add_heading(title, level=2)
             heading.paragraph_format.keep_with_next = True
-        for sentence in sentences:
-            paragraph = document.add_paragraph(sentence["text"])
-            paragraph.paragraph_format.space_after = Pt(9)
-            paragraph.paragraph_format.line_spacing = 1.55
-            paragraph.paragraph_format.widow_control = True
+        entries = (scope_display_items(sentences, snapshot.get("language", "en"))
+                   if any(item.get("sale_spec_field") for item in sentences)
+                   else [("paragraph", item["text"]) for item in sentences])
+        for kind, data in entries:
+            if kind == "table":
+                table = document.add_table(rows=0, cols=2)
+                table.style = "Table Grid"
+                table.autofit = False
+                table.columns[0].width = Cm(4)
+                table.columns[1].width = Cm(11)
+                for label, value in data:
+                    row = table.add_row()
+                    row.cells[0].text = label
+                    row.cells[1].text = value
+                    row._tr.get_or_add_trPr().append(OxmlElement("w:cantSplit"))
+                document.add_paragraph().paragraph_format.space_after = Pt(3)
+            else:
+                paragraph = document.add_paragraph(data)
+                paragraph.paragraph_format.space_after = Pt(9)
+                paragraph.paragraph_format.line_spacing = 1.55
+                paragraph.paragraph_format.widow_control = True
     _docx_signature_section(document, snapshot, seal_bytes)
     output = io.BytesIO()
     document.save(output)
@@ -210,17 +227,38 @@ def _pdf(snapshot, seal_bytes=None):
                                 fontSize=10, leading=17, spaceAfter=10, splitLongWords=True)
     story = [Paragraph(escape(snapshot.get("title") or "Contract"), title_style)]
     for title, authored_sentences in authored_clauses_for_final(snapshot):
-        sentences = [Paragraph(escape(sentence["text"]).replace("\n", "<br/>"), body_style)
-                     for sentence in authored_sentences]
+        entries = (scope_display_items(authored_sentences, snapshot.get("language", "en"))
+                   if any(item.get("sale_spec_field") for item in authored_sentences)
+                   else [("paragraph", item["text"]) for item in authored_sentences])
+        rendered = []
+        for kind, data in entries:
+            if kind == "table":
+                table = PdfTable(
+                    [[Paragraph(escape(label), body_style),
+                      Paragraph(escape(value).replace("\n", "<br/>"), body_style)]
+                     for label, value in data],
+                    colWidths=[130, 355], hAlign="LEFT", repeatRows=0)
+                table.setStyle(TableStyle([
+                    ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#b8bec5")),
+                    ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#f2f4f6")),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 9),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 9),
+                    ("TOPPADDING", (0, 0), (-1, -1), 5),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                ]))
+                rendered.append(table)
+            else:
+                rendered.append(Paragraph(escape(data).replace("\n", "<br/>"), body_style))
         if title:
             heading = Paragraph(escape(title), heading_style)
-            if sentences:
-                story.append(KeepTogether([heading, sentences[0]]))
-                story.extend(sentences[1:])
+            if rendered:
+                story.append(KeepTogether([heading, rendered[0]]))
+                story.extend(rendered[1:])
             else:
                 story.append(heading)
         else:
-            story.extend(sentences)
+            story.extend(rendered)
     story.append(Spacer(1, 12))
     story.append(_pdf_signature_section(snapshot, heading_style, body_style, seal_bytes))
     output = io.BytesIO()
