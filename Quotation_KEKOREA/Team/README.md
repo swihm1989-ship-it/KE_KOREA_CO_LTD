@@ -1,6 +1,49 @@
 # KE KOREA — 팀 공유 및 구현 안내
 
-기준일: **2026-11-09**. 저장소 코드·SQL·의존성·로컬 테스트 기록을 기준으로 작성했습니다. 코드 구현, 실제 DB 적용, 로컬 실행, 운영 배포는 서로 구분합니다. 이 문서는 현재 구조를 설명하며 과거 변경 이력은 [프로젝트 README](../README.md)를 참고하세요.
+> 현재 동작은 원격 코드 `f335e9e` 기준으로 대조했습니다. 문서 끝의 「2026-11-10 코드·README 대조 결과」를 우선 참고하세요. 이전 날짜의 테스트·패치 기록은 당시 상태이며 현재 운영 성공을 뜻하지 않습니다.
+
+기준일: **2026-11-10**. 저장소 코드·SQL·의존성·로컬 테스트 기록을 기준으로 작성했습니다. 코드 구현, 실제 DB 적용, 로컬 실행, 운영 배포는 서로 구분합니다. 이 문서는 현재 구조를 설명하며 과거 변경 이력은 [프로젝트 README](../README.md)를 참고하세요.
+
+## 처음 합류한 팀원을 위한 3분 안내
+
+이 앱은 거래 내용을 문서로 정리하고 사람이 검토하도록 돕는다. AI가 내용을 추출·작성·검토하고, Python 코드가 숫자·출처·변경 범위를 검사하며, 사용자가 수정안을 승인한다.
+
+읽는 순서: **아래 용어와 예시 → 3절 업무 흐름 → 4절 저장/RAG → 7절 실행 → 8절 검증 상태**. 발표 담당자는 [5분 발표 안내](../Presentation/README.md)와 [읽을 대본](../Presentation/presentation_script_ko.md)을 이어서 본다.
+
+| 용어 | 쉬운 설명 | 이 앱에서 하는 일 |
+| --- | --- | --- |
+| API | 앱이 외부 기능에 요청하고 결과를 받는 통로 | OpenAI에 추출·작성·검토 요청 |
+| LangGraph | 처리 단계와 순서를 연결하는 실행 도구 | 계약 분석의 추출→검증, 신규 초안의 준비→생성·검토→최종 구조 검증 |
+| 장기기억 | 다시 열어 볼 수 있도록 남기는 기록 | Supabase의 계약·대화·메모·수정 이력. LangGraph 자체에 영속 기억을 둔 것은 아님 |
+| RAG | 필요한 참고 지식을 찾아 AI에게 함께 제공 | 승인·활성 상태의 참고 메모를 유형에 맞춰 검색 |
+| 임베딩 | 문장의 의미를 검색에 쓸 숫자로 표현 | 승인 메모의 의미 검색에 사용. 상품 가격을 생성하거나 확정하지 않음 |
+| revision | 저장된 계약의 버전 번호 | 수정안 승인 후 새 버전 저장. 이전 버전과 충돌하면 적용 차단 |
+| snapshot | 한 버전에 들어 있는 계약 데이터 묶음 | 당사자·조건·조항·검토사항 등을 함께 보관 |
+| MCP | AI 도구 연결을 위한 별도 규약 | 이 운영 앱에는 아직 미구현. 개발 환경에서 쓰는 MCP와 구분 |
+
+예시: 가상 물품 100 PCS, 단가 USD 2, EXW 조건을 입력하면 AI가 조건 후보를 만든다. 사용자는 BOX 2에서 확인하고 BOX 3의 초안을 검토한다. 문장 메모로 수정을 요청해도 즉시 원문은 바뀌지 않는다. 수정 전후를 비교·승인한 뒤 새 revision으로 저장된다. 다시 계약을 열 때 조회하는 기록과, 다른 계약 작성에 참고하는 승인 RAG 지식은 별도다.
+
+```mermaid
+flowchart LR
+  A[거래 설명] --> B[LangGraph 계약 분석과 검증]
+  B --> C[조건 후보와 사용자 확인]
+  C --> D[LangGraph 신규 초안 생성과 품질검토]
+  R[승인된 참고 메모 검색] --> D
+  D --> E[본문 검토와 수정안 비교·승인]
+  E --> F[새 revision 저장]
+  F --> G[Supabase에서 다시 열기]
+```
+
+이 도식은 단계 설명이다. 모든 단계를 하나의 LangGraph나 하나의 자동 저장 작업으로 묶은 것은 아니다. 거래조건 분석 그래프와 신규 초안 그래프가 따로 있으며, DB 저장·승인은 기존 애플리케이션이 담당한다.
+
+### 팀 인수인계 때 확인할 네 가지
+
+| 담당 역할 | 확인할 자료 | 전달할 결과 |
+| --- | --- | --- |
+| 기능 설명 담당 | BOX 1→2→3과 가상 계약 | 후보·미리보기·저장 승인을 구분해 설명 |
+| 개발 담당 | `ai_graph.py`, `drafting.py`, `repository.py` | 호출 흐름과 revision 충돌 처리 위치 설명 |
+| 데이터 담당 | 승인 참고 메모와 DB/Storage 설정 | 실제 승인 샘플 유무, 검색 가능 여부, 시연 DB 확인 |
+| 발표 담당 | 발표 대본과 가상 계약·검토용 파일 | 네트워크 없이도 설명할 화면/파일 준비 |
 
 ## 1. 먼저 알아야 할 구현 현황
 
@@ -8,9 +51,9 @@
 | --- | --- | --- |
 | 사용자 화면 | Streamlit | [app.py](../app.py), [contracts/ui.py](../contracts/ui.py). React/Next.js 앱이 아님 |
 | AI 추출·작성 | OpenAI Responses API 직접 호출 | Python `urllib.request`로 요청하고 JSON을 검증. [extractor.py](../agent/extractor.py), [service.py](../contracts/service.py) |
-| LangChain / LangGraph | 사용하지 않음 | 의존성·실행 코드에 없음. 로더·검색·체인·상태 전이를 직접 구현 |
+| LangChain / LangGraph | 계약 전용 LangGraph 도입 | `contracts/ai_graph.py`, `requirements.txt`. 계약 분석·초안 검증 노드만 사용하며 일반 거래문서는 기존 경로 유지 |
 | MCP | 앱 런타임에 구현되지 않음 | MCP 서버/클라이언트, 도구 등록·발견 및 MCP를 통한 DB 호출 없음. 개발 환경에서 제공되는 도구와 배포 앱의 기능은 별개 |
-| 에이전트 오케스트레이션 | Python 함수와 규칙 모듈 | 거래 문서의 비동기 작업 관리와 계약 초안의 순차 파이프라인. 여러 자율 에이전트의 협업 시스템은 아님 |
+| 에이전트 오케스트레이션 | 계약 전용 LangGraph + 기존 Python 규칙 | 상태 없는 계약 분석/작성 그래프와 기존 거래문서 작업 관리. 여러 자율 에이전트의 협업 시스템은 아님 |
 | 장기 저장소 | Supabase PostgreSQL + Storage | 계약·대화·revision·메모·참고자료·출력 기록 영속 저장. 아래 저장소 표 참고 |
 | 공통 지식 재사용/RAG | 승인된 참고 메모 검색 후 프롬프트에 전달 | 임베딩/키워드 혼합 검색과 신규 초안용 조항별 키워드 검색. [library.py](../contracts/library.py) |
 | 벡터 저장 방식 | JSONB manifest 안의 숫자 배열 | 기본 512차원 임베딩. pgvector 인덱스·FAISS·Chroma·Pinecone 미사용 |
@@ -52,7 +95,7 @@ KE_KOREA_CO_LTD/
 - **BOX 2:** 조건 및 당사자 직접 입력·상태 확인·본문 조건 후보 추출·지급조건 관리.
 - **BOX 3:** 문장별 미리보기·메모·위험 검토·수정안 비교/승인·DRAFT/FINAL 다운로드.
 - 계약 유형은 `sale`, `trade_commission`, `investment_commission`; 출력 언어는 한국어/영어입니다. 한국어·영어·인도네시아어 조건 이름은 표준 키로 정규화하지만 인도네시아어 계약서 출력 모드를 제공하는 것은 아닙니다.
-- [flow.py](../contracts/flow.py)는 초안 요청 의도와 초기 질문 수를 제어합니다. LangGraph 상태 그래프가 아닙니다.
+- [flow.py](../contracts/flow.py)는 초안 요청 의도와 초기 질문 수를 제어합니다. LangGraph 상태 그래프가 아닙니다. 계약 전용 실제 LangGraph 실행은 `contracts/ai_graph.py`가 담당합니다.
 
 ### 3.2 거래조건과 본문은 별도 데이터
 
@@ -84,7 +127,7 @@ flowchart LR
 - 선택 첨부자료 전체에서 문단/페이지를 연결한 구간을 검색합니다. 주제별 최대 3개 새 구간, 발췌 합계 최대 100,000자입니다. 거래조건 분석의 기존 앞 12,000자 제한과 상세 작성용 검색은 별도입니다. 원문 전체를 모델에 무제한 전송하는 방식은 아닙니다.
 - 모든 계획 주제의 구성요소와 실제 생성된 모든 조항에 검사 결과를 요구합니다. 문장 ID·인용 문구가 실제 본문에 존재하는지 확인합니다. 이 검증은 의미/법적 정당성의 결정적 증명이 아닙니다.
 - 문제가 있으면 해당 조항만 1회 보완하고 다시 검사합니다. 무관한 조항·기존 문장 ID·확정 조건·보호된 커미션 지급 조항을 보존합니다. 남은 문제는 미확정 검토 항목으로 전달합니다.
-- 내부 생성/검사 호출은 통상 2회, 최대 4회입니다. 요청별 타임아웃 최대 60초, 경과시간 예산 180초를 적용합니다. 네트워크 제한은 UI의 즉시 취소 타이머가 아닙니다. 기존 거래조건 분석과 기존 검색/임베딩 호출은 이 횟수에 별도입니다.
+- 신규 초안은 생성→품질검토→필요 시 1회 보완→재검토 순서입니다. 각 검토에서 잘못된 인용만 1회 재검증할 수 있어 생성/검사 API는 통상 2회, 최대 6회입니다. 요청별 소켓 타임아웃은 최대 150초, 내부 파이프라인 경과시간 예산은 600초입니다. 별도의 거래조건 분석은 180초이며 검색·임베딩 호출은 이 횟수에서 제외합니다. 이는 즉시 취소를 보장하는 UI 타이머가 아닙니다. 모델·품질검증을 자동 완화하지 않습니다.
 - 잘못된 응답·허위 인용·범위 밖 수정·시간 초과는 중간 초안을 저장하지 않습니다. 이미 조항이 저장된 계약은 자동 재작성하지 않습니다. 모델을 자동 변경하지 않습니다.
 
 ### 3.4 수정·위험 검토·승인
@@ -157,7 +200,7 @@ DB 정의는 [계약 마이그레이션](../supabase/migrations/202611050001_con
 - 계약 참고자료는 PDF/DOCX/HWP5, 파일당 최대 20 MB, PDF 최대 100페이지, 요청당 최대 5개입니다. 구형 `.doc`는 PDF/DOCX 변환이 필요합니다. HWP는 읽기 지원이며 HWP 출력 기능은 없습니다.
 - 텍스트 PDF는 PyMuPDF, DOCX는 ZIP/XML, HWP5는 `pyhwp` subprocess로 추출합니다. 스캔 참고 PDF의 OCR은 사용자 동의 후 OpenAI로 전송합니다.
 - **계약 참고 OCR은 이미지 상단 78%만 처리**합니다. 하단 22%의 조항이 빠질 수 있으며 서명·직인·수기 판독/완전성을 보장하지 않습니다. 무역 PDF 입력 전처리와 같은 경로라고 설명하면 안 됩니다.
-- 계약 출력은 ReportLab PDF + `python-docx` DOCX입니다. DRAFT는 워터마크/머리글·미확정 부록을 포함합니다. FINAL은 앱의 기존 `rules.py` 필수조건·미확정 본문·계좌·법률 검증 경로를 통과해야 합니다. 렌더러 함수를 직접 호출하는 것만으로 FINAL 승인을 구현한 것은 아닙니다.
+- 계약 출력은 ReportLab PDF + `python-docx` DOCX입니다. DRAFT는 저장된 검토용 본문을 출력합니다. FINAL은 현재 revision 승인과 직인 권한 검증이 필요하며 미확정 문구 출력은 별도 동의로만 허용합니다. 렌더러 직접 호출이 승인을 뜻하지 않습니다.
 - 렌더링 성공 후 비공개 저장이 실패하면 현재 세션에 직접 다운로드를 제공할 수 있습니다. 서버에 저장된 기록과 구분하며 세션 종료 후 보존을 보장하지 않습니다.
 - 추출·생성·검토·임베딩/OCR 실행은 각 경로에서 관련 내용을 OpenAI에 전송할 수 있습니다. DB 영속 저장과 모델 요청은 별도 처리입니다. 민감 문서의 외부 처리 허용 여부를 먼저 확인하세요.
 
@@ -188,6 +231,7 @@ $LASTEXITCODE
 
 | 설정 | 역할 |
 | --- | --- |
+| `KEKOREA_AUTH_USERNAME`, `KEKOREA_AUTH_PASSWORD`, `KEKOREA_AUTH_SESSION_SECRET` | 앱 관리자 로그인과 서명된 세션; Streamlit Secrets에 보관 |
 | `OPENAI_API_KEY`, `OPENAI_MODEL` | 구조화 추출 및 기본 AI 모델 |
 | `CONTRACT_OPENAI_MODEL` | 계약 전용 모델 선택; 비어 있으면 기본 모델 사용 |
 | `CONTRACT_LIBRARY_EMBEDDING_MODEL` | 공통 참고 메모의 임베딩 모델 |
@@ -202,14 +246,15 @@ $LASTEXITCODE
 
 | 항목 | 확인한 내용 | 미확인/한계 |
 | --- | --- | --- |
-| 최신 코드 자동 테스트 | 2026-11-09 전체 **437개 통과, 109.838초, 생략 없음**; 신규 품질 테스트 15개 포함 | 가상 API 응답 기반이며 실제 AI 문장 품질 보증 아님 |
+| 커밋별 과거 전체 테스트 | `987fd16`: 498개, `97a6199`: 501개 통과 | 그 이후 코드 전체를 같은 수치로 검증했다고 설명하지 않음 |
+| 대조 기준 코드의 자동 검사 | `f335e9e`의 GitHub Actions 성공, 실행 `42749663125` | CI 성공과 운영 화면/실제 모델 품질은 별개 |
 | 테스트 근거 | [실행 로그](../../logs/tests/drafting_quality_2026-11-09.log), [신규 테스트](../tests/test_contract_drafting.py), [연결 테스트](../tests/test_contract_library_ui.py) | 기존 Streamlit/PyMuPDF 경고 남음 |
-| 로컬 임시 화면 | 이번 세션에서 `http://127.0.0.1:8502/_stcore/health` 200/ok 확인 | 브라우저 URL 확인 도구 제한으로 시각 확인 미완료. 재시작 후 가동 보장 없음 |
+| 로컬 임시 화면 | `127.0.0.1:8502`는 로컬 실행 예시 | 현재 가동을 확인한 주소가 아님. 발표 직전 직접 실행·로그인·화면 확인 필요 |
 | 로컬 데이터 | 사용자 선택에 따라 **기존 Supabase DB 공유** | 임시 화면에서 만든 계약도 기존 DB에 저장. `[TEST]` 제목 사용; 완전히 격리된 staging DB가 아님 |
 | Render | [render.yaml](../../render.yaml)에 `main`·Python·Streamlit 실행 설정 | 이번 변경의 배포/대시보드 연결·자동 반영 여부는 미확인 |
 | Streamlit 운영 | 별도 호스팅 대상 | 이번 변경의 실제 배포와 문서 생성 경로는 미확인 |
 
-- 앱 전체의 사용자 로그인·사용자별 계약 접근 통제는 구현돼 있지 않습니다. UI에도 이 사실을 경고합니다. DB의 RLS/비공개 버킷/서버 키는 공개 앱 경유 접근을 사용자별로 제한하는 로그인 기능을 대체하지 않습니다.
+- 앱 진입 전 관리자 로그인이 구현되어 있습니다(`Auth/gate.py`, `Auth/session.py`). 서명된 세션은 최초 로그인 후 12시간 제한이며 새로고침을 지원합니다. JavaScript 쿠키는 HttpOnly가 아니며, 사용자별 계약 권한 분리와 조직용 인증까지 구현한 것으로 설명하지 않습니다.
 - 샘플 관리 키는 관리 영역에만 적용됩니다. 외부 공개 시에는 앱 인증·권한·비용 제한·감사 체계를 먼저 설계해야 합니다.
 - 로컬 실행은 코드 배포와 분리되지만 DB를 자동 복제하지 않습니다. 운영 데이터를 수정하는 테스트나 삭제·복구 시연을 임의로 하지 마세요.
 - Render 설정 파일의 자동 배포 선언과 실제 서비스의 Git 연결 상태는 별개입니다. 실제 서비스 상태는 배포 담당자가 확인해야 합니다.
@@ -220,25 +265,25 @@ $LASTEXITCODE
 | 항목 | 현재 결론 / 다음 확인 |
 | --- | --- |
 | 장기기억의 범위 | 계약 기록과 승인된 참고 지식은 저장됨. 모든 대화의 전역 자동 기억·자동학습은 없음 |
-| 프레임워크 주장 | LangChain·LangGraph·MCP 도입으로 발표하지 않음. 향후 도입 시 어댑터와 기존 검증 경계 보존 필요 |
+| 프레임워크 주장 | 계약 분석·검토 초안에 LangGraph 도입. LangChain 기반 검색·MCP 런타임·fine-tuning 도입으로 확대 해석하지 않음 |
 | 지식 데이터 준비 | 실제 승인 샘플 수·조항별 다양성·개인정보 제거 상태는 이번 코드 검토로 확인하지 않음 |
 | 의미 품질 평가 | 불가항력 등 대표 조항의 기준 계약 세트로 누락·허위 조건·검색 적합성·비용/지연을 실모델 평가해야 함 |
 | OCR 완전성 | 상단 78% 크롭 및 불명확 문자 때문에 추출 원문과 실제 PDF를 비교해야 함 |
 | 지속성 | 세션 메모리, DB 저장, Storage 업로드 성공, 직접 다운로드를 구분 |
-| 운영 준비 | 앱 인증, 사용자별 권한, 독립 staging DB, 백업/복구 절차, 부하/비용 측정, 서버 운영 모니터링은 별도 확인/구축 대상 |
+| 운영 준비 | 관리자 로그인 구현. 사용자별 계약 권한, 조직용 인증, 독립 staging DB, 백업/복구 절차, 부하/비용 측정과 운영 모니터링은 별도 확인/구축 대상 |
 | 오류 대응 | `logs/tests`·`logs/preview`와 revision·source ID로 추적. API 키·원본 계약·실제 계좌를 오류 로그에 남기지 않음 |
 | 변경 규칙 | [AGENTS.md](../AGENTS.md) 보호 규칙과 [README 검사](../../scripts/check_readme_sync.py) 준수. 다섯 README를 함께 점검 |
 
 ## 10. 발표·유지보수 연결
 
 - 팀 설명: 이 문서의 구현 표 → 저장소/RAG → 실행/검증 순서로 공유합니다.
-- 발표/시연: [발표용 README](../Presentation/README.md)를 사용합니다. 과거 [발표 스크립트](../Presentation/presentation_script_ko.md)는 최신 구현/검증 상태와 대조한 뒤 사용하세요.
+- 발표/시연: [발표용 README](../Presentation/README.md)를 사용합니다. [5분 발표 대본](../Presentation/presentation_script_ko.md)은 준비된 가상 계약을 기준으로 읽고 시연하도록 갱신했습니다. 발표 전 실제 접속과 가상 파일을 확인하세요.
 - 상세 계약 기능: [README_CONTRACTS.md](../README_CONTRACTS.md). 최근 설계: [초안 품질 계획](../../docs/superpowers/plans/2026-11-09-draft-quality-pipeline.md).
 
 
 ### 2026-11-09 계약 PDF 출력 정책 개선 (로컬 패치, 배포 미확인)
 - 계약서 DRAFT PDF/DOCX는 BOX 3에서 저장한 제목·조항을 출력하며, 검토용 워터마크/머리글은 유지하지만 자동 `[확인 필요]` 접두사, 미확정 부록, AI 검토 원문은 출력하지 않는다. 원래 조항 자체에 작성자가 적은 미확정 문구는 임의 삭제하지 않는다.
-- FINAL PDF/DOCX는 현재 revision의 본문을 사용자가 명시적으로 승인한 뒤 생성한다. BOX 2의 제안·법률 검토사항은 화면에서 경고하지만 전부 확정하도록 강제하지 않는다. 본문에 `[서명 전 확인]` 등의 임시 표시가 남았거나 당사자/본문이 명백히 누락되면 최종 생성을 막는다.
+- FINAL은 현재 저장 revision의 본문 승인과 직인 권한·원본 SHA-256 검증을 요구합니다. 임시 확인 문구는 기본 차단하지만, 사용자가 미확정 본문 그대로 내보내기에 별도로 동의하면 문구를 보존해 출력할 수 있습니다. 이 동의는 거래조건 확정이나 법률 검증을 뜻하지 않으며, 미반영 조건 변경·본문 부재·KE KOREA 및 매매 당사자 누락 검증은 유지합니다. BOX 2 전 항목 확정이나 AI 위험 추천안 전부 선택은 필수가 아닙니다.
 - FINAL에는 검증된 회사 직인을 KE KOREA 서명란에만 넣는다. Streamlit Secrets의 `CONTRACT_FINAL_SEAL_PASSWORD` 관리자 암호가 필요하며 원본 이미지는 기존 비공개 Supabase 저장소 또는 SHA-256이 같은 로컬 이미지에서 읽는다. 이미지·비밀번호는 코드나 저장소에 기록하지 않는다. DRAFT에는 직인을 넣지 않는다.
 - 코드 패치가 전체 테스트나 운영 Streamlit 검증을 의미하지 않는다. 적용 후 테스트 및 실제 PDF 시각 검증이 필요하다.
 
@@ -319,9 +364,51 @@ $LASTEXITCODE
 - 원래 금액·수량·비율·날짜의 실제 값 변경은 계속 차단하고, 불일치 시 원문/번역문과 차이를 보여줍니다. 원본 계약은 보존됩니다.
 - 회귀 테스트: `Quotation_KEKOREA/tests/test_contract_translation_month_names.py`. 실모델 응답·운영 Streamlit은 별도 검증이 필요합니다.
 
+### 2026-11-10 Source-reference deployment repair
 
-### 2026-11-10 Analysis source-reference compatibility
+- Fixed a Python string quoting error in the analysis citation instructions introduced by `5f5e0e6`; the service can import again. No other runtime behavior was changed by this repair.
+- Source-reference recovery retains the upstream handling of null/single-object/prose citations and continues to reject fabricated quotes. Existing transaction, pricing, translation, export and authentication behavior is unchanged.
+- Verification: 18 source-reference/service tests and all 498 tests in the full suite passed (130.277 s, no skips) with app requirements installed and the existing local private catalog fixture available. Compile checks and git diff --check passed. The initial minimal-dependency run failed because python-docx/pydantic and the private fixture were absent; no application code was changed to address those setup failures. Production health returned HTTP 200; deployed contract-analysis behavior remains unverified.
 
-- Analysis normalizes null source_refs to [] and a single citation object to a one-item list. The AI request now specifies citation array/object shapes. Existing quote, document ID and source-kind validation still rejects fabricated citations and ambiguous formats such as strings.
-- Both response variations reproduced the screenshot error locally. The original production response was unavailable, so its exact shape remains unconfirmed.
-- Service regressions: 14 passed. Full-suite results will be recorded after verification. Live model and deployed Streamlit behavior remain unverified.
+### 2026-11-10 Contract analysis timeout handling
+
+- Trade-condition analysis now allows a 180-second socket timeout instead of 90 seconds. The reported approximately 90-second failure matches the previous limit; production transport logs were unavailable, so the underlying server/network delay is not confirmed.
+- Direct timeouts and URL-wrapped timeouts now display a distinct timeout message with the request limit. Connection errors retain their existing message. Other operations keep their existing timeout values; model selection, business terms, translation, pricing, exports and authentication were not changed.
+- Tests cover the analysis timeout, unchanged input snapshot, unchanged default for other calls, and safe timeout/connection messages. Existing citation validation remains enabled. Verification: all 501 tests passed in 139.103 seconds with app requirements and the existing local catalog fixture, no skips. Compile and diff checks passed. A synthetic analysis using local configured API credentials succeeded in 19.41 seconds; that does not validate production credentials or latency. Production contract-analysis verification remains pending.
+
+## 2026-11-10 코드·README 대조 결과
+
+**대조 기준:** 원격 `main`의 `f335e9e`. 이번 점검에서 `97a6199` 이후 코드 변경 16개가 다섯 README에 기록되지 않은 것을 확인해 보완했다. 아래는 코드 확인 결과이며, 운영 화면 검증 완료를 뜻하지 않는다.
+
+| 근거 커밋 | 구현과 사용자에게 보이는 동작 |
+| --- | --- |
+| `c173bac` | 계약 초안 생성·품질검토 요청 제한을 호출당 최대 150초, 파이프라인 예산 600초로 조정. 중간 미검증 초안은 저장하지 않음. |
+| `c06cd2c` | AI가 같은 조건을 다국어 키로 반복 추출하면 키를 정규화하고 충돌을 미확정 검토 항목으로 남김. |
+| `b359cd4` | 계약 분석·검토 초안만 LangGraph의 추출/생성·검증 노드로 실행. 기존 중복 키 계약은 미리보기 후 사용자 승인으로 새 revision에 복구하며 열기만으로 쓰지 않음. `langgraph>=1.0,<2` 의존성 추가. |
+| `a317bdc` | 계약 생성·검사·보완 단계를 화면에 표시. |
+| `fbbdc16` | 무조건적인 문장 전체 확인 표시를 줄이고 실제 누락 사실에만 표시하도록 작성 지침 보완. 미확정 문구를 보존한 FINAL 출력은 별도 사용자 동의로 허용하며 기존 승인·직인·당사자 검증 유지. |
+| `fd20d88` | 선택적인 AI 일괄 문장 정리: 문장 전체 확인 포장 문구만 수정 후보로 제안. 숫자·실제 미확정 사실·보호 문장은 보존하고, 위험 검토·메모 편집을 대체하거나 자동 저장하지 않음. |
+| `0e353b1` | 품질검토의 인용이 실제 문장과 맞지 않을 때 동일 초안으로 1회 재검증. 그 외 검증은 완화하지 않음. |
+| `11fa92b` | 번역의 통화·단위·Incoterms 등 보호 코드 불일치 문장만 1회 재번역하고 숫자·코드 검증 재수행. 계속 불일치하면 원본 보존. |
+| `39bb6eb` | 계약 AI 완료 단계별 소요 시간을 표시. 계약 원문·계정 비밀을 시간 표시 데이터에 넣지 않음. |
+| `8beb6c7` | `제3자`/`third party`를 수량 3과 구분하되 법률 표현의 출현 횟수를 별도로 비교해 삭제·추가를 차단. 실제 금액·기한 검증 유지. |
+| `ddf4822` | 저장 계약 목록에 언어 표시 `[KR]`/`[EN]` 등을 붙이되 법적 제목은 변경하지 않음. 문장 삭제는 AI 호출 없이 수정안 생성→비교·승인→새 revision 순서이며 기본 커미션 지급 문장은 보호. |
+| `da754b7` | FINAL 서명란을 한 번만 출력하고 당사자·대표자·직책·계약 날짜를 저장값에서 구성. 중복 서명 요약만 제외하며 실질 조항은 보존. 직인은 개인 서명을 대체하지 않음. |
+| `321e1a7` | 한국어 중복 서명 요약 처리, 제목/조항/본문 18/12/10pt 및 비율을 유지한 10cm 폭 직인 배치. |
+| `2f7825e` | PDF/DOCX 글꼴·굵기·간격·정렬 및 서명란 페이지 배치 개선. `packages.txt`에 `fonts-nanum` 추가; 실제 사용 글꼴은 호스트 설치 상태에 따름. |
+| `b59f648` | 알려진 대표자 직책만 계약 출력 언어에 맞춰 표기. 임의로 CEO를 추정하지 않고 알 수 없는 직책은 사용자 입력 보존. |
+| `f335e9e` | 새 매매 초안의 당사자·브랜드·제품/수량·가격·인도·결제 명세를 저장 조건에서 구성. 제안값은 미확정 표시하고 브랜드·100% 선결제를 추정하지 않음. 품질 보완 때 고정 명세를 보존하며 기존 계약을 자동 재작성하지 않음. |
+
+**앞선 오류 수정 기록:** 출처 형식 복구 `5f5e0e6`, 안내 문자열 문법 수정 `987fd16`, 거래조건 분석의 90→180초 제한 및 시간 초과 메시지 구분 `97a6199`도 포함한다. null/단일 객체를 처리하고 검증 불가 문자열 인용은 확인 이슈로 남기며, 허위 인용은 계속 거부한다.
+
+**로컬 작업본과의 차이:** 이번 점검 당시 사용자 작업본 `a314818`은 원격 기준과 분기되어 있다. 사용자가 추가한 번역 약어 차이 상세 메시지는 그 로컬 커밋의 변경이며, 이 대화에서 관련 19개 테스트와 USD→KRW 차이 표시·원본 보존을 확인했다. 원격에는 이후의 보호 코드 1회 재번역 경로가 있으므로 두 동작을 같은 구현으로 설명하지 않는다. 이번 작업은 문서만 정리하며 실행 코드를 병합하거나 변경하지 않는다.
+
+**검증 범위:** `987fd16`의 498개 및 `97a6199`의 501개 전체 테스트 통과는 각 커밋에서 수행한 과거 결과다. 현재 코드 전체 테스트를 이번 문서 점검에서 다시 실행한 것으로 기록하지 않는다. 원격 `f335e9e`의 GitHub Actions 성공은 확인했다(`42749663125`); 이는 자동 검사 결과이며 배포 완료·운영 계약 분석·최종 날인 화면 성공을 증명하지 않는다. 해당 운영 검증은 미확인이다. 이번 문서 검증은 다섯 README의 변경 범위, 코드/커밋 근거, 링크 대상 및 `git diff --check` 대조로 한정한다.
+
+동기화 보호의 한계: `scripts/check_readme_sync.py`와 로컬 pre-commit 훅은 파일 포함 여부만 검사한다. 훅을 실행하지 않는 원격 작업의 문서 누락이나 내용의 정확성까지 보장하지 않는다. 이번 보완은 누락 이력을 현재 문서에 추가한 것이며 과거 커밋의 동시 갱신 규칙 위반을 소급해 없애지는 않는다.
+
+### 2026-11-10 팀 설명·발표 자료 재점검
+
+- 팀 README에 3분 입문 안내, 쉬운 기술 용어, 가상 거래의 처리 과정과 인수인계 역할을 추가했다. 발표 README에 LangGraph 설명, 준비 계약 중심 5분 시연 순서, FAQ 및 지연 시 대체 순서를 정리했다.
+- 발표 대본의 문장 중간에 섞인 Git 명령을 제거하고 현재 계약·무역문서 기능 기준 5분 대본으로 교체했다. 로그인 미구현·437개가 최신 테스트라는 구식 설명 및 임시 서버 가동 주장을 바로잡았다.
+- 문서만 수정했다. 발표용 계약·캡처·파일 준비, 실제 낭독 시간 및 운영 시연 성공은 미확인이다. 준비 자료: [팀 안내](README.md), [발표 안내](../Presentation/README.md), [발표 대본](../Presentation/presentation_script_ko.md).
