@@ -248,11 +248,15 @@ def _audit(snapshot, plan, references, *, env, client, timeout):
 
 def generate_reviewed_draft(snapshot, preferred_clauses, *, env, reference_context=None,
                             transaction_messages=None, client=None, repo=None, use_library=True,
-                            initial_library_sources=None):
+                            initial_library_sources=None, progress_callback=None):
     """Atomic draft -> audit -> at most one repair -> re-audit; max four AI calls."""
     import urllib.request
     client = client or urllib.request.urlopen
     original = validate_snapshot(snapshot)
+    def report(stage):
+        if progress_callback is not None:
+            progress_callback(stage)
+    report('입력 조건 검증')
     if original.get('clauses'):
         raise ValueError('Do not automatically regenerate an existing contract; use the existing revision workflow.')
     # Drafting 13 substantive clauses, auditing every clause, and optionally
@@ -267,21 +271,25 @@ def generate_reviewed_draft(snapshot, preferred_clauses, *, env, reference_conte
             raise RuntimeError('Draft quality time budget exceeded; no draft was saved.')
         return min(150, seconds)
 
+    report('계약서 구성 및 필수 조항 계획')
     plan = build_drafting_plan(original)
     references = deepcopy(reference_context or [])
     library_sources = deepcopy(initial_library_sources or []) if use_library else []
     # Previously retrieved guidance is not implicit consent to send it again.
     original.pop('library_sources', None)
     if repo is not None and use_library:
+        report('승인된 참고자료 검색')
         from Quotation_KEKOREA.contracts.library import search_library_topics
         library = search_library_topics(repo, original, plan['topics'], env=env)
         references.extend(library['references'])
         library_sources.extend(library['sources'])
     references = select_topic_references(references, plan)
+    report('AI 계약서 초안 작성 (API 응답 대기)')
     draft = generate_draft(original, preferred_clauses, env=env, reference_context=references,
                            transaction_messages=transaction_messages, client=client,
                            drafting_plan=plan, request_timeout=remaining())
     _check_identifiers(draft)
+    report('AI 초안 품질 검토 (API 응답 대기)')
     checks = _audit(draft, plan, references, env=env, client=client, timeout=remaining())
     problems = [r for r in checks if r['status'] != 'complete']
     if problems:
@@ -291,6 +299,7 @@ def generate_reviewed_draft(snapshot, preferred_clauses, *, env, reference_conte
         # Standing policy is deterministic and must never be rewritten by AI.
         repairable = [r for r in problems if not r['clause_ids'] or set(r['clause_ids']) & editable]
         if repairable:
+            report('누락·충돌 조항 1회 보완 작성 (API 응답 대기)')
             repaired = generate_draft(original, preferred_clauses, env=env, reference_context=references,
                                       transaction_messages=transaction_messages, client=client,
                                       drafting_plan=plan, request_timeout=remaining(),
@@ -314,6 +323,7 @@ def generate_reviewed_draft(snapshot, preferred_clauses, *, env, reference_conte
             repaired['issues'].extend(deepcopy(i) for i in draft['issues']
                                       if (i.get('code'), i.get('message')) not in existing)
             draft = repaired
+            report('보완 조항 재검토 (API 응답 대기)')
             checks = _audit(draft, plan, references, env=env, client=client, timeout=remaining())
     for row in checks:
         if row['status'] != 'complete':
@@ -324,5 +334,6 @@ def generate_reviewed_draft(snapshot, preferred_clauses, *, env, reference_conte
     # Only report sources actually sent to generation; do not disclose unselected originals.
     used = {r['id'] for r in references}
     draft['library_sources'] = list({s['id']: s for s in library_sources if s['id'] in used}.values())
+    report('검증된 초안 결과 정리')
     remaining()
     return validate_snapshot(draft)

@@ -23,7 +23,7 @@ class ContractDraftState(TypedDict, total=False):
 def generate_contract_draft_graph(snapshot, preferred_clauses, *, env,
                                   reference_context=None, transaction_messages=None,
                                   client=None, repo=None, use_library=True,
-                                  initial_library_sources=None):
+                                  initial_library_sources=None, progress_callback=None):
     """Run guarded contract drafting in isolated LangGraph stages.
 
     Keep the current call signature for the two existing Streamlit entry points.
@@ -44,6 +44,7 @@ def generate_contract_draft_graph(snapshot, preferred_clauses, *, env,
             reference_context=reference_context,
             transaction_messages=transaction_messages, client=client, repo=repo,
             use_library=use_library, initial_library_sources=initial_library_sources,
+            progress_callback=progress_callback,
         )
         return {"draft": result}
 
