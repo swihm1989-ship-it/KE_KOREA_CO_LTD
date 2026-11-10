@@ -255,13 +255,17 @@ def generate_reviewed_draft(snapshot, preferred_clauses, *, env, reference_conte
     original = validate_snapshot(snapshot)
     if original.get('clauses'):
         raise ValueError('Do not automatically regenerate an existing contract; use the existing revision workflow.')
-    deadline = time.monotonic() + 180
+    # Drafting 13 substantive clauses, auditing every clause, and optionally
+    # repairing them can exceed a 60-second request window even when the API
+    # is healthy. Bound each call and the complete pipeline independently.
+    # Preserve fail-closed behavior: no unreviewed or partial draft is saved.
+    deadline = time.monotonic() + 600
 
     def remaining():
         seconds = deadline - time.monotonic()
         if seconds <= 0:
             raise RuntimeError('Draft quality time budget exceeded; no draft was saved.')
-        return min(60, seconds)
+        return min(150, seconds)
 
     plan = build_drafting_plan(original)
     references = deepcopy(reference_context or [])

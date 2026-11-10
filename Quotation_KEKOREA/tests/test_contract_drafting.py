@@ -201,8 +201,21 @@ class DraftingTests(unittest.TestCase):
         self.assertNotIn('PRIVATE', json.dumps(result))
         self.assertNotIn('INVESTMENT ONLY', json.dumps(result))
 
+    def test_reviewed_draft_uses_extended_bounded_request_timeout(self):
+        timeouts = []
+        respond = self.opener(complete=True)
+
+        def record_timeout(request, timeout):
+            timeouts.append(timeout)
+            return respond(request, timeout)
+
+        generate_reviewed_draft(self.snapshot, [], env=ENV, client=record_timeout)
+        self.assertEqual(len(timeouts), 2)
+        self.assertTrue(all(0 < value <= 150 for value in timeouts))
+        self.assertTrue(all(value > 60 for value in timeouts))
+
     def test_expired_pipeline_budget_cannot_return_a_draft(self):
-        with patch('Quotation_KEKOREA.contracts.drafting.time.monotonic', side_effect=[0, 181]):
+        with patch('Quotation_KEKOREA.contracts.drafting.time.monotonic', side_effect=[0, 601]):
             with self.assertRaisesRegex(RuntimeError, 'time budget'):
                 generate_reviewed_draft(self.snapshot, [], env=ENV, client=self.opener())
         self.assertEqual(self.calls, [])
