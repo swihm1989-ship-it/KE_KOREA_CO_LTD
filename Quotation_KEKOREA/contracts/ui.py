@@ -4,6 +4,7 @@ from Quotation_KEKOREA.contracts.latest_instruction import (
 )
 """Streamlit UI for private contract drafting, review, revision and export."""
 import hashlib
+import time
 import hmac
 import re
 from pathlib import Path
@@ -14,7 +15,7 @@ from uuid import NAMESPACE_URL, uuid4, uuid5
 import streamlit as st
 
 from Quotation_KEKOREA.contracts.editing import (
-    RevisionConflict, apply_proposal, restore_revision,
+    RevisionConflict, apply_proposal, restore_revision, propose_sentence_deletion,
 )
 from Quotation_KEKOREA.contracts.exports import export_contract
 from Quotation_KEKOREA.contracts.contract_versions import copy_contract, translate_contract, localized_term_label
@@ -24,7 +25,11 @@ from Quotation_KEKOREA.contracts.draft_exports import export_draft
 from Quotation_KEKOREA.contracts.workspace import collect_notes, propose_notes_revision
 from Quotation_KEKOREA.contracts.final_merge import merge_revision_requests
 from Quotation_KEKOREA.contracts.risk_review_ui import render_risk_review
+from Quotation_KEKOREA.contracts.bulk_cleanup import candidate_sentences, propose_bulk_signature_cleanup
 from Quotation_KEKOREA.contracts.models import new_snapshot, validate_snapshot
+from Quotation_KEKOREA.contracts.legacy_recovery import (
+    prepare_duplicate_term_recovery, has_legacy_duplicate_term_keys,
+)
 from Quotation_KEKOREA.contracts.library import search_library
 from Quotation_KEKOREA.contracts.review_summary import review_cards
 from Quotation_KEKOREA.contracts.library_ui import render_library_admin, show_library_sources
@@ -41,11 +46,26 @@ from Quotation_KEKOREA.contracts.rules import (
     LABELS, TYPE_REQUIRED, apply_analysis, validate_snapshot as validate_rules,
 )
 from Quotation_KEKOREA.contracts.service import (
-    analyze_trade, conversation_response_language, extract_reference_page, language_conflict,
+    conversation_response_language, extract_reference_page, language_conflict,
     propose_revision, propose_term_revision,
 )
 from Quotation_KEKOREA.contracts.flow import should_generate_draft, select_new_questions
-from Quotation_KEKOREA.contracts.drafting import generate_reviewed_draft as generate_draft
+from Quotation_KEKOREA.contracts.ai_graph import (
+    generate_contract_draft_graph as generate_draft,
+    analyze_contract_terms_graph as analyze_trade,
+)
+
+
+LANGUAGE_SUFFIXES = {"ko": "KR", "en": "EN", "zh": "CN", "zh-CN": "CN",
+                     "cn": "CN", "id": "IDN", "idn": "IDN"}
+
+
+def contract_list_label(record):
+    """Language is view metadata, not part of the legal contract title."""
+    title = str(record.get("title") or "Contract")
+    language = str(record.get("language") or "").strip()
+    suffix = LANGUAGE_SUFFIXES.get(language, LANGUAGE_SUFFIXES.get(language.lower()))
+    return f"{title} [{suffix}]" if suffix else title
 
 
 TYPE_LABELS = {
@@ -146,7 +166,49 @@ def _load_snapshot(repo, contract_id):
     snapshot = row.get("snapshot")
     if not isinstance(snapshot, dict):
         raise ContractRepositoryError("Saved contract data is not a valid snapshot.")
+    if has_legacy_duplicate_term_keys(snapshot):
+        raise ValueError("Contract term keys must be unique")
     return validate_snapshot(snapshot), revisions
+
+
+def _render_legacy_recovery(repo, contract_id):
+    """Keep malformed historical revisions unchanged until explicit review."""
+    try:
+        revisions = repo.load_contract(contract_id)
+        if not revisions:
+            raise ContractRepositoryError("No saved contract revision was found.")
+        latest = max(revisions, key=lambda row: int(row.get("revision", 0)))
+        original = latest["snapshot"]
+        candidate, collisions = prepare_duplicate_term_recovery(original)
+        if not collisions:
+            st.error("저장된 계약 데이터를 확인할 수 없습니다. 관리자 검토가 필요합니다.")
+            return
+        st.warning("저장된 계약에 중복 거래조건이 있습니다. 원본은 그대로 유지됩니다. 아래 복구 후보를 확인하고 명시적으로 승인해야 새 Revision으로 저장됩니다.")
+        with st.expander("중복 거래조건 비교 (원본 읽기 전용)", expanded=True):
+            for group in collisions:
+                st.markdown(f"**{group['key']}** — 후보 {len(group['candidates'])}개")
+                for term in group["candidates"]:
+                    marker = " (유지 후보)" if term.get("id") == group["selected_id"] else ""
+                    st.write(f"{term.get('key')} | {term.get('value')} | {term.get('unit') or ''} | {term.get('currency') or ''} | {term.get('status')}{marker}")
+            st.caption("충돌값은 자동으로 확정되지 않습니다. 복구 후 BOX 2에서 반드시 검토하세요.")
+        consent = st.checkbox(
+            "중복 조건의 유지 후보와 원본 충돌 기록을 검토했으며, 새 Revision으로 복구하겠습니다.",
+            key=f"legacy_recovery_ack_{contract_id}",
+        )
+        if st.button("검토한 중복 조건 복구 저장", disabled=not consent,
+                     key=f"legacy_recovery_commit_{contract_id}"):
+            # Create a new revision instead of modifying historical revisions.
+            candidate["legacy_term_recovery_history"] = candidate.pop("_term_recovery_pending", [])
+            saved = _save_snapshot(
+                repo, candidate, "User-approved historical duplicate term recovery",
+                expected_revision=int(original["revision"]),
+            )
+            st.session_state[f"contract_snapshot_{contract_id}"] = saved
+            st.session_state.pop("contract_revisions", None)
+            st.success("기존 Revision을 보존하고 새 Revision으로 복구했습니다.")
+            st.rerun()
+    except (ValueError, ContractRepositoryError) as exc:
+        st.error(f"저장 계약 복구 준비 실패: {exc}")
 
 
 def _rows(value):
@@ -291,8 +353,10 @@ def _new_contract(repo, title, contract_type, language, initial_snapshot=None):
 def _ensure_active_snapshot(repo, active_id):
     state_key = f"contract_snapshot_{active_id}"
     if state_key in st.session_state:
-        snapshot = validate_snapshot(st.session_state[state_key])
-        return snapshot
+        snapshot = st.session_state[state_key]
+        if has_legacy_duplicate_term_keys(snapshot):
+            raise ValueError("Contract term keys must be unique")
+        return validate_snapshot(snapshot)
     snapshot, revisions = _load_snapshot(repo, active_id)
     st.session_state[state_key] = snapshot
     st.session_state["contract_revisions"] = revisions
@@ -394,6 +458,26 @@ def _references_panel(repo, contract_id, env):
                     st.rerun()
 
 
+def _timed_contract_progress(status):
+    """Show timing of completed stages without logging contract terms or API data."""
+    previous = [None]
+    started_at = [time.perf_counter()]
+
+    def tick(stage):
+        now = time.perf_counter()
+        if previous[0] is not None:
+            status.write(f"{previous[0]} · {now - started_at[0]:.1f}초")
+        previous[0] = stage
+        started_at[0] = now
+        status.update(label=f"계약서 AI · {stage}", state="running")
+
+    def finish():
+        if previous[0] is not None:
+            status.write(f"{previous[0]} · {time.perf_counter() - started_at[0]:.1f}초")
+
+    return tick, finish
+
+
 def _render_revision_preview(snapshot, heading):
     """Display the complete saved or proposed clause text, never implicitly approve it."""
     st.markdown(f'#### {heading}')
@@ -428,7 +512,7 @@ def _proposal_panel(repo, snapshot, proposal, state_key):
             st.caption("수정 전")
             st.write(change.get("original_text") or "—")
             st.caption("수정 후")
-            st.write(change.get("proposed_text") or "—")
+            st.write("**삭제 예정**" if change.get("delete_sentence") else (change.get("proposed_text") or "—"))
             if change.get("reason"):
                 st.caption("변경 이유: " + change["reason"])
             if is_required:
@@ -752,6 +836,20 @@ def _render_draft(repo, snapshot, state_key, env):
                                 st.button("메모 삭제", key=f"contract_note_remove_{contract_id}_{sentence_id}",
                                           on_click=_remove_note, args=(repo, snapshot, sentence_id, saved_notes,
                                                                       buffer_key, open_key, widget_key))
+                            # Deletion is a normal, reversible revision proposal,
+                            # never an immediate change to an approved contract.
+                            pending_proposal = st.session_state.get('contract_pending_proposal') or {}
+                            pending_here = pending_proposal.get('contract_id') == contract_id
+                            if st.button("문장 삭제", key=f"contract_delete_sentence_{contract_id}_{sentence_id}",
+                                         disabled=pending_here,
+                                         help="삭제 전 전체 계약서 비교·승인 단계가 표시됩니다."):
+                                try:
+                                    proposal = propose_sentence_deletion(snapshot, sentence_id)
+                                    st.session_state['contract_pending_proposal'] = proposal
+                                    st.session_state['contract_pending_proposal_key'] = state_key
+                                    st.rerun()
+                                except (ValueError, RevisionConflict) as exc:
+                                    st.error(str(exc))
                             if st.button("메모 닫기", key=f"contract_note_close_{contract_id}_{sentence_id}"):
                                 buffers[sentence_id] = note
                                 opened.remove(sentence_id)
@@ -980,11 +1078,23 @@ def _export_panel(repo, snapshot, env):
             st.caption('BOX 3에 실제 계약 조항을 먼저 생성하세요.')
     with final_col:
         st.markdown('**FINAL / 최종 계약서**')
-        blockers = final_document_blockers(snapshot)
+        # A user may export the actual saved wording without being forced to
+        # accept every AI suggestion. Unresolved wording is never silently erased
+        # or treated as an agreed commercial fact.
+        strict_blockers = final_document_blockers(snapshot)
+        has_unresolved = any('BOX 3에 임시 확인 문구' in message for message in strict_blockers)
+        allow_unresolved = False
+        if has_unresolved:
+            st.warning('본문에 [서명 전 확인] 등 미확정 문구가 있습니다. 조항은 그대로 출력되며, 그 내용이 합의되었다는 뜻은 아닙니다.')
+            allow_unresolved = st.checkbox(
+                '미확정 문구가 남아 있는 현재 계약 본문을 그대로 최종 파일로 내보내는 데 동의합니다.',
+                key=f"contract_final_allow_unresolved_{snapshot['contract_id']}_{snapshot['revision']}",
+            )
+        blockers = final_document_blockers(snapshot, allow_unresolved_text=allow_unresolved)
         if issues:
-            st.caption(f'내부 검토사항 {len(issues)}건은 PDF에 출력되지 않습니다. 최종 승인 전 내용을 확인하세요.')
+            st.caption(f'AI 검토사항 {len(issues)}건은 권고사항이며 전부 선택할 필요는 없습니다. 파일에는 현재 저장된 본문만 포함됩니다.')
         if blockers:
-            st.warning(f'FINAL 생성 전 수정할 계약 본문/당사자 항목: {len(blockers)}건. BOX 3에서 남은 항목을 수정한 뒤 새 revision을 승인하세요.')
+            st.warning(f'최종 파일 생성 전 확인이 필요한 조건 {len(blockers)}건')
         for message in blockers:
             st.error(message)
         approval_key = f"contract_final_approved_{snapshot['contract_id']}_{snapshot['revision']}"
@@ -1009,7 +1119,7 @@ def _export_panel(repo, snapshot, env):
             button_key = f"contract_export_final_{snapshot['contract_id']}_{snapshot['revision']}_{ext}"
             if st.button(f'최종 계약서 {ext.upper()}', disabled=disabled, key=button_key):
                 try:
-                    if final_document_blockers(snapshot) or not approved or not authorized:
+                    if final_document_blockers(snapshot, allow_unresolved_text=allow_unresolved) or not approved or not authorized:
                         raise ValueError('현재 계약 본문 승인과 직인 사용 권한 확인이 필요합니다.')
                     outputs = export_contract(snapshot, formats=(ext,), seal_bytes=_verified_contract_seal(env))
                     local_key=f"contract_unsaved_output_final_{snapshot['contract_id']}_{snapshot['revision']}_{ext}"
@@ -1117,10 +1227,10 @@ def _run_editor(repo, snapshot, state_key, env):
             "currency": st.column_config.TextColumn("Currency" if snapshot.get("language") == "en" else "통화"),
             "status": st.column_config.SelectboxColumn(
                 "상태", options=["확인 필요", "AI 제안", "확정", "TBD 유지"],
-                required=True, help="확정은 명시적으로 승인한 값만 선택하세요. TBD는 최종본을 차단하는 미확정 상태입니다."),
+                required=True, help="확정은 명시적으로 승인한 값만 선택하세요. 미확정 항목도 경고를 확인한 후 현재 본문 그대로 출력할 수 있습니다."),
         },
     )
-    st.caption("확정=사용자 승인, AI 제안=미승인 후보, 확인 필요·TBD 유지=미확정. 검토용 초안은 가능하며 최종본만 검증합니다.")
+    st.caption("확정=사용자 승인, AI 제안=미승인 후보, 확인 필요·TBD 유지=미확정. 모든 AI 제안을 승인할 필요는 없으며 미확정 문구는 별도 동의 후 본문 그대로 출력할 수 있습니다.")
     st.markdown('<span id="contract-parties"></span>', unsafe_allow_html=True)
     st.markdown("#### Contract parties and roles" if snapshot.get("language") == "en" else "#### 당사자 및 역할")
     party_rows = st.data_editor(
@@ -1304,11 +1414,19 @@ def _contract_chat(repo, snapshot, state_key, env):
                              if clause.get("active")
                              and updated["contract_type"] in clause.get("contract_types", [])
                              and clause.get("language") == updated["language"]]
-                with st.spinner("확인되지 않은 항목을 표시하고 계약서 초안을 작성합니다..."):
-                    updated = generate_draft(
-                        updated, preferred, env=env, reference_context=selected_context,
-                        transaction_messages=prior_messages, repo=repo, use_library=use_library,
-                        initial_library_sources=library_result['sources'])
+                with st.status("계약서 AI 실행 단계 준비 중", expanded=True) as draft_status:
+                    progress, finish_timing = _timed_contract_progress(draft_status)
+                    try:
+                        updated = generate_draft(
+                            updated, preferred, env=env, reference_context=selected_context,
+                            transaction_messages=prior_messages, repo=repo, use_library=use_library,
+                            initial_library_sources=library_result['sources'],
+                            progress_callback=progress)
+                    except Exception:
+                        draft_status.update(label="계약서 AI 실행 실패 · 기존 초안 유지", state="error")
+                        raise
+                    finish_timing()
+                    draft_status.update(label="계약서 AI 초안 품질 검토 완료", state="complete")
                 made_draft = True
             if snapshot.get("clauses"):
                 st.session_state[f"contract_pending_analysis_{snapshot['contract_id']}"] = {
@@ -1427,6 +1545,46 @@ def _contract_chat(repo, snapshot, state_key, env):
                 st.write(f"- {question}")
 
 
+def _bulk_cleanup_panel(snapshot, env):
+    """Separate optional action; never overwrites pending risk or note proposals."""
+    targets = candidate_sentences(snapshot)
+    if not targets:
+        return
+    with st.expander("AI 일괄 문장 정리 · 서명 전 확인 문구", expanded=False):
+        st.caption(
+            f"현재 계약서에서 일괄 정리 후보 {len(targets)}문장을 찾았습니다. "
+            "합의되지 않은 거래조건은 AI가 임의로 확정하지 않으며, "
+            "기존 AI 핵심 위험 검토와 문장 메모는 그대로 유지됩니다."
+        )
+        existing = st.session_state.get('contract_pending_proposal') or {}
+        busy = bool(existing and existing.get('contract_id') == snapshot['contract_id'])
+        preview = st.session_state.get(f"contract_risk_preview_{snapshot['contract_id']}") or {}
+        risk_selected = bool(preview.get('revision') == snapshot['revision']
+                             and preview.get('sentences'))
+        if risk_selected:
+            st.info(
+                "AI 핵심 위험 검토에서 선택한 미저장 수정안이 있습니다. "
+                "기존 추천안을 먼저 비교·승인하거나 취소한 뒤 일괄 정리를 실행하세요."
+            )
+        if busy:
+            st.info("검토 중인 수정 제안이 있습니다. 먼저 적용하거나 취소해 주세요.")
+        if st.button(
+            "AI 일괄 문장 정리 제안 만들기",
+            key=f"contract_bulk_cleanup_{snapshot['contract_id']}_{snapshot['revision']}",
+            disabled=busy or risk_selected,
+        ):
+            try:
+                with st.spinner("불필요한 확인 문구만 찾아 일괄 수정안을 작성합니다..."):
+                    proposal = propose_bulk_signature_cleanup(snapshot, env=env)
+                st.session_state['contract_pending_proposal'] = proposal
+                st.session_state['contract_pending_proposal_key'] = (
+                    f"contract_snapshot_{snapshot['contract_id']}"
+                )
+                st.rerun()
+            except (ValueError, RuntimeError, ContractRepositoryError) as exc:
+                st.error(f"AI 문장 정리 실패: {exc}")
+
+
 def render_contract_page(page, env):
     """Render a contract workflow without changing the existing sidebar definition."""
     st.markdown('<div class="ke-header"><div class="ke-eyebrow">KE KOREA · CONTRACT WORKSPACE</div>'
@@ -1469,16 +1627,14 @@ def render_contract_page(page, env):
             contract_id = str(record["id"])
             title_col, delete_col = st.columns([12, 1])
             if title_col.button(
-                record["title"], key=f"contract_open_{page}_{contract_id}",
+                contract_list_label(record), key=f"contract_open_{page}_{contract_id}",
                 use_container_width=True,
             ):
                 st.session_state["contract_active_id"] = contract_id
                 st.session_state.pop(f"contract_snapshot_{contract_id}", None)
-                try:
-                    _ensure_active_snapshot(repo, contract_id)
-                    st.rerun()
-                except (ValueError, ContractRepositoryError) as exc:
-                    st.error(str(exc))
+                # Loading and legacy-revision recovery are handled below;
+                # opening a corrupt historical snapshot must not block access.
+                st.rerun()
             if delete_col.button("X", key=f"contract_delete_{contract_id}",
                                  help=f"{record['title']} 삭제"):
                 st.session_state["contract_delete_pending_id"] = contract_id
@@ -1496,7 +1652,13 @@ def render_contract_page(page, env):
         return
     try:
         snapshot = _ensure_active_snapshot(repo, active_id)
-    except (ValueError, ContractRepositoryError) as exc:
+    except ValueError as exc:
+        if "Contract term keys must be unique" in str(exc):
+            _render_legacy_recovery(repo, active_id)
+        else:
+            st.error(str(exc))
+        return
+    except ContractRepositoryError as exc:
         st.error(str(exc))
         return
     state_key = f"contract_snapshot_{active_id}"
@@ -1594,12 +1756,21 @@ def render_contract_page(page, env):
                         reference_context += library_result['references']
                         for message in library_result['notices']:
                             st.warning(message)
-                    draft = generate_draft(
-                        snapshot, preferred, env=env, reference_context=reference_context,
-                        transaction_messages=repo.list_messages(active_id),
-                        repo=repo, use_library=st.session_state.get(f'contract_use_library_{active_id}', True),
-                        initial_library_sources=library_result['sources'],
-                    )
+                    with st.status("계약서 AI 실행 단계 준비 중", expanded=True) as draft_status:
+                        progress, finish_timing = _timed_contract_progress(draft_status)
+                        try:
+                            draft = generate_draft(
+                                snapshot, preferred, env=env, reference_context=reference_context,
+                                transaction_messages=repo.list_messages(active_id),
+                                repo=repo, use_library=st.session_state.get(f'contract_use_library_{active_id}', True),
+                                initial_library_sources=library_result['sources'],
+                                progress_callback=progress,
+                            )
+                        except Exception:
+                            draft_status.update(label="계약서 AI 실행 실패 · 기존 초안 유지", state="error")
+                            raise
+                        finish_timing()
+                        draft_status.update(label="계약서 AI 초안 품질 검토 완료", state="complete")
                     saved = _save_snapshot(repo, draft, "AI generated contract draft")
                     st.session_state[state_key] = saved
                     st.success(f"초안을 revision {saved['revision']}로 저장했습니다.")
@@ -1688,6 +1859,7 @@ def render_contract_page(page, env):
         else:
             pending, buffers = _render_draft(repo, snapshot, state_key, env)
         if snapshot.get('clauses'):
+            _bulk_cleanup_panel(snapshot, env)
             render_risk_review(repo, snapshot, state_key, env)
             with st.expander("Revision 기록 및 복원", expanded=False):
                 revisions = st.session_state.get("contract_revisions")

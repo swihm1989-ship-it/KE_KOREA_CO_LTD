@@ -97,14 +97,29 @@ class ContractWorkspaceUiTests(unittest.TestCase):
         self.assertFalse(self.repo.records)
         self.assertTrue(self.at.error)
 
+    def test_legacy_duplicate_contract_displays_recovery_without_silent_save(self):
+        self.seed('legacy', 'sale', 'Legacy Supply')
+        original = self.repo.revisions['legacy'][0]['snapshot']
+        original['terms'] = [
+            {'id': 't1', 'key': 'quantity', 'value': '10', 'unit': 'PCS', 'status': 'confirmed'},
+            {'id': 't2', 'key': '수량', 'value': '11', 'unit': 'PCS', 'status': 'suggested'},
+        ]
+        self.run_app()
+        next(b for b in self.at.button if b.label == 'Legacy Supply [EN]').click()
+        self.run_app()
+        self.assertEqual(len(self.repo.revisions['legacy']), 1)
+        self.assertTrue(any('중복 거래조건' in m.value for m in self.at.warning))
+        self.assertTrue(next(b for b in self.at.button
+                             if b.label == '검토한 중복 조건 복구 저장').disabled)
+
     def test_all_types_can_be_opened_from_one_menu_without_title_decorations(self):
         self.seed('sale', 'sale', 'Example Supply')
         self.seed('investment', 'investment_commission', 'Example FI')
         self.seed('trade', 'trade_commission', 'Example Referral')
         self.run_app()
         titles = {item.label for item in self.at.button}
-        self.assertTrue({'Example Supply', 'Example FI', 'Example Referral'}.issubset(titles))
-        next(item for item in self.at.button if item.label == 'Example FI').click()
+        self.assertTrue({'Example Supply [EN]', 'Example FI [EN]', 'Example Referral [EN]'}.issubset(titles))
+        next(item for item in self.at.button if item.label == 'Example FI [EN]').click()
         self.run_app()
         self.assertIn('## Example FI', [item.value for item in self.at.markdown])
         self.run_app()
@@ -116,13 +131,27 @@ class ContractWorkspaceUiTests(unittest.TestCase):
             if {'key', '항목'}.issubset(item.value.columns)
         ))
 
+    def test_saved_list_suffix_respects_record_language_not_legal_title(self):
+        from Quotation_KEKOREA.contracts.ui import contract_list_label
+        self.assertEqual(contract_list_label({'title': '거래 계약', 'language': 'ko'}), '거래 계약 [KR]')
+        self.assertEqual(contract_list_label({'title': 'Sale Agreement', 'language': 'en'}), 'Sale Agreement [EN]')
+        self.assertEqual(contract_list_label({'title': '销售合同', 'language': 'zh'}), '销售合同 [CN]')
+        self.assertEqual(contract_list_label({'title': 'Perjanjian', 'language': 'id'}), 'Perjanjian [IDN]')
+        self.assertEqual(contract_list_label({'title': 'Unknown', 'language': 'fr'}), 'Unknown')
+        self.seed('korean', 'sale', '원래 제목')
+        self.repo.records['korean']['language'] = 'ko'
+        self.repo.revisions['korean'][0]['snapshot']['language'] = 'ko'
+        self.run_app()
+        self.assertIn('원래 제목 [KR]', [button.label for button in self.at.button])
+        self.assertEqual(self.repo.records['korean']['title'], '원래 제목')
+
     def test_saved_contract_list_renders_without_undefined_options(self):
         self.seed('first', 'sale', 'First contract')
         self.seed('second', 'trade_commission', 'Second contract')
         self.run_app()
         labels = [item.label for item in self.at.button]
-        self.assertIn('First contract', labels)
-        self.assertIn('Second contract', labels)
+        self.assertIn('First contract [EN]', labels)
+        self.assertIn('Second contract [EN]', labels)
         self.assertEqual(labels.count('X'), 2)
 
     def test_contract_chat_history_keeps_older_messages_collapsed(self):

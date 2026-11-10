@@ -6,32 +6,129 @@ import re
 
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.shared import Inches, Pt
+from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
+from docx.oxml import OxmlElement
+from docx.shared import Inches, Pt, Cm
 from pathlib import Path
 from reportlab.platypus import Image as PdfImage
+from reportlab.platypus import Table as PdfTable, TableStyle
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import (
-    KeepTogether, PageBreak, Paragraph, SimpleDocTemplate, Spacer,
+    KeepTogether, Paragraph, SimpleDocTemplate, Spacer,
 )
+
+
+from Quotation_KEKOREA.contracts.signature_layout import (
+    authored_clauses_for_final, signature_blocks,
+)
+
+def _pdf_font_pair():
+    # Malgun Gothic can be supplied by the host OS; never bundle licensed fonts.
+    regulars = ["/usr/share/fonts/truetype/malgun.ttf",
+                "C:/Windows/Fonts/malgun.ttf",
+                "/usr/share/fonts/truetype/nanum/NanumGothic.ttf"]
+    bolds = ["/usr/share/fonts/truetype/malgunbd.ttf",
+             "C:/Windows/Fonts/malgunbd.ttf",
+             "/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf"]
+    for regular, bold in zip(regulars, bolds):
+        if Path(regular).is_file() and Path(bold).is_file():
+            pdfmetrics.registerFont(TTFont("ContractBodyFont", regular))
+            pdfmetrics.registerFont(TTFont("ContractBoldFont", bold))
+            return "ContractBodyFont", "ContractBoldFont"
+    pdfmetrics.registerFont(UnicodeCIDFont("HYGothic-Medium"))
+    return "HYGothic-Medium", "HYGothic-Medium"
+
+
+def _stamp_width_height(image, target_width=283.46, max_height=115):
+    width = target_width
+    height = width * image.imageHeight / image.imageWidth
+    if height > max_height:
+        width *= max_height / height
+        height = max_height
+    return width, height
+
+
+def _setup_docx_fonts(document):
+    from docx.oxml.ns import qn
+    for name, size, bold in (("Normal", 10, False), ("Title", 18, True),
+                             ("Heading 1", 18, True), ("Heading 2", 12, True)):
+        style = document.styles[name]
+        style.font.name = "Malgun Gothic"
+        style.font.size = Pt(size)
+        style.font.bold = bold
+        rpr = style.element.get_or_add_rPr()
+        fonts = rpr.rFonts
+        if fonts is None:
+            fonts = OxmlElement("w:rFonts")
+            rpr.insert(0, fonts)
+        for attribute in ("w:ascii", "w:hAnsi", "w:eastAsia", "w:cs"):
+            fonts.set(qn(attribute), "Malgun Gothic")
 
 
 def _plain_lines(snapshot):
     lines = [snapshot.get("title") or "Contract", ""]
-    for clause in sorted(snapshot.get("clauses", []), key=lambda item: item.get("order", 0)):
-        lines.append(clause.get("title") or "")
-        lines.extend(sentence["text"] for sentence in clause.get("sentences", []))
+    for title, sentences in authored_clauses_for_final(snapshot):
+        if title:
+            lines.append(title)
+        lines.extend(sentence["text"] for sentence in sentences)
         lines.append("")
     lines.extend(["SIGNATURES", ""])
-    for party in snapshot.get("parties", []):
-        role = ", ".join(party.get("roles", []))
-        lines.extend([f"{party.get('legal_name') or role}", "By: ______________________________",
-                      "Name / Title: _____________________", "Date: ____________________________", ""])
+    for block in signature_blocks(snapshot):
+        lines.extend([f"{block['label']} - Company: {block['company']}",
+                      f"Name / Title: {block['name_title']}",
+                      f"Date: {block['date']}", "Signature: __________________", ""])
     return lines
+
+
+def _docx_signature_section(document, snapshot, seal_bytes):
+    """Keep both signers together, and place the authorized seal on its signature row."""
+    heading = document.add_heading("서명" if snapshot.get("language") == "ko" else "SIGNATURES", level=1)
+    heading.paragraph_format.keep_with_next = True
+    heading.paragraph_format.space_before = Pt(18)
+    heading.paragraph_format.space_after = Pt(14)
+    blocks = signature_blocks(snapshot)
+    table = document.add_table(rows=0, cols=2)
+    table.autofit = False
+    table.columns[0].width = Cm(6.25)
+    table.columns[1].width = Cm(10.0)
+    content_rows = []
+    for index, block in enumerate(blocks):
+        if index:
+            row = table.add_row()
+            row.cells[0].text = " "
+            row.cells[1].text = ""
+            content_rows.append(row)
+        label_row = table.add_row()
+        label_row.cells[0].text = block['label']
+        for para in label_row.cells[0].paragraphs:
+            para.style = document.styles['Heading 2']
+        content_rows.append(label_row)
+        fields = (
+            ("Company", block['company']), ("Name / Title", block['name_title']),
+            ("Date", block['date']), ("Signature", "________________________")
+        )
+        for field, value in fields:
+            row = table.add_row()
+            row.cells[0].text = f"{field}: {value}"
+            row.cells[0].vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+            row.cells[1].vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+            if field == "Signature" and seal_bytes is not None and _is_ke_korea_party(block['party']):
+                row.cells[1].paragraphs[0].add_run().add_picture(
+                    io.BytesIO(seal_bytes), width=Cm(10.0))
+            content_rows.append(row)
+    for index, row in enumerate(content_rows):
+        row_pr = row._tr.get_or_add_trPr()
+        row_pr.append(OxmlElement('w:cantSplit'))
+        for cell in row.cells:
+            for paragraph in cell.paragraphs:
+                paragraph.paragraph_format.space_after = Pt(5)
+                paragraph.paragraph_format.keep_with_next = index < len(content_rows) - 1
 
 
 def _docx(snapshot, seal_bytes=None):
@@ -41,81 +138,91 @@ def _docx(snapshot, seal_bytes=None):
     section.bottom_margin = Inches(0.75)
     section.left_margin = Inches(0.85)
     section.right_margin = Inches(0.85)
-    normal = document.styles["Normal"]
-    normal.font.name = "Malgun Gothic" if snapshot.get("language") == "ko" else "Arial"
-    normal.font.size = Pt(10)
-    title = document.add_heading(snapshot.get("title") or "Contract", level=0)
+    _setup_docx_fonts(document)
+    title = document.add_paragraph(snapshot.get("title") or "Contract", style="Title")
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    for clause in sorted(snapshot.get("clauses", []), key=lambda item: item.get("order", 0)):
-        heading = document.add_heading(clause.get("title") or "", level=2)
-        heading.paragraph_format.keep_with_next = True
-        for sentence in clause.get("sentences", []):
+    title.paragraph_format.space_after = Pt(20)
+    for title, sentences in authored_clauses_for_final(snapshot):
+        if title:
+            heading = document.add_heading(title, level=2)
+            heading.paragraph_format.keep_with_next = True
+        for sentence in sentences:
             paragraph = document.add_paragraph(sentence["text"])
-            paragraph.paragraph_format.space_after = Pt(6)
+            paragraph.paragraph_format.space_after = Pt(9)
+            paragraph.paragraph_format.line_spacing = 1.55
             paragraph.paragraph_format.widow_control = True
-    if _has_authored_signature_clause(snapshot):
-        if seal_bytes is not None:
-            document.add_picture(io.BytesIO(seal_bytes), width=Inches(1.1))
-    else:
-        document.add_page_break()
-        document.add_heading("서명" if snapshot.get("language") == "ko" else "SIGNATURES", level=1)
-        for party in snapshot.get("parties", []):
-            roles = ", ".join(party.get("roles", []))
-            document.add_heading(party.get("legal_name") or roles, level=2)
-            if seal_bytes is not None and _is_ke_korea_party(party):
-                document.add_picture(io.BytesIO(seal_bytes), width=Inches(1.1))
-            document.add_paragraph("By: __________________________________")
-            document.add_paragraph("Name / Title: __________________________")
-            document.add_paragraph("Date: __________________________________")
+    _docx_signature_section(document, snapshot, seal_bytes)
     output = io.BytesIO()
     document.save(output)
     return output.getvalue()
 
 
-def _pdf(snapshot, seal_bytes=None):
-    font_name = "Helvetica"
-    if snapshot.get("language") == "ko":
-        font_name = "HYGothic-Medium"
-        pdfmetrics.registerFont(UnicodeCIDFont(font_name))
-    styles = getSampleStyleSheet()
-    title_style = ParagraphStyle("ContractTitle", parent=styles["Title"], fontName=font_name,
-                                 fontSize=16, leading=22, alignment=TA_CENTER, spaceAfter=24)
-    heading_style = ParagraphStyle("ContractHeading", parent=styles["Heading2"], fontName=font_name,
-                                   fontSize=11, leading=16, textColor=colors.HexColor("#092b4c"),
-                                   spaceBefore=12, spaceAfter=6, keepWithNext=True)
-    body_style = ParagraphStyle("ContractBody", parent=styles["BodyText"], fontName=font_name,
-                                fontSize=9.5, leading=15, spaceAfter=7, splitLongWords=True)
-    story = [Paragraph(escape(snapshot.get("title") or "Contract"), title_style)]
-    for clause in sorted(snapshot.get("clauses", []), key=lambda item: item.get("order", 0)):
-        heading = Paragraph(escape(clause.get("title") or ""), heading_style)
-        sentences = [Paragraph(escape(sentence["text"]).replace("\n", "<br/>"), body_style)
-                     for sentence in clause.get("sentences", [])]
-        if sentences:
-            story.append(KeepTogether([heading, sentences[0]]))
-            story.extend(sentences[1:])
-        else:
-            story.append(heading)
-    if _has_authored_signature_clause(snapshot):
-        if seal_bytes is not None:
+def _pdf_signature_section(snapshot, heading_style, body_style, seal_bytes):
+    """Flowable signature section; use current page if it all fits, else next."""
+    blocks = signature_blocks(snapshot)
+    signature_style = ParagraphStyle(
+        "ContractSignatures", parent=heading_style, fontSize=18, leading=25,
+        spaceBefore=16, spaceAfter=14,
+    )
+    label_style = ParagraphStyle(
+        "ContractSignerLabel", parent=heading_style, fontSize=12, leading=18,
+        spaceBefore=8, spaceAfter=8,
+    )
+    section = [Paragraph("서명" if snapshot.get("language") == "ko" else "SIGNATURES",
+                         signature_style)]
+    for index, block in enumerate(blocks):
+        if index:
+            section.append(Spacer(1, 14))
+        section.append(Paragraph(escape(block['label']), label_style))
+        for field, value in (
+            ("Company", block['company']), ("Name / Title", block['name_title']),
+            ("Date", block['date'])
+        ):
+            section.append(Paragraph(escape(f"{field}: {value}"), body_style))
+        stamp = ""
+        if seal_bytes is not None and _is_ke_korea_party(block['party']):
             stamp = PdfImage(io.BytesIO(seal_bytes))
-            stamp.drawHeight = 68
-            stamp.drawWidth = 68 * stamp.imageWidth / stamp.imageHeight
-            story.append(stamp)
-    else:
-        story.append(PageBreak())
-        story.append(Paragraph("서명" if snapshot.get("language") == "ko" else "SIGNATURES",
-                               heading_style))
-        for party in snapshot.get("parties", []):
-            label = party.get("legal_name") or ", ".join(party.get("roles", []))
-            story.append(Paragraph(escape(label), heading_style))
-            if seal_bytes is not None and _is_ke_korea_party(party):
-                stamp = PdfImage(io.BytesIO(seal_bytes))
-                stamp.drawHeight = 68
-                stamp.drawWidth = 68 * stamp.imageWidth / stamp.imageHeight
-                story.append(stamp)
-            story.extend([Paragraph("By: __________________________________", body_style),
-                          Paragraph("Name / Title: __________________________", body_style),
-                          Paragraph("Date: __________________________________", body_style), Spacer(1, 16)])
+            stamp.drawWidth, stamp.drawHeight = _stamp_width_height(stamp)
+            stamp.hAlign = 'LEFT'
+        signature = PdfTable(
+            [[Paragraph("Signature: __________________________", body_style), stamp]],
+            colWidths=[155, 315], hAlign='LEFT')
+        signature.setStyle(TableStyle([
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('LEFTPADDING', (0, 0), (-1, -1), 0),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+            ('TOPPADDING', (0, 0), (-1, -1), 0),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 0),
+        ]))
+        section.append(signature)
+    return KeepTogether(section)
+
+
+def _pdf(snapshot, seal_bytes=None):
+    font_name, bold_font = _pdf_font_pair()
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle("ContractTitle", parent=styles["Title"], fontName=bold_font,
+                                 fontSize=18, leading=26, alignment=TA_CENTER, spaceAfter=22)
+    heading_style = ParagraphStyle("ContractHeading", parent=styles["Heading2"], fontName=bold_font,
+                                   fontSize=12, leading=19, textColor=colors.black,
+                                   spaceBefore=16, spaceAfter=9, keepWithNext=True)
+    body_style = ParagraphStyle("ContractBody", parent=styles["BodyText"], fontName=font_name,
+                                fontSize=10, leading=17, spaceAfter=10, splitLongWords=True)
+    story = [Paragraph(escape(snapshot.get("title") or "Contract"), title_style)]
+    for title, authored_sentences in authored_clauses_for_final(snapshot):
+        sentences = [Paragraph(escape(sentence["text"]).replace("\n", "<br/>"), body_style)
+                     for sentence in authored_sentences]
+        if title:
+            heading = Paragraph(escape(title), heading_style)
+            if sentences:
+                story.append(KeepTogether([heading, sentences[0]]))
+                story.extend(sentences[1:])
+            else:
+                story.append(heading)
+        else:
+            story.extend(sentences)
+    story.append(Spacer(1, 12))
+    story.append(_pdf_signature_section(snapshot, heading_style, body_style, seal_bytes))
     output = io.BytesIO()
     def page_footer(canvas, doc):
         canvas.saveState()

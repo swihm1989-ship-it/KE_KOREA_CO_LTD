@@ -104,6 +104,33 @@ class ThreeBoxUiTests(unittest.TestCase):
         self.assertEqual({r['sentence_id'] for r in self.repo.annotations.values()}, {'s1', 's2'})
         self.assertEqual(self.repo.records['sample']['current_revision'], 1)
 
+    def test_sentence_delete_requires_preview_and_revision_approval(self):
+        self.run_app()
+        self.at.button(key='contract_sentence_sample_s1').click()
+        self.run_app()
+        self.at.button(key='contract_delete_sentence_sample_s1').click()
+        self.run_app()
+        self.assertEqual(self.repo.records['sample']['current_revision'], 1)
+        self.assertEqual(len(self.repo.revisions['sample'][0]['snapshot']['clauses'][0]['sentences']), 2)
+        self.assertTrue(any('삭제 예정' in item.value for item in self.at.markdown))
+        self.button('선택한 변경을 하나의 revision으로 적용').click()
+        self.run_app()
+        self.assertEqual(self.repo.records['sample']['current_revision'], 2)
+        saved = self.repo.revisions['sample'][-1]['snapshot']
+        self.assertEqual([s['id'] for s in saved['clauses'][0]['sentences']], ['s2'])
+        self.assertEqual(len(self.repo.revisions['sample'][0]['snapshot']['clauses'][0]['sentences']), 2)
+
+    def test_delete_proposal_can_be_cancelled_without_modification(self):
+        self.run_app()
+        self.at.button(key='contract_sentence_sample_s1').click()
+        self.run_app()
+        self.at.button(key='contract_delete_sentence_sample_s1').click()
+        self.run_app()
+        self.button('수정안 취소').click()
+        self.run_app()
+        self.assertEqual(self.repo.records['sample']['current_revision'], 1)
+        self.assertEqual(len(self.repo.revisions['sample'][0]['snapshot']['clauses'][0]['sentences']), 2)
+
     def test_final_revision_request_commits_only_after_comparison_approval(self):
         self.run_app()
         self.at.checkbox(key='contract_ai_consent_sample').check()

@@ -25,6 +25,44 @@ def note(note_id='n1', sentence='s1', revision=4, instruction='간결하게 수�
 
 
 class WorkspaceActionsTests(unittest.TestCase):
+    def test_delete_sentence_proposal_is_revision_safe_and_needs_selection(self):
+        from Quotation_KEKOREA.contracts.editing import (
+            propose_sentence_deletion, apply_proposal, RevisionConflict,
+        )
+        snapshot = example_snapshot()
+        old = deepcopy(snapshot)
+        proposal = propose_sentence_deletion(snapshot, 's1')
+        self.assertEqual(snapshot, old)
+        self.assertTrue(proposal['changes'][0]['delete_sentence'])
+        self.assertEqual(proposal['base_revision'], 4)
+        self.assertEqual(len(snapshot['clauses'][0]['sentences']), 2)
+        with self.assertRaisesRegex(ValueError, 'Select at least one'):
+            apply_proposal(snapshot, proposal, [])
+        saved = apply_proposal(snapshot, proposal, [proposal['changes'][0]['id']])
+        self.assertEqual(saved['revision'], 5)
+        self.assertEqual([s['id'] for s in saved['clauses'][0]['sentences']], ['s2'])
+        with self.assertRaises(RevisionConflict):
+            apply_proposal(saved, proposal, [proposal['changes'][0]['id']])
+
+    def test_delete_last_sentence_removes_empty_clause_but_keeps_other_clauses(self):
+        from Quotation_KEKOREA.contracts.editing import propose_sentence_deletion, apply_proposal
+        snapshot = example_snapshot()
+        snapshot['clauses'].append(
+            {'id': 'c2', 'title': '2. 기타', 'order': 2,
+             'sentences': [{'id': 's3', 'text': '기타 조항입니다.'}]}
+        )
+        proposal = propose_sentence_deletion(snapshot, 's3')
+        saved = apply_proposal(snapshot, proposal, [proposal['changes'][0]['id']])
+        self.assertEqual([clause['id'] for clause in saved['clauses']], ['c1'])
+        self.assertEqual(len(snapshot['clauses']), 2)
+
+    def test_protected_commission_sentence_cannot_be_deleted(self):
+        from Quotation_KEKOREA.contracts.editing import propose_sentence_deletion
+        snapshot = example_snapshot()
+        snapshot['clauses'][0]['sentences'][0]['id'] = 'commission_payment_sentence_0'
+        with self.assertRaisesRegex(ValueError, '기본 커미션 지급'):
+            propose_sentence_deletion(snapshot, 'commission_payment_sentence_0')
+
     def test_notes_are_revision_bound_and_superseded_notes_are_excluded(self):
         from Quotation_KEKOREA.contracts.workspace import collect_notes
         snapshot = example_snapshot()

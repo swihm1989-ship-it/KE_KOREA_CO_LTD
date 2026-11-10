@@ -1,6 +1,7 @@
 """Deterministic contract completeness checks; not legal advice."""
 from decimal import Decimal, InvalidOperation
 from Quotation_KEKOREA.contracts.commission_policy import payment_policy_issues
+from Quotation_KEKOREA.contracts.normalize_terms import normalize_term_keys
 
 
 COMMON_REQUIRED = (
@@ -143,11 +144,32 @@ def apply_analysis(snapshot, analysis):
         candidate.setdefault("id", f"party_{len(updated['parties']) + 1}")
         candidate["status"] = "suggested"
         updated["parties"].append(candidate)
+    # The AI may repeat a commercial field under different language labels
+    # (e.g. '수량' and 'quantity'). Normalize before creating the snapshot.
+    # Keep the earliest nonblank suggestion; never auto-resolve conflicting data.
+    normalized, conflicts = normalize_term_keys(analysis)
     updated["terms"] = []
-    for term in analysis.get("terms", []):
+    seen_keys = set()
+    for term in normalized.get("terms", []):
         candidate = dict(term)
+        key = str(candidate.get("key") or "").strip()
+        if not key or key in seen_keys:
+            continue
+        seen_keys.add(key)
+        candidate["status"] = "suggested" if str(candidate.get("value") or "").strip() else "missing"
         candidate.setdefault("id", f"term_{len(updated['terms']) + 1}")
         updated["terms"].append(candidate)
-    updated["issues"] = analysis.get("issues", [])
+    updated["issues"] = list(analysis.get("issues", []))
+    if conflicts:
+        updated["clause_extraction_conflicts"] = conflicts
+        updated["issues"].append({
+            "code": "contract_term_extraction_conflict",
+            "severity": "confirm",
+            "message": (
+                "AI 추출 조건에 중복·모호한 항목이 있습니다. "
+                "BOX 2에서 원문과 값을 확인해 주세요. 자동 확정하지 않았습니다."
+            ),
+            "confirmed": False,
+        })
     updated["questions"] = analysis.get("questions", [])
     return updated

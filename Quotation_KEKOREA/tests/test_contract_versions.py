@@ -32,6 +32,58 @@ class ContractVersionTests(unittest.TestCase):
         self.assertEqual(result['clauses'][0]['sentences'][0]['text'],'Price USD 5/KG, EXW Seoul warehouse, 50MT/month.')
         self.assertEqual(result['terms'][0]['value'],'5')
         self.assertEqual(result['parties'][0]['legal_name'],'KE KOREA CO. LTD')
+    def test_protected_code_mismatch_retries_only_one_segment(self):
+        original = self.fixture()
+        calls = []
+        def translate(_instructions, payload, *, env):
+            calls.append([item['key'] for item in payload['segments']])
+            rows = []
+            for item in payload['segments']:
+                value = item['text']
+                if '단가 USD 5/KG' in value:
+                    value = ('The price is USD 5 per kilogram, EXW Seoul warehouse, '
+                             '50MT/month.')
+                elif '인도 조건' == value:
+                    value = 'Delivery Conditions'
+                elif value == '공급 계약':
+                    value = 'Supply Agreement'
+                elif value == 'EXW 서울 창고':
+                    value = 'EXW Seoul warehouse'
+                if 'previous_translation' in payload:
+                    value = 'The price is USD 5/KG, EXW Seoul warehouse, 50MT/month.'
+                rows.append({'key': item['key'], 'text': value})
+            return {'translations': rows}
+        output = translate_contract(original, 'en', env={}, caller=translate)
+        self.assertEqual(output['clauses'][0]['sentences'][0]['text'],
+                         'The price is USD 5/KG, EXW Seoul warehouse, 50MT/month.')
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[1], ['clause:0:sentence:0'])
+        self.assertEqual(original['language'], 'ko')
+
+    def test_changed_protected_code_still_blocks_after_retry(self):
+        original = self.fixture()
+        def translate(_instructions, payload, *, env):
+            return {'translations': [
+                {'key': item['key'], 'text': item['text'].replace('EXW', 'FOB')}
+                for item in payload['segments']
+            ]}
+        with self.assertRaisesRegex(ValueError, '통화/단위/Incoterms 변경이 재번역'):
+            translate_contract(original, 'en', env={}, caller=translate)
+        self.assertEqual(original['language'], 'ko')
+
+    def test_unrelated_numeric_change_does_not_retry(self):
+        original = self.fixture()
+        calls = []
+        def translate(_instructions, payload, *, env):
+            calls.append(payload)
+            return {'translations': [
+                {'key': item['key'], 'text': item['text'].replace('50MT', '60MT')}
+                for item in payload['segments']
+            ]}
+        with self.assertRaisesRegex(ValueError, '번역 숫자/금액 불일치'):
+            translate_contract(original, 'en', env={}, caller=translate)
+        self.assertEqual(len(calls), 1)
+
     def test_english_condition_label_is_localized_without_changing_key(self):
         self.assertEqual(localized_term_label('payment_trigger','en','매매대금 지급 조건'),'Payment terms')
         self.assertEqual(localized_term_label('payment_trigger','ko','매매대금 지급 조건'),'매매대금 지급 조건')

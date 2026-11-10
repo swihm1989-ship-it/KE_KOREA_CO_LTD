@@ -17,6 +17,42 @@ def find_sentence(snapshot, sentence_id):
     raise RevisionConflict("The selected sentence no longer exists.")
 
 
+def propose_sentence_deletion(snapshot, sentence_id):
+    """Offer removal as an ordinary revision proposal, without any AI/API call.
+
+    This does not save anything. The existing comparison/approval flow must
+    validate against the current revision before committing the deletion.
+    """
+    snapshot = validate_snapshot(snapshot)
+    sentence = find_sentence(snapshot, sentence_id)
+    if sentence_id in {f'commission_payment_sentence_{i}' for i in range(3)}:
+        raise ValueError("기본 커미션 지급 조항은 BOX 2 지급조건 편집기에서 관리해 주세요.")
+    change_id = f"change_{uuid4().hex}"
+    proposal = {
+        "id": f"proposal_{uuid4().hex}",
+        "contract_id": snapshot["contract_id"],
+        "base_revision": snapshot["revision"],
+        "target_sentence_id": sentence_id,
+        "instruction": "사용자가 문장 삭제 요청",
+        "changes": [{
+            "id": change_id, "sentence_id": sentence_id,
+            "original_text": sentence["text"], "proposed_text": "",
+            "delete_sentence": True, "term_key": None,
+            "required_to_resolve_conflict": False,
+            "reason": "사용자가 선택한 문장 삭제. 이 조항이 마지막 문장이면 조항 제목도 함께 삭제됩니다.",
+        }],
+        "issues": [],
+        "explanation": (
+            "선택한 문장을 삭제할 후보입니다. 수정 전후 및 전체 계약서 "
+            "미리보기를 확인한 뒤 승인하면 새 Revision에 반영됩니다. "
+            "기존 Revision은 유지됩니다."
+        ),
+    }
+    # Fail closed early on missing/stale IDs, but never mutate the source.
+    apply_proposal(snapshot, proposal, [change_id])
+    return proposal
+
+
 def apply_proposal(snapshot, proposal, selected_change_ids):
     if proposal.get("base_revision") != snapshot.get("revision"):
         raise RevisionConflict("This proposal is out of date. Review it against the latest revision.")

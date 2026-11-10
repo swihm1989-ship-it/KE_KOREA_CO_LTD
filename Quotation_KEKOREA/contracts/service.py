@@ -9,6 +9,7 @@ from uuid import uuid4
 from Quotation_KEKOREA.contracts.models import CONTRACT_TYPES, validate_snapshot
 from Quotation_KEKOREA.contracts.editing import find_sentence
 from Quotation_KEKOREA.contracts.commission_policy import drafting_guidance, apply_payment_policy
+from Quotation_KEKOREA.contracts.sale_scope_template import apply_sale_scope_template
 
 
 def conversation_response_language(text):
@@ -149,7 +150,12 @@ def _call(instructions, user_data, *, env, opener=urllib.request.urlopen, timeou
             f"Contract AI request failed (HTTP {exc.code}){detail}; "
             "the existing draft was not changed."
         ) from None
-    except (urllib.error.URLError, TimeoutError):
+    except (urllib.error.URLError, TimeoutError) as exc:
+        if isinstance(exc, TimeoutError) or isinstance(getattr(exc, "reason", None), TimeoutError):
+            raise RuntimeError(
+                f"Contract AI timed out after {timeout} seconds; "
+                "the existing draft was not changed. Please try again."
+            ) from None
         raise RuntimeError("Contract AI could not be reached; the existing draft was not changed.") from None
     except (UnicodeDecodeError, json.JSONDecodeError):
         raise RuntimeError("Contract AI returned an invalid response; the existing draft was not changed.") from None
@@ -242,10 +248,7 @@ def analyze_trade(messages, current_snapshot, reference_context, *, env, client=
         "For example 단가/harga satuan/unit price => unit_price; 월 물량/jumlah bulanan/monthly quantity => quantity; 인도조건/syarat pengiriman/delivery terms => delivery; 대금 지급/syarat pembayaran/payment terms => payment_trigger. "
         "Put buyer and seller LEGAL ENTITY NAMES only under parties with buyer/seller roles, not as terms. Preserve source wording, exact units, figures, currency and uncertainty. Do not translate company names or infer missing facts. "
         "Each party has legal_name, country, address, representative, roles (array of buyer/seller/client/intermediary/commission_payer/fundraiser/investor). "
-        "Keep buyer/seller distinct from commission payer and intermediary. Each term has key, value, unit, currency, status, source_refs; use status suggested for extracted values and missing for absent values, never confirmed. "
-        "For every party and term, source_refs must be an array of objects, or [] if there is no citation; never null, a string, or a single object. "
-        "Each citation must be {kind: user, message_id: the provided message id if available, quote: exact user text} "
-        "or {kind: reference, document_id: a provided reference id, quote: exact reference text}. Never invent IDs or quotes. "
+        'Keep buyer/seller distinct from commission payer and intermediary. Each term has key, value, unit, currency, status, source_refs; use status suggested for extracted values and missing for absent values, never confirmed. For EVERY party and term, source_refs MUST be a JSON array; use [] if no exact source quote is available, NEVER null, a string or a placeholder. Each cited source is an object: {"kind":"user","quote":"exact text","message_id":"optional existing message ID"} or {"kind":"reference","document_id":"existing reference ID","quote":"exact text"}. Only cite literal exact substrings from available user messages or selected reference extracts. Do not fabricate source IDs, quotes, evidence or assertions. '
         "For clause-to-term extraction, distinguish unit price from contract total, quantity amount from unit of measure, and Incoterm/location from delivery schedule/notice obligations. "
         "Use ISO currency codes only when explicitly sourced; do not assume $ means USD. Cite exact source phrases for ambiguous claims and retain uncertainty rather than inventing data. "
         "Never interpret a procedural delivery notice as contradictory to EXW, FOB, CIF or other Incoterms without actual inconsistent obligations. "
@@ -263,7 +266,7 @@ def analyze_trade(messages, current_snapshot, reference_context, *, env, client=
         "record it as suggested instead of asking again. After a user answers follow-ups, "
         "return zero more questions. Lack of a bank account, registered address, or legal opinion "
         "should be recorded as a missing item for signature, not prevent an initial draft.",
-        user_data, env=env, opener=client or urllib.request.urlopen)
+        user_data, env=env, opener=client or urllib.request.urlopen, timeout=180)
     if data.get("contract_type") not in CONTRACT_TYPES:
         raise ValueError("Contract AI did not return a supported contract type.")
     for field in ("parties", "terms", "questions", "issues"):
@@ -302,35 +305,49 @@ def analyze_trade(messages, current_snapshot, reference_context, *, env, client=
         normalized_source = " ".join(str(source or "").split())
         return bool(normalized_quote) and normalized_quote in normalized_source
 
-    for owner in [*data["parties"], *data["terms"]]:
-        source_refs = owner.get("source_refs", [])
-        # Accept unambiguous JSON variations without dropping any citation.
-        # Singleton objects still undergo the same source/quote checks below.
-        if source_refs is None:
-            source_refs = []
-        elif isinstance(source_refs, dict):
-            source_refs = [source_refs]
-        if not isinstance(source_refs, list):
-            raise ValueError("Contract AI returned invalid source references.")
-        owner["source_refs"] = source_refs
-        for source_ref in source_refs:
-            if not isinstance(source_ref, dict):
-                raise ValueError("Contract AI returned invalid source references.")
-            kind = source_ref.get("kind")
-            quote = source_ref.get("quote")
-            if kind == "reference":
-                source = reference_by_id.get(str(source_ref.get("document_id") or ""))
-                if source is None or not quote_matches(quote, source):
-                    raise ValueError("Contract AI cited text not found in the selected reference material.")
-            elif kind == "user":
-                message_id = source_ref.get("message_id")
-                source = message_by_id.get(str(message_id)) if message_id else None
-                valid_quote = (quote_matches(quote, source) if source is not None
-                               else any(quote_matches(quote, item) for item in message_texts))
-                if not valid_quote:
-                    raise ValueError("Contract AI cited text not found in the user conversation.")
+    for owner_type, owners in (("party", data["parties"]), ("term", data["terms"])):
+        for owner_index, owner in enumerate(owners):
+            owner_label = f"{owner_type}[{owner_index}]"
+            raw_refs = owner.get("source_refs")
+            if raw_refs is None or raw_refs == "":
+                source_refs = []
+            elif isinstance(raw_refs, dict):
+                source_refs = [raw_refs]
+            elif isinstance(raw_refs, str):
+                source_refs = [raw_refs]
+            elif isinstance(raw_refs, list):
+                source_refs = raw_refs
             else:
-                raise ValueError("Contract AI returned an unsupported source reference kind.")
+                raise ValueError(f"Contract AI returned invalid source references for {owner_label}: {type(raw_refs).__name__}.")
+            verified_refs = []
+            for source_ref in source_refs:
+                if source_ref is None or isinstance(source_ref, str):
+                    if isinstance(source_ref, str) and not source_ref.strip():
+                        continue
+                    data["issues"].append({
+                        "code": "unverified_ai_source_ref", "severity": "confirm",
+                        "message": f"AI source for {owner_label} was not a verifiable citation. Confirm the extracted information against the original input."
+                    })
+                    continue
+                if not isinstance(source_ref, dict):
+                    raise ValueError(f"Contract AI returned an invalid source reference for {owner_label}: {type(source_ref).__name__}.")
+                kind = source_ref.get("kind")
+                quote = source_ref.get("quote")
+                if kind == "reference":
+                    source = reference_by_id.get(str(source_ref.get("document_id") or ""))
+                    if source is None or not quote_matches(quote, source):
+                        raise ValueError(f"Contract AI cited text not found in the selected reference material ({owner_label}).")
+                elif kind == "user":
+                    message_id = source_ref.get("message_id")
+                    source = message_by_id.get(str(message_id)) if message_id else None
+                    valid_quote = (quote_matches(quote, source) if source is not None
+                                   else any(quote_matches(quote, item) for item in message_texts))
+                    if not valid_quote:
+                        raise ValueError(f"Contract AI cited text not found in the user conversation ({owner_label}).")
+                else:
+                    raise ValueError(f"Contract AI returned an unsupported source reference kind for {owner_label}.")
+                verified_refs.append(source_ref)
+            owner["source_refs"] = verified_refs
     return _localize_contract_followups(data, response_language, env=env,
                                           opener=client or urllib.request.urlopen)
 
@@ -362,9 +379,22 @@ def generate_draft(snapshot, preferred_clauses, *, env, reference_context=None,
         "Preserve the user's snapshot.title exactly; never add a contract type, prefix, suffix, or translation to it. "
         "Return JSON keys title, clauses, issues. clauses is an ordered array of {id,title,order,sentences}; each sentence is {id,text,term_ids,source_refs}. IDs must be unique stable-looking IDs. "
         "Use the user's transaction_messages for cautions and commercial context; distinguish these from reference document examples. "
+        "For sales, include a topic_key=scope clause, but keep independent obligations in "
+        "their respective clauses: a fixed party-and-trade specification section will "
+        "replace the initial scope paragraph with values from stored trade fields only. "
+        "Never invent brands, prices, Incoterms or payment schedules. "
         "Reconcile material conflicts in issues but do not ask questions before writing the draft. "
-        "Use explicit placeholders such as [서명 전 확인] or [TO CONFIRM] for unresolved facts; "
-        "do not invent or falsely certify missing terms. Draft the full usable clause structure first. "
+        "Draft a ready-to-review, commercially workable agreement with complete neutral operative clauses. "
+        "Do NOT prefix entire sentences or routine clauses with [서명 전 확인] / [TO CONFIRM]. "
+        "Use placeholders only at the precise location of a genuinely missing material business fact "
+        "(such as an unknown party, amount, deadline, Incoterm, governing law or forum). "
+        "For each missing fact use a placeholder sparingly; do not wrap standard liability, force majeure, "
+        "confidentiality, notices or other balanced default procedures in placeholders merely because "
+        "the parties have not separately negotiated the prose. Explain nonessential review choices in issues. "
+        "A suggested user-supplied commercial value may be described as a PROPOSED term with the exact "
+        "user-supplied value (not a confirmed agreement), while conflicts must remain explicit and unresolved. "
+        "Never invent quantities, obligations, dates, penalties, limits, governing law or parties. "
+        "Draft the full usable clause structure first. "
         "Do not silently discard user cautions. "
         "issues is an array of objects with non-empty string code and message, and severity exactly one of block, confirm, or info. "
         "Do not include reviewer notes in contract prose." + quality_instructions,
@@ -444,7 +474,8 @@ def generate_draft(snapshot, preferred_clauses, *, env, reference_context=None,
         raise ValueError("The English draft contains Korean text outside extracted party/term values. The current draft was kept unchanged.")
     if checked["language"] == "ko" and letters and korean_count / len(letters) < 0.45:
         raise ValueError("The Korean draft appears to contain substantial English prose. The current draft was kept unchanged.")
-    return apply_payment_policy(checked, env=env)
+    return apply_sale_scope_template(apply_payment_policy(checked, env=env),
+                                     repair_context=repair_context)
 
 
 def propose_revision(snapshot, sentence_id, instruction, *, env, client=None):
