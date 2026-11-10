@@ -46,7 +46,9 @@ class ContractRuleTests(unittest.TestCase):
         result = apply_analysis(snapshot, analysis)
         self.assertEqual([t["key"] for t in result["terms"]], ["quantity", "unit_price"])
         self.assertTrue(all(t["status"] == "suggested" for t in result["terms"]))
-        self.assertEqual(validate_structure(result)["terms"], result["terms"])
+        checked = validate_structure(result)
+        self.assertEqual([term["key"] for term in checked["terms"]], ["quantity", "unit_price"])
+        self.assertTrue(all(term["source_refs"] == [] for term in checked["terms"]))
         self.assertEqual(result["issues"], [])
 
     def test_conflicting_duplicate_terms_require_review(self):
