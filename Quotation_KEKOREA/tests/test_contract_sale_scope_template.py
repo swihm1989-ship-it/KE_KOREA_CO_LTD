@@ -93,6 +93,19 @@ class SaleScopeTemplateTests(unittest.TestCase):
         self.assertEqual(apply_sale_scope_template(snapshot, repair_context={'draft': snapshot}),
                          snapshot)
 
+    def test_audit_repair_cannot_erase_fixed_sale_trade_values(self):
+        before = apply_sale_scope_template(fixture())
+        corrupted = deepcopy(before)
+        corrupted['clauses'][0]['sentences'][4]['text'] = '가격: USD 0.1/장'
+        result = apply_sale_scope_template(
+            corrupted, repair_context={'draft': before, 'editable_clause_ids': [
+                before['clauses'][0]['id'],
+            ]})
+        self.assertEqual(result['clauses'][0], before['clauses'][0])
+        self.assertNotIn('0.1/장', '\\n'.join(
+            s['text'] for s in result['clauses'][0]['sentences']))
+        self.assertEqual(corrupted['clauses'][0]['sentences'][4]['text'], '가격: USD 0.1/장')
+
     def test_english_template_translates_labels_and_titles_not_commercial_values(self):
         snapshot = fixture()
         snapshot['language'] = 'en'
