@@ -7,7 +7,6 @@ The generated text remains individually editable through BOX 3 revisions.
 from copy import deepcopy
 from uuid import uuid4
 
-from Quotation_KEKOREA.contracts.normalize_terms import canonical_term_key
 from Quotation_KEKOREA.contracts.signature_layout import localized_representative_title
 
 
