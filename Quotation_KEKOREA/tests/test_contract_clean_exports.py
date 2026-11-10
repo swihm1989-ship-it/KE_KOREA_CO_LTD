@@ -5,6 +5,8 @@ import unittest
 from zipfile import ZipFile
 
 from docx import Document
+from datetime import datetime, timezone
+import fitz
 from Quotation_KEKOREA.contracts.draft_exports import export_draft
 from Quotation_KEKOREA.contracts.exports import export_contract
 from Quotation_KEKOREA.contracts.final_policy import final_document_blockers
@@ -73,6 +75,90 @@ class CleanContractExportTests(unittest.TestCase):
         with ZipFile(io.BytesIO(data)) as z:
             pictures=[name for name in z.namelist() if name.startswith('word/media/')]
         self.assertEqual(len(pictures),1)
+
+    def test_signature_fields_inline_seal_and_no_duplicate_body_summary(self):
+        original = sample()
+        original['language'] = 'en'
+        original['title'] = 'Cell Supply'
+        original['created_at'] = '2026-11-10T08:31:00+09:00'
+        original['parties'][0].update(representative='SEOKWON IHM', representative_title='CEO')
+        original['parties'][1].update(legal_name='TENGYAO TECHNOLOGY CO. LTD',
+                                      representative='ALEX', representative_title='CEO')
+        original['clauses'][0]['sentences'].extend([
+            {'id': 'sig_s', 'text': 'Supplier: KE KOREA CO. LTD, Representative: SEOKWON IHM, Signature: [signature].'},
+            {'id': 'sig_b', 'text': 'Buyer: TENGYAO TECHNOLOGY CO. LTD, Representative: ALEX, Signature: [signature].'},
+        ])
+        original['clauses'][0]['sentences'].append({
+            'id': 'normal', 'text': 'Supplier: KE KOREA shall deliver the goods by December 31.'
+        })
+        outputs = export_contract(original, seal_bytes=TEST_STAMP)
+        document = Document(io.BytesIO(outputs['docx']['content']))
+        texts = '\\n'.join(p.text for p in document.paragraphs)
+        cell_text = '\\n'.join(cell.text for table in document.tables
+                               for row in table.rows for cell in row.cells)
+        self.assertNotIn('Representative: SEOKWON IHM, Signature:', texts)
+        self.assertIn('Supplier: KE KOREA shall deliver the goods', texts)
+        self.assertNotIn('By:', cell_text)
+        self.assertIn('Company: KE KOREA CO. LTD', cell_text)
+        self.assertIn('Company: TENGYAO TECHNOLOGY CO. LTD', cell_text)
+        self.assertIn('Name / Title: SEOKWON IHM, CEO', cell_text)
+        self.assertIn('Name / Title: ALEX, CEO', cell_text)
+        self.assertEqual(cell_text.count('Date: 2026-11-10'), 2)
+        with fitz.open(stream=outputs['pdf']['content'], filetype='pdf') as pdf:
+            page_text = [page.get_text() for page in pdf]
+            joined = '\\n'.join(page_text)
+            self.assertNotIn('Representative: SEOKWON IHM, Signature:', joined)
+            self.assertEqual(joined.count('SIGNATURES'), 1)
+            self.assertEqual(joined.count('Date: 2026-11-10'), 2)
+            self.assertNotIn('By:', joined)
+            self.assertIn('Name / Title: ALEX, CEO', joined)
+            signature_page = next(i for i, text in enumerate(page_text) if 'SIGNATURES' in text)
+            self.assertIn('Company: TENGYAO TECHNOLOGY CO. LTD', page_text[signature_page])
+            self.assertIn('Company: KE KOREA CO. LTD', page_text[signature_page])
+            self.assertEqual(sum(len(page.get_images()) for page in pdf), 1)
+
+    def test_missing_signatory_details_remain_blank_not_tbd(self):
+        original = sample()
+        original['language'] = 'en'
+        original['created_at'] = '2026-11-10'
+        original['parties'][1]['representative'] = ''
+        with fitz.open(stream=export_contract(original, formats=('pdf',))['pdf']['content'],
+                       filetype='pdf') as pdf:
+            text = '\\n'.join(page.get_text() for page in pdf)
+            self.assertIn('Name / Title:', text)
+            self.assertNotIn('TBD', text)
+            self.assertNotIn('By:', text)
+            self.assertIn('Date: 2026-11-10', text)
+
+    def test_date_resolver_prioritizes_contract_date_and_does_not_use_effective_date(self):
+        from Quotation_KEKOREA.contracts.signature_layout import contract_signature_date
+        original = sample()
+        original['created_at'] = '2026-11-10'
+        original['terms'] = [
+            {'key': 'effective_date', 'value': '2027-01-01'},
+            {'key': 'contract_date', 'value': '2026-11-09'},
+        ]
+        self.assertEqual(contract_signature_date(original), '2026-11-09')
+        original['terms'].pop()
+        self.assertEqual(contract_signature_date(original), '2026-11-10')
+
+    def test_signature_section_uses_current_page_when_it_fits_and_moves_together(self):
+        original = sample()
+        original['language'] = 'en'
+        original['created_at'] = '2026-11-10'
+        with fitz.open(stream=export_contract(original, formats=('pdf',))['pdf']['content'],
+                       filetype='pdf') as pdf:
+            self.assertEqual(len(pdf), 1, 'Short contract should not waste signature-only page')
+        long_contract = sample('This is the final contract wording. ' * 250)
+        long_contract['language'] = 'en'
+        long_contract['created_at'] = '2026-11-10'
+        with fitz.open(stream=export_contract(long_contract, formats=('pdf',))['pdf']['content'],
+                       filetype='pdf') as pdf:
+            signature_pages = [i for i,page in enumerate(pdf) if 'SIGNATURES' in page.get_text()]
+            self.assertEqual(len(signature_pages), 1)
+            text = pdf[signature_pages[0]].get_text()
+            self.assertEqual(text.count('Company:'), 2)
+            self.assertEqual(text.count('Signature:'), 2)
 
     def test_final_pdf_still_renders(self):
         data=export_contract(sample(),formats=('pdf',),seal_bytes=TEST_STAMP)['pdf']['content']
