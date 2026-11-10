@@ -177,7 +177,7 @@ def _render_legacy_recovery(repo, contract_id):
         if st.button("검토한 중복 조건 복구 저장", disabled=not consent,
                      key=f"legacy_recovery_commit_{contract_id}"):
             # Create a new revision instead of modifying historical revisions.
-            candidate.pop("_term_recovery_pending", None)
+            candidate["legacy_term_recovery_history"] = candidate.pop("_term_recovery_pending", [])
             saved = _save_snapshot(
                 repo, candidate, "User-approved historical duplicate term recovery",
                 expected_revision=int(original["revision"]),
