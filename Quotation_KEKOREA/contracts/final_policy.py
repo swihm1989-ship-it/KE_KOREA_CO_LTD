@@ -2,7 +2,7 @@
 import re
 
 _PLACEHOLDER = re.compile(
-    r'\[(?:서명\s*전\s*확인|확인\s*필요|필수\s*확인|TBD(?:\s*/[^\]]*)?|'
+    r'\[(?:서명\s*전\s*확인(?:\s*[:：][^\]]*)?|확인\s*필요(?:\s*[:：][^\]]*)?|'필수\s*확인(?:\s*[:：][^\]]*)?|TBD(?:\s*/[^\]]*)?|'
     r'TO\s*CONFIRM|TO\s*BE\s*CONFIRMED|PENDING\s*CONFIRMATION)\]', re.I)
 
 def final_document_blockers(snapshot, *, allow_unresolved_text=False):
