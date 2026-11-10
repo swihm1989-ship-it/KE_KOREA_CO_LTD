@@ -164,7 +164,24 @@ def sale_scope_clause(snapshot):
 def apply_sale_scope_template(snapshot, *, repair_context=None):
     """Replace only the initial AI-generated scope prose, never saved revisions."""
     if repair_context:
-        return snapshot
+        # Preserve the deterministic trade schedule across a quality-repair
+        # pass. AI may improve other clauses, but must never rewrite the fixed
+        # business summary or substitute new payment/price assumptions.
+        previous = repair_context.get('draft') or {}
+        original_scope = next(
+            (clause for clause in previous.get('clauses', [])
+             if any(sentence.get('sale_spec_field')
+                    for sentence in clause.get('sentences', []))), None)
+        if original_scope is None:
+            return snapshot
+        result = deepcopy(snapshot)
+        index = next((i for i, clause in enumerate(result.get('clauses', []))
+                      if clause.get('id') == original_scope.get('id')), None)
+        if index is None:
+            result['clauses'].insert(0, deepcopy(original_scope))
+        else:
+            result['clauses'][index] = deepcopy(original_scope)
+        return result
     template = sale_scope_clause(snapshot)
     if template is None:
         return snapshot
