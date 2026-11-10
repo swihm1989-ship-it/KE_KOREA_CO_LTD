@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from Quotation_KEKOREA.contracts.models import new_snapshot, validate_snapshot
 from Quotation_KEKOREA.contracts.legacy_recovery import prepare_duplicate_term_recovery
-from Quotation_KEKOREA.contracts.ai_graph import generate_contract_draft_graph
+from Quotation_KEKOREA.contracts.ai_graph import generate_contract_draft_graph, analyze_contract_terms_graph
 
 
 class LegacyRecoveryTests(unittest.TestCase):
@@ -48,6 +48,26 @@ class LegacyRecoveryTests(unittest.TestCase):
 
 
 class ContractLangGraphTests(unittest.TestCase):
+    def test_analysis_graph_deduplicates_multilingual_ai_terms(self):
+        snapshot = new_snapshot("graph", "sale", "ko")
+        data = {
+            "contract_type": "sale", "parties": [], "questions": [], "issues": [],
+            "terms": [
+                {"key": "수량", "value": "2324938", "unit": "PCS", "status": "suggested"},
+                {"key": "quantity", "value": "2324938", "unit": "PCS", "status": "suggested"},
+            ],
+        }
+        with patch("Quotation_KEKOREA.contracts.ai_graph.analyze_trade",
+                   return_value=data):
+            result = analyze_contract_terms_graph(
+                [{"role": "user", "content": "수량 2324938 PCS"}],
+                snapshot, [], env={},
+            )
+        self.assertEqual(len(result["terms"]), 1)
+        self.assertEqual(result["terms"][0]["key"], "quantity")
+        self.assertEqual(result["terms"][0]["status"], "suggested")
+        self.assertEqual(result["issues"], [])
+
     def test_graph_runs_existing_reviewed_pipeline_without_changing_input(self):
         snap = new_snapshot("graph", "sale", "en")
         base = deepcopy(snap)
