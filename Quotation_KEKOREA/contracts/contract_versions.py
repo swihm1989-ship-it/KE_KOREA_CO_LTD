@@ -17,6 +17,17 @@ _NUMBER = re.compile(
     # e.g. the number in "30일" and "계약금의30%".
     r'(?<![A-Za-z0-9_])(?P<value>(?:[0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\.[0-9]+)?)(?P<percent>\s*%)?'
 )
+# '제3자' is the legal expression 'third party', not a numeric obligation.
+# Compare the concept separately so omitting third-party protections still fails.
+_KO_THIRD_PARTY = re.compile(r'제\s*3\s*자')
+_EN_THIRD_PARTY = re.compile(r'\bthird[\s-]+part(?:y|ies)\b', re.I)
+
+
+def _third_party_mentions(text):
+    value = str(text or '')
+    return len(_KO_THIRD_PARTY.findall(value)) + len(_EN_THIRD_PARTY.findall(value))
+
+
 _PROTECTED = re.compile(r'\b(?:USD|KRW|EUR|CNY|IDR|SGD|EXW|FOB|CIF|CFR|DAP|DDP|FCA|CPT|CIP|DPU|KG|MT|PCS|TT|T/T|SWIFT)\b', re.I)
 
 
@@ -60,7 +71,10 @@ def _numbers(text):
     (e.g. M10) are not mistaken for quantities.
     """
     normalized = []
-    for match in _NUMBER.finditer(_normalize_month_words(str(text or ''))):
+    # Normalize a fixed Korean legal ordinal to a word before comparing
+    # amounts. Presence is checked independently in translation validation.
+    text = _KO_THIRD_PARTY.sub('제삼자', str(text or ''))
+    for match in _NUMBER.finditer(_normalize_month_words(text)):
         raw = match.group('value').replace(',', '')
         value = format(Decimal(raw).normalize(), 'f')
         normalized.append(value + ('%' if match.group('percent') else ''))
@@ -192,6 +206,12 @@ def translate_contract(snapshot, language, *, env, caller=None):
         for row,(key,source) in zip(translated,batch):
             target=row['text'].strip()
             source_nums, target_nums = _numbers(source), _numbers(target)
+            # '제3자' / 'third party' may differ in digits, but the legal
+            # concept itself must not disappear or be newly introduced.
+            if _third_party_mentions(source) != _third_party_mentions(target):
+                raise ValueError(
+                    '번역에서 제3자(third party) 관련 법률 표현이 변경되어 원본을 유지했습니다: ' + key
+                )
             if source_nums != target_nums:
                 # Show differences, but never approve a changed number automatically.
                 source_only = list((Counter(source_nums) - Counter(target_nums)).elements())
@@ -211,6 +231,8 @@ def translate_contract(snapshot, language, *, env, caller=None):
                 target = _retry_changed_protected_segment(
                     request, source, target, key, language, env,
                 )
+                if _third_party_mentions(source) != _third_party_mentions(target):
+                    raise ValueError('재번역에서 제3자(third party) 관련 표현이 변경되어 원본을 유지했습니다: '+key)
                 if _numbers(source) != _numbers(target):
                     raise ValueError('재번역에서 숫자/금액 변경이 감지되어 새 계약을 만들지 않았습니다: '+key)
                 dst_codes = _protected_codes(target)

@@ -19,6 +19,50 @@ class TranslationNumericFixTests(unittest.TestCase):
     def test_changed_percentage_is_not_equal(self):
         self.assertNotEqual(_numbers('계약금의30%'), _numbers('30 of deposit'))
 
+    def test_third_party_legal_ordinal_is_not_a_commercial_number(self):
+        self.assertEqual(
+            _numbers('상대방 동의 없이 제3자에게 공개하지 않는다.'),
+            _numbers('Do not disclose to third parties without consent.'),
+        )
+        self.assertNotEqual(_numbers('제3자에게 30일 이내 10% 지급한다.'),
+                            _numbers('Pay 20% within 30 days to third parties.'))
+
+    def test_third_party_english_translation_preserves_meaning(self):
+        source = ContractVersionTests().fixture()
+        source['clauses'][0]['sentences'][0]['text'] = (
+            '제3자에게 사전 동의 없이 영업정보를 공개하지 않는다.'
+        )
+        def translate(_instructions, payload, *, env):
+            return {'translations': [
+                {'key': item['key'],
+                 'text': ('Confidential business information must not be disclosed '
+                          'to third parties without prior consent.'
+                          if '제3자' in item['text'] else item['text'])}
+                for item in payload['segments']
+            ]}
+        translated = translate_contract(source, 'en', env={}, caller=translate)
+        self.assertIn('third parties', translated['clauses'][0]['sentences'][0]['text'])
+        self.assertEqual(source['language'], 'ko')
+
+    def test_dropping_third_party_protection_fails(self):
+        source = ContractVersionTests().fixture()
+        source['clauses'][0]['sentences'][0]['text'] = '제3자에게 비밀을 공개하지 않는다.'
+        def translate(_instructions, payload, *, env):
+            return {'translations': [
+                {'key': item['key'], 'text': (
+                    'Do not disclose any confidential information.'
+                    if '제3자' in item['text'] else item['text'])}
+                for item in payload['segments']
+            ]}
+        with self.assertRaisesRegex(ValueError, '제3자'):
+            translate_contract(source, 'en', env={}, caller=translate)
+        self.assertEqual(source['language'], 'ko')
+
+    def test_real_digit_three_remains_protected(self):
+        self.assertEqual(_numbers('제3자에게 3일 내 3% 지급한다.'), ['3', '3%'])
+        self.assertNotEqual(_numbers('제3자에게 3일 내 지급한다.'),
+                            _numbers('Pay within 4 days to third parties.'))
+
     def test_changed_deadline_is_rejected_with_clauses_shown(self):
         source = ContractVersionTests().fixture()
         source['clauses'][0]['sentences'][0]['text'] = '대금의 30%를 7일 이내 지급한다.'
