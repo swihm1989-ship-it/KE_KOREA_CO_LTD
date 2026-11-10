@@ -1,7 +1,8 @@
 import unittest
 
 from Quotation_KEKOREA.contracts.models import new_snapshot
-from Quotation_KEKOREA.contracts.rules import validate_snapshot
+from Quotation_KEKOREA.contracts.rules import validate_snapshot, apply_analysis
+from Quotation_KEKOREA.contracts.models import validate_snapshot as validate_structure
 
 
 def complete_commission_snapshot():
@@ -31,6 +32,42 @@ def complete_commission_snapshot():
 
 
 class ContractRuleTests(unittest.TestCase):
+    def test_multilingual_duplicate_terms_do_not_break_draft_validation(self):
+        snapshot = new_snapshot("solar-contract", "sale", "ko")
+        analysis = {
+            "contract_type": "sale", "parties": [], "issues": [], "questions": [],
+            "terms": [
+                {"key": "수량", "value": "2324938", "unit": "PCS"},
+                {"key": "quantity", "value": "2324938", "unit": "PCS"},
+                {"key": "단가", "value": "0.225", "currency": "USD"},
+                {"key": "unit price", "value": "0.225", "currency": "USD"},
+            ],
+        }
+        result = apply_analysis(snapshot, analysis)
+        self.assertEqual([t["key"] for t in result["terms"]], ["quantity", "unit_price"])
+        self.assertTrue(all(t["status"] == "suggested" for t in result["terms"]))
+        checked = validate_structure(result)
+        self.assertEqual([term["key"] for term in checked["terms"]], ["quantity", "unit_price"])
+        self.assertTrue(all(term["source_refs"] == [] for term in checked["terms"]))
+        self.assertEqual(result["issues"], [])
+
+    def test_conflicting_duplicate_terms_require_review(self):
+        snapshot = new_snapshot("solar-contract", "sale", "ko")
+        analysis = {
+            "contract_type": "sale", "parties": [], "issues": [], "questions": [],
+            "terms": [
+                {"key": "quantity", "value": "2324938", "unit": "PCS"},
+                {"key": "수량", "value": "2324939", "unit": "PCS"},
+            ],
+        }
+        result = apply_analysis(snapshot, analysis)
+        self.assertEqual(len(result["terms"]), 1)
+        self.assertEqual(result["terms"][0]["value"], "2324938")
+        self.assertEqual(result["terms"][0]["status"], "suggested")
+        self.assertTrue(result["clause_extraction_conflicts"])
+        self.assertTrue(any(issue["code"] == "contract_term_extraction_conflict" for issue in result["issues"]))
+        validate_structure(result)
+
     def test_missing_governing_law_and_disputes_block_until_explicit_omission(self):
         snapshot = complete_commission_snapshot()
         issues = validate_snapshot(snapshot, for_export=True)
