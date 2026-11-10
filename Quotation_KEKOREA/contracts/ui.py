@@ -25,6 +25,7 @@ from Quotation_KEKOREA.contracts.workspace import collect_notes, propose_notes_r
 from Quotation_KEKOREA.contracts.final_merge import merge_revision_requests
 from Quotation_KEKOREA.contracts.risk_review_ui import render_risk_review
 from Quotation_KEKOREA.contracts.models import new_snapshot, validate_snapshot
+from Quotation_KEKOREA.contracts.legacy_recovery import prepare_duplicate_term_recovery
 from Quotation_KEKOREA.contracts.library import search_library
 from Quotation_KEKOREA.contracts.review_summary import review_cards
 from Quotation_KEKOREA.contracts.library_ui import render_library_admin, show_library_sources
@@ -147,6 +148,46 @@ def _load_snapshot(repo, contract_id):
     if not isinstance(snapshot, dict):
         raise ContractRepositoryError("Saved contract data is not a valid snapshot.")
     return validate_snapshot(snapshot), revisions
+
+
+def _render_legacy_recovery(repo, contract_id):
+    """Keep malformed historical revisions unchanged until explicit review."""
+    try:
+        revisions = repo.load_contract(contract_id)
+        if not revisions:
+            raise ContractRepositoryError("No saved contract revision was found.")
+        latest = max(revisions, key=lambda row: int(row.get("revision", 0)))
+        original = latest["snapshot"]
+        candidate, collisions = prepare_duplicate_term_recovery(original)
+        if not collisions:
+            st.error("저장된 계약 데이터를 확인할 수 없습니다. 관리자 검토가 필요합니다.")
+            return
+        st.warning("저장된 계약에 중복 거래조건이 있습니다. 원본은 그대로 유지됩니다. 아래 복구 후보를 확인하고 명시적으로 승인해야 새 Revision으로 저장됩니다.")
+        with st.expander("중복 거래조건 비교 (원본 읽기 전용)", expanded=True):
+            for group in collisions:
+                st.markdown(f"**{group['key']}** — 후보 {len(group['candidates'])}개")
+                for term in group["candidates"]:
+                    marker = " (유지 후보)" if term.get("id") == group["selected_id"] else ""
+                    st.write(f"{term.get('key')} | {term.get('value')} | {term.get('unit') or ''} | {term.get('currency') or ''} | {term.get('status')}{marker}")
+            st.caption("충돌값은 자동으로 확정되지 않습니다. 복구 후 BOX 2에서 반드시 검토하세요.")
+        consent = st.checkbox(
+            "중복 조건의 유지 후보와 원본 충돌 기록을 검토했으며, 새 Revision으로 복구하겠습니다.",
+            key=f"legacy_recovery_ack_{contract_id}",
+        )
+        if st.button("검토한 중복 조건 복구 저장", disabled=not consent,
+                     key=f"legacy_recovery_commit_{contract_id}"):
+            # Create a new revision instead of modifying historical revisions.
+            candidate.pop("_term_recovery_pending", None)
+            saved = _save_snapshot(
+                repo, candidate, "User-approved historical duplicate term recovery",
+                expected_revision=int(original["revision"]),
+            )
+            st.session_state[f"contract_snapshot_{contract_id}"] = saved
+            st.session_state.pop("contract_revisions", None)
+            st.success("기존 Revision을 보존하고 새 Revision으로 복구했습니다.")
+            st.rerun()
+    except (ValueError, ContractRepositoryError) as exc:
+        st.error(f"저장 계약 복구 준비 실패: {exc}")
 
 
 def _rows(value):
@@ -1474,11 +1515,9 @@ def render_contract_page(page, env):
             ):
                 st.session_state["contract_active_id"] = contract_id
                 st.session_state.pop(f"contract_snapshot_{contract_id}", None)
-                try:
-                    _ensure_active_snapshot(repo, contract_id)
-                    st.rerun()
-                except (ValueError, ContractRepositoryError) as exc:
-                    st.error(str(exc))
+                # Loading and legacy-revision recovery are handled below;
+                # opening a corrupt historical snapshot must not block access.
+                st.rerun()
             if delete_col.button("X", key=f"contract_delete_{contract_id}",
                                  help=f"{record['title']} 삭제"):
                 st.session_state["contract_delete_pending_id"] = contract_id
@@ -1496,7 +1535,13 @@ def render_contract_page(page, env):
         return
     try:
         snapshot = _ensure_active_snapshot(repo, active_id)
-    except (ValueError, ContractRepositoryError) as exc:
+    except ValueError as exc:
+        if "Contract term keys must be unique" in str(exc):
+            _render_legacy_recovery(repo, active_id)
+        else:
+            st.error(str(exc))
+        return
+    except ContractRepositoryError as exc:
         st.error(str(exc))
         return
     state_key = f"contract_snapshot_{active_id}"
