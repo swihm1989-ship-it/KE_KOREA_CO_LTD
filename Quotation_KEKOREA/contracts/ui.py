@@ -1354,11 +1354,19 @@ def _contract_chat(repo, snapshot, state_key, env):
                              if clause.get("active")
                              and updated["contract_type"] in clause.get("contract_types", [])
                              and clause.get("language") == updated["language"]]
-                with st.spinner("확인되지 않은 항목을 표시하고 계약서 초안을 작성합니다..."):
-                    updated = generate_draft(
-                        updated, preferred, env=env, reference_context=selected_context,
-                        transaction_messages=prior_messages, repo=repo, use_library=use_library,
-                        initial_library_sources=library_result['sources'])
+                with st.status("계약서 AI 실행 단계 준비 중", expanded=True) as draft_status:
+                    def progress(stage):
+                        draft_status.update(label=f"계약서 AI · {stage}", state="running")
+                    try:
+                        updated = generate_draft(
+                            updated, preferred, env=env, reference_context=selected_context,
+                            transaction_messages=prior_messages, repo=repo, use_library=use_library,
+                            initial_library_sources=library_result['sources'],
+                            progress_callback=progress)
+                    except Exception:
+                        draft_status.update(label="계약서 AI 실행 실패 · 기존 초안 유지", state="error")
+                        raise
+                    draft_status.update(label="계약서 AI 초안 품질 검토 완료", state="complete")
                 made_draft = True
             if snapshot.get("clauses"):
                 st.session_state[f"contract_pending_analysis_{snapshot['contract_id']}"] = {
@@ -1648,12 +1656,21 @@ def render_contract_page(page, env):
                         reference_context += library_result['references']
                         for message in library_result['notices']:
                             st.warning(message)
-                    draft = generate_draft(
-                        snapshot, preferred, env=env, reference_context=reference_context,
-                        transaction_messages=repo.list_messages(active_id),
-                        repo=repo, use_library=st.session_state.get(f'contract_use_library_{active_id}', True),
-                        initial_library_sources=library_result['sources'],
-                    )
+                    with st.status("계약서 AI 실행 단계 준비 중", expanded=True) as draft_status:
+                        def progress(stage):
+                            draft_status.update(label=f"계약서 AI · {stage}", state="running")
+                        try:
+                            draft = generate_draft(
+                                snapshot, preferred, env=env, reference_context=reference_context,
+                                transaction_messages=repo.list_messages(active_id),
+                                repo=repo, use_library=st.session_state.get(f'contract_use_library_{active_id}', True),
+                                initial_library_sources=library_result['sources'],
+                                progress_callback=progress,
+                            )
+                        except Exception:
+                            draft_status.update(label="계약서 AI 실행 실패 · 기존 초안 유지", state="error")
+                            raise
+                        draft_status.update(label="계약서 AI 초안 품질 검토 완료", state="complete")
                     saved = _save_snapshot(repo, draft, "AI generated contract draft")
                     st.session_state[state_key] = saved
                     st.success(f"초안을 revision {saved['revision']}로 저장했습니다.")
