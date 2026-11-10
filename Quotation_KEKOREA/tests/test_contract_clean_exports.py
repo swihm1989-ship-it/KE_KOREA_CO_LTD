@@ -160,6 +160,53 @@ class CleanContractExportTests(unittest.TestCase):
             self.assertEqual(text.count('Company:'), 2)
             self.assertEqual(text.count('Signature:'), 2)
 
+    def test_korean_buyer_summary_is_excluded_but_actual_terms_remain(self):
+        data = sample("구매자: TENGYAO TECHNOLOGY CO. LTD, 대표자: ALEX, 서명: [서명].")
+        data['clauses'][0]['sentences'].append({
+            'id': 'business',
+            'text': '구매자는 2026년 12월 31일까지 물품을 인수한다.'
+        })
+        exported = export_contract(data, formats=('docx','pdf'))
+        document = Document(io.BytesIO(exported['docx']['content']))
+        doc_text = '\\n'.join(p.text for p in document.paragraphs)
+        self.assertNotIn('대표자: ALEX, 서명: [서명]', doc_text)
+        self.assertIn('2026년 12월 31일까지', doc_text)
+        with fitz.open(stream=exported['pdf']['content'], filetype='pdf') as pdf:
+            text = '\\n'.join(p.get_text() for p in pdf)
+            self.assertNotIn('대표자: ALEX, 서명: [서명]', text)
+            self.assertIn('2026년 12월 31일까지', text)
+
+    def test_contract_fonts_and_seal_print_dimensions(self):
+        from Quotation_KEKOREA.contracts.exports import _stamp_width_height
+        import base64
+        original = sample('The supplier agrees to deliver goods.')
+        original['language'] = 'en'
+        original['title'] = 'Solar Supply Agreement'
+        document = Document(io.BytesIO(
+            export_contract(original, formats=('docx',), seal_bytes=TEST_STAMP)['docx']['content'
+        ]))
+        for name, size, bold in [('Normal', 10, False), ('Title', 18, True),
+                                 ('Heading 2', 12, True)]:
+            style = document.styles[name]
+            self.assertEqual(style.font.name, 'Malgun Gothic')
+            self.assertEqual(style.font.size.pt, size)
+            self.assertEqual(style.font.bold, bold)
+        self.assertAlmostEqual(document.inline_shapes[0].width.cm, 10, places=1)
+        self.assertAlmostEqual(document.tables[0].columns[1].width.cm, 10, places=1)
+        with fitz.open(stream=export_contract(
+            original, formats=('pdf',), seal_bytes=TEST_STAMP)['pdf']['content'
+        ], filetype='pdf') as pdf:
+            text_spans = [s for page in pdf for b in page.get_text('dict')['blocks']
+                          if 'lines' in b for line in b['lines'] for s in line['spans']]
+            title = next(s for s in text_spans if 'Solar Supply Agreement' in s['text'])
+            body = next(s for s in text_spans if 'The supplier agrees' in s['text'])
+            self.assertAlmostEqual(title['size'], 18, delta=0.2)
+            self.assertAlmostEqual(body['size'], 10, delta=0.2)
+            img_rects = [rect for page in pdf for img in page.get_images(full=True)
+                         for rect in page.get_image_rects(img[0])]
+            self.assertEqual(len(img_rects), 1)
+            self.assertAlmostEqual(img_rects[0].width * 2.54 / 72, 10, delta=0.2)
+
     def test_final_pdf_still_renders(self):
         data=export_contract(sample(),formats=('pdf',),seal_bytes=TEST_STAMP)['pdf']['content']
         self.assertTrue(data.startswith(b'%PDF-'))
