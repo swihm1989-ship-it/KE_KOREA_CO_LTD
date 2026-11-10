@@ -9,6 +9,20 @@ from Quotation_KEKOREA.contracts.models import validate_snapshot
 from Quotation_KEKOREA.contracts.normalize_terms import normalize_term_keys
 
 
+def has_legacy_duplicate_term_keys(snapshot):
+    """Detect literal and multilingual alias collisions without modifying data."""
+    seen = set()
+    for term in snapshot.get("terms", []):
+        if not isinstance(term, dict) or not term.get("key"):
+            continue
+        normalized, _ = normalize_term_keys({"terms": [term]})
+        key = normalized["terms"][0]["key"]
+        if key in seen:
+            return True
+        seen.add(key)
+    return False
+
+
 def prepare_duplicate_term_recovery(snapshot):
     """Return a validated, UNSAVED candidate plus original duplicate details.
 
