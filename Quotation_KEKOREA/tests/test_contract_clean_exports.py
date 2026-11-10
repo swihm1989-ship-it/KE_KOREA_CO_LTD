@@ -44,6 +44,24 @@ class CleanContractExportTests(unittest.TestCase):
         errors=final_document_blockers(sample('월 인도일은 [서명 전 확인]으로 한다.'))
         self.assertTrue(errors)
 
+    def test_user_may_explicitly_export_unresolved_authored_text(self):
+        original = sample('배상 한도는 [서명 전 확인]으로 한다.')
+        self.assertTrue(final_document_blockers(original))
+        self.assertEqual(final_document_blockers(original, allow_unresolved_text=True), [])
+        # The opt-in never silently deletes or resolves the authored wording.
+        docx = export_contract(original, formats=('docx',))['docx']['content']
+        body = '\\n'.join(p.text for p in Document(io.BytesIO(docx)).paragraphs)
+        self.assertIn('[서명 전 확인]', body)
+
+    def test_opt_in_does_not_bypass_signatories_or_reconciliation(self):
+        original = sample('손해배상 한도는 [서명 전 확인]으로 한다.')
+        original['parties'] = [{'legal_name': 'Unknown', 'roles': ['seller']}]
+        original['pending_reconciliation'] = {'changes': ['pending']}
+        problems = final_document_blockers(original, allow_unresolved_text=True)
+        self.assertTrue(any('본문 반영' in msg for msg in problems))
+        self.assertTrue(any('KE KOREA' in msg for msg in problems))
+        self.assertTrue(any('매도인·매수인' in msg for msg in problems))
+
     def test_final_docx_places_only_one_stamp_on_ke_korea_party(self):
         result=export_contract(sample(),formats=('docx',),seal_bytes=TEST_STAMP)
         data=result['docx']['content']
