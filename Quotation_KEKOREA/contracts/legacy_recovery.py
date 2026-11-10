@@ -25,8 +25,8 @@ def prepare_duplicate_term_recovery(snapshot):
         normalized, _ = normalize_term_keys({"terms": [term]})
         if not normalized["terms"]:
             raise ValueError("Saved contract has an unrecognized empty term.")
-        item = normalized["terms"][0]
-        key = item["key"]
+        item = deepcopy(term)
+        key = normalized["terms"][0]["key"]
         if key not in groups:
             ordered_keys.append(key)
             groups[key] = []
