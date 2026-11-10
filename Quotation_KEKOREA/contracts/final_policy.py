@@ -2,18 +2,26 @@
 import re
 
 _PLACEHOLDER = re.compile(
-    r'\[(?:서명\s*전\s*확인|확인\s*필요|필수\s*확인|TBD(?:\s*/[^\]]*)?|'
-    r'TO\s*CONFIRM|TO\s*BE\s*CONFIRMED|PENDING\s*CONFIRMATION)\]', re.I)
+    r'\[(?:서명\s*전\s*확인(?:\s*[:：][^\]]*)?|'
+    r'확인\s*필요(?:\s*[:：][^\]]*)?|'
+    r'필수\s*확인(?:\s*[:：][^\]]*)?|'
+    r'TBD(?:\s*/[^\]]*)?|TO\s*CONFIRM|TO\s*BE\s*CONFIRMED|'
+    r'PENDING\s*CONFIRMATION)\]', re.I)
 
-def final_document_blockers(snapshot):
-    """Block document placeholders and unreconciled changes, not every BOX 2 suggestion."""
+def final_document_blockers(snapshot, *, allow_unresolved_text=False):
+    """Block unsafe final exports; allow authored placeholders only by opt-in.
+
+    Leaving review questions unresolved must not be mistaken for approving them.
+    An explicit user acknowledgement in the UI is required for this opt-in;
+    it never bypasses signatory, seal-authorization, or pending-change checks.
+    """
     problems = []
     clauses = snapshot.get('clauses') or []
     if not any(str(s.get('text') or '').strip() for c in clauses for s in c.get('sentences', [])):
         problems.append('최종 계약서에 실제 계약 조항이 없습니다.')
     for clause in clauses:
         for sentence in clause.get('sentences', []):
-            if _PLACEHOLDER.search(str(sentence.get('text') or '')):
+            if not allow_unresolved_text and _PLACEHOLDER.search(str(sentence.get('text') or '')):
                 problems.append('BOX 3에 임시 확인 문구가 남았습니다: '+str(sentence.get('text') or '')[:90])
     if snapshot.get('pending_reconciliation'):
         problems.append('BOX 2 변경사항의 본문 반영·승인이 남아 있습니다.')
