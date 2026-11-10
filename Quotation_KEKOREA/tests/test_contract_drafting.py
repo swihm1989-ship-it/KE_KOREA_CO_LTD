@@ -151,6 +151,58 @@ class DraftingTests(unittest.TestCase):
             generate_reviewed_draft(self.snapshot, [], env=ENV, client=self.opener())
         self.assertEqual(self.calls, [])
 
+    def test_nonverbatim_clause_quote_recovers_with_one_audit_retry(self):
+        original = deepcopy(self.snapshot)
+        events = []
+        base = self.opener(complete=True)
+        seen = {'count': 0}
+
+        def first_bad_quote(request, timeout):
+            response = base(request, timeout)
+            if self.calls[-1].get('drafting_task') == 'audit':
+                seen['count'] += 1
+                if seen['count'] == 1:
+                    response.value['clause_checks'][0]['evidence'][0]['quote'] = 'Paraphrased, nonexistent sentence'
+            return response
+
+        result = generate_reviewed_draft(
+            self.snapshot, [], env=ENV, client=first_bad_quote,
+            progress_callback=events.append,
+        )
+        self.assertEqual([call['drafting_task'] for call in self.calls],
+                         ['draft', 'audit', 'audit'])
+        self.assertIn('AI 검토 인용 불일치 · 동일 초안으로 근거 재검증 (1회)', events)
+        self.assertTrue(result['draft_quality']['checks'])
+        self.assertEqual(self.snapshot, original)
+
+    def test_repeated_bad_citation_fails_closed_and_identifies_clause(self):
+        original = deepcopy(self.snapshot)
+        base = self.opener(complete=True)
+
+        def always_bad(request, timeout):
+            response = base(request, timeout)
+            if self.calls[-1].get('drafting_task') == 'audit':
+                response.value['clause_checks'][0]['evidence'][0]['quote'] = 'Never in the actual clause.'
+            return response
+
+        with self.assertRaisesRegex(ValueError, 'clause_id=scope, sentence_id=scope_s1'):
+            generate_reviewed_draft(self.snapshot, [], env=ENV, client=always_bad)
+        self.assertEqual([call['drafting_task'] for call in self.calls],
+                         ['draft', 'audit', 'audit'])
+        self.assertEqual(self.snapshot, original)
+
+    def test_invalid_audit_structure_is_not_retried(self):
+        base = self.opener(complete=True)
+        def incomplete_review(request, timeout):
+            response = base(request, timeout)
+            if self.calls[-1].get('drafting_task') == 'audit':
+                response.value['clause_checks'] = []
+            return response
+        with self.assertRaisesRegex(ValueError, 'every generated clause'):
+            generate_reviewed_draft(self.snapshot, [], env=ENV, client=incomplete_review)
+        self.assertEqual([call['drafting_task'] for call in self.calls],
+                         ['draft', 'audit'])
+
     def test_invalid_audit_and_repair_outputs_fail_without_mutating_input(self):
         for mode in ('missing_topic', 'false_quote', 'invalid_status', 'duplicate_clause', 'lost_sentence', 'false_citation'):
             with self.subTest(mode=mode):
