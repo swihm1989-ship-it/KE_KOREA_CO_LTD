@@ -211,6 +211,32 @@ class CleanContractExportTests(unittest.TestCase):
             self.assertEqual(len(img_rects), 1)
             self.assertAlmostEqual(img_rects[0].width * 2.54 / 72, 10, delta=0.2)
 
+    def test_polished_contract_headings_and_signature_labels(self):
+        contract = sample('납품 조건은 계약서에 명시된 내용을 따른다.')
+        contract['created_at'] = '2026-11-10'
+        contract['parties'][0]['representative'] = 'SEOKWON IHM'
+        contract['parties'][1]['representative'] = 'ALEX'
+        outputs = export_contract(contract, formats=('pdf', 'docx'))
+        docx = Document(io.BytesIO(outputs['docx']['content']))
+        self.assertEqual(docx.styles['Heading 1'].font.size.pt, 18)
+        self.assertTrue(docx.styles['Heading 1'].font.bold)
+        self.assertEqual(docx.styles['Heading 2'].font.size.pt, 12)
+        self.assertEqual(docx.styles['Normal'].font.size.pt, 10)
+        self.assertTrue(any(p.style.name == 'Heading 2' and p.text == 'Supplier'
+                            for row in docx.tables[0].rows for cell in row.cells
+                            for p in cell.paragraphs))
+        self.assertTrue(any(p.style.name == 'Heading 2' and p.text == 'Buyer'
+                            for row in docx.tables[0].rows for cell in row.cells
+                            for p in cell.paragraphs))
+        with fitz.open(stream=outputs['pdf']['content'], filetype='pdf') as pdf:
+            spans = [sp for page in pdf for block in page.get_text('dict')['blocks']
+                     if 'lines' in block for ln in block['lines'] for sp in ln['spans']]
+            self.assertTrue(any(sp['text'] == 'Supplier' and abs(sp['size'] - 12) < .2
+                                for sp in spans))
+            self.assertTrue(any(sp['text'] == 'Buyer' and abs(sp['size'] - 12) < .2
+                                for sp in spans))
+            self.assertEqual(sum('서명' in page.get_text() for page in pdf), 1)
+
     def test_final_pdf_still_renders(self):
         data=export_contract(sample(),formats=('pdf',),seal_bytes=TEST_STAMP)['pdf']['content']
         self.assertTrue(data.startswith(b'%PDF-'))
