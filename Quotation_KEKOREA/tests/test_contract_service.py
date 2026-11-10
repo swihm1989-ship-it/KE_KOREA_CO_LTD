@@ -150,7 +150,7 @@ class ContractServiceTests(unittest.TestCase):
     def test_analysis_normalizes_absent_and_single_source_references(self):
         quote = 'Price is USD 0.225 per PCS.'
         citation = {'kind': 'user', 'message_id': 'm1', 'quote': quote}
-        for refs in (None, citation):
+        for refs in (None, '', citation):
             with self.subTest(refs=refs):
                 response = {
                     'contract_type': 'sale',
@@ -166,14 +166,43 @@ class ContractServiceTests(unittest.TestCase):
                     {'contract_type': 'sale'}, [],
                     env={'OPENAI_API_KEY': 'test', 'OPENAI_MODEL': 'test'},
                     client=self.opener_for(response))
-                expected = [] if refs is None else [citation]
+                expected = [] if refs in (None, '') else [citation]
                 self.assertEqual(result['parties'][0]['source_refs'], expected)
                 self.assertEqual(result['terms'][0]['source_refs'], expected)
+                self.assertEqual(result['issues'], [])
                 self.assertEqual(result['terms'][0]['value'], '0.225')
                 self.assertEqual(json.dumps(response, sort_keys=True), original)
 
+    def test_analysis_marks_string_references_unverified_without_accepting_them(self):
+        quote = 'Price is USD 0.225.'
+        for refs in (quote, 'unverifiable citation', '   '):
+            with self.subTest(refs=refs):
+                response = {
+                    'contract_type': 'sale',
+                    'parties': [{'legal_name': 'Example', 'roles': ['seller'],
+                                 'source_refs': refs}],
+                    'terms': [{'key': 'unit_price', 'value': '0.225',
+                               'status': 'suggested', 'source_refs': refs}],
+                    'questions': [], 'issues': [],
+                }
+                snapshot = {'contract_type': 'sale', 'revision': 1}
+                original = json.dumps(response, sort_keys=True)
+                result = analyze_trade(
+                    [{'id': 'm1', 'role': 'user', 'content': quote}], snapshot, [],
+                    env={'OPENAI_API_KEY': 'test', 'OPENAI_MODEL': 'test'},
+                    client=self.opener_for(response))
+                self.assertEqual(result['parties'][0]['source_refs'], [])
+                self.assertEqual(result['terms'][0]['source_refs'], [])
+                self.assertEqual(len(result['issues']), 2)
+                for issue in result['issues']:
+                    self.assertEqual(issue['code'], 'unverified_ai_source_ref')
+                    self.assertEqual(issue['severity'], 'confirm')
+                self.assertEqual(result['terms'][0]['value'], '0.225')
+                self.assertEqual(snapshot, {'contract_type': 'sale', 'revision': 1})
+                self.assertEqual(json.dumps(response, sort_keys=True), original)
+
     def test_analysis_rejects_malformed_or_fabricated_source_references(self):
-        for refs in ('Price is USD 0.225.', ['m1'], [None], {},
+        for refs in (['m1'], [None], {},
                      {'kind': 'user', 'quote': 'Price is USD 9.'},
                      {'kind': 'reference', 'document_id': 'missing', 'quote': 'Price.'}):
             with self.subTest(refs=refs):

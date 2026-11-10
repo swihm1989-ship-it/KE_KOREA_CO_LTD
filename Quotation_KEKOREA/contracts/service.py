@@ -314,7 +314,11 @@ def analyze_trade(messages, current_snapshot, reference_context, *, env, client=
             elif isinstance(raw_refs, dict):
                 source_refs = [raw_refs]
             elif isinstance(raw_refs, str):
-                source_refs = [raw_refs]
+                source_refs = []
+                data["issues"].append({
+                    "code": "unverified_ai_source_ref", "severity": "confirm",
+                    "message": f"AI source for {owner_label} was not a verifiable citation. Confirm the extracted information against the original input."
+                })
             elif isinstance(raw_refs, list):
                 source_refs = raw_refs
             else:
@@ -322,13 +326,10 @@ def analyze_trade(messages, current_snapshot, reference_context, *, env, client=
             verified_refs = []
             for source_ref in source_refs:
                 if source_ref is None or isinstance(source_ref, str):
-                    if isinstance(source_ref, str) and not source_ref.strip():
-                        continue
-                    data["issues"].append({
-                        "code": "unverified_ai_source_ref", "severity": "confirm",
-                        "message": f"AI source for {owner_label} was not a verifiable citation. Confirm the extracted information against the original input."
-                    })
-                    continue
+                    raise ValueError(
+                        f"Contract AI returned an invalid source reference for {owner_label}: "
+                        f"{type(source_ref).__name__}."
+                    )
                 if not isinstance(source_ref, dict):
                     raise ValueError(f"Contract AI returned an invalid source reference for {owner_label}: {type(source_ref).__name__}.")
                 kind = source_ref.get("kind")
