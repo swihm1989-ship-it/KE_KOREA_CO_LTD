@@ -237,6 +237,57 @@ class CleanContractExportTests(unittest.TestCase):
                                 for sp in spans))
             self.assertEqual(sum('서명' in page.get_text() for page in pdf), 1)
 
+    def test_user_entered_signer_title_localized_to_output_language(self):
+        from Quotation_KEKOREA.contracts.signature_layout import signature_blocks
+        contract = sample()
+        contract['parties'][0].update(
+            representative='SEOKWON IHM', representative_title='CEO',
+            address='157 Yangpyeong-ro, Seoul, Republic of Korea')
+        contract['parties'][1].update(
+            representative='ALEX', representative_title='대표이사',
+            address='Wuxi Economic Free Zone Unit 7, China')
+        contract['language'] = 'en'
+        blocks = signature_blocks(contract)
+        self.assertEqual(blocks[0]['name_title'], 'SEOKWON IHM, Chief Executive Officer')
+        self.assertEqual(blocks[1]['name_title'], 'ALEX, Chief Executive Officer')
+        contract['language'] = 'ko'
+        blocks = signature_blocks(contract)
+        self.assertEqual(blocks[0]['name_title'], 'SEOKWON IHM, 대표이사')
+        self.assertEqual(blocks[1]['name_title'], 'ALEX, 대표이사')
+
+    def test_non_ceo_roles_and_missing_titles_are_not_invented(self):
+        from Quotation_KEKOREA.contracts.signature_layout import signature_blocks
+        contract = sample()
+        contract['language'] = 'en'
+        contract['parties'][0].update(
+            representative='SEOKWON IHM', representative_title='이사')
+        contract['parties'][1].update(
+            representative='ALEX', representative_title='',
+            address='Wuxi, China')
+        blocks = signature_blocks(contract)
+        self.assertEqual(blocks[0]['name_title'], 'SEOKWON IHM, Director')
+        self.assertEqual(blocks[1]['name_title'], 'ALEX')
+        contract['parties'][1]['representative_title'] = 'Procurator'
+        self.assertEqual(signature_blocks(contract)[1]['name_title'], 'ALEX, Procurator')
+
+    def test_exported_pdf_and_docx_use_translated_signer_titles(self):
+        data = sample('Delivery shall follow the written schedule.')
+        data['language'] = 'en'
+        data['parties'][1].update(
+            legal_name='TENGYAO TECHNOLOGY CO. LTD',
+            representative='ALEX', representative_title='대표이사',
+            address='Wuxi, China')
+        exported = export_contract(data, formats=('pdf', 'docx'))
+        doc = Document(io.BytesIO(exported['docx']['content']))
+        cell_text = '\\n'.join(cell.text for table in doc.tables
+                                for row in table.rows for cell in row.cells)
+        self.assertIn('ALEX, Chief Executive Officer', cell_text)
+        self.assertNotIn('ALEX, 대표이사', cell_text)
+        with fitz.open(stream=exported['pdf']['content'], filetype='pdf') as pdf:
+            text = '\\n'.join(page.get_text() for page in pdf)
+            self.assertIn('ALEX, Chief Executive Officer', text)
+            self.assertNotIn('ALEX, 대표이사', text)
+
     def test_final_pdf_still_renders(self):
         data=export_contract(sample(),formats=('pdf',),seal_bytes=TEST_STAMP)['pdf']['content']
         self.assertTrue(data.startswith(b'%PDF-'))
