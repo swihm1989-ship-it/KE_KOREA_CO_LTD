@@ -8,10 +8,14 @@ from datetime import datetime
 import re
 from zoneinfo import ZoneInfo
 
+# Match only generated signature-summary lines, never substantive clauses.
+# Both the English [signature] and Korean [서명] placeholders occur in
+# historical AI drafts. Do not let this match span multiple paragraphs.
 _SIGNATURE_SUMMARY = re.compile(
-    r'^\s*(?:Supplier|Seller|Buyer|공급자|매도인|매수인)\s*[:：].*'
-    r'(?:Signature\s*[:：]\s*\[signature\]|서명\s*[:：])',
-    re.I | re.S,
+    r'^\s*(?:Supplier|Seller|Buyer|공급자|매도인|매수인|구매자)\s*[:：]'
+    r'[^\r\n]{0,500}?(?:Representative|대표자)\s*[:：][^\r\n]{0,200}?'
+    r'(?:Signature|서명)\s*[:：]\s*\[\s*(?:signature|서명)\s*\]\s*[.。]?\s*$',
+    re.I,
 )
 _SIGNATURE_TITLES = {'서명', '서명란', 'signatures', 'signature', 'signing'}
 
