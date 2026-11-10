@@ -11,6 +11,8 @@ from langgraph.graph import StateGraph, START, END
 
 from Quotation_KEKOREA.contracts.models import validate_snapshot
 from Quotation_KEKOREA.contracts.drafting import generate_reviewed_draft
+from Quotation_KEKOREA.contracts.service import analyze_trade
+from Quotation_KEKOREA.contracts.normalize_terms import normalize_term_keys
 
 
 class ContractDraftState(TypedDict, total=False):
@@ -61,3 +63,44 @@ def generate_contract_draft_graph(snapshot, preferred_clauses, *, env,
     graph.add_edge("validate_reviewed_result", END)
     result = graph.compile().invoke({"snapshot": deepcopy(snapshot)})
     return result["draft"]
+
+
+class ContractAnalysisState(TypedDict, total=False):
+    analysis: dict[str, Any]
+    normalized: dict[str, Any]
+
+
+def analyze_contract_terms_graph(messages, current_snapshot, reference_context,
+                                 *, env, client=None):
+    """Contract-only analysis graph: AI extraction -> conservative validation.
+
+    This also covers the AI conversation stage preceding draft creation.
+    Duplicate or conflicting proposals never silently become approved facts.
+    """
+    def extract(_state: ContractAnalysisState):
+        data = analyze_trade(
+            deepcopy(messages), deepcopy(current_snapshot),
+            deepcopy(reference_context), env=env, client=client,
+        )
+        return {"analysis": data}
+
+    def verify(state: ContractAnalysisState):
+        normalized, warnings = normalize_term_keys(state["analysis"])
+        if warnings:
+            normalized["clause_extraction_conflicts"] = warnings
+            normalized.setdefault("issues", []).append({
+                "code": "contract_term_extraction_conflict",
+                "severity": "confirm",
+                "message": "AI 추출 조건에 중복 또는 의미가 모호한 항목이 있습니다. BOX 2에서 확인하세요.",
+            })
+        if len({term["key"] for term in normalized.get("terms", [])}) != len(normalized.get("terms", [])):
+            raise ValueError("Contract AI returned unresolved duplicate term keys.")
+        return {"normalized": normalized}
+
+    graph = StateGraph(ContractAnalysisState)
+    graph.add_node("extract_contract_terms", extract)
+    graph.add_node("validate_contract_terms", verify)
+    graph.add_edge(START, "extract_contract_terms")
+    graph.add_edge("extract_contract_terms", "validate_contract_terms")
+    graph.add_edge("validate_contract_terms", END)
+    return graph.compile().invoke({})["normalized"]
