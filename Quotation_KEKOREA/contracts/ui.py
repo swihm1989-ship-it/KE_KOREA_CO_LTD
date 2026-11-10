@@ -15,7 +15,7 @@ from uuid import NAMESPACE_URL, uuid4, uuid5
 import streamlit as st
 
 from Quotation_KEKOREA.contracts.editing import (
-    RevisionConflict, apply_proposal, restore_revision,
+    RevisionConflict, apply_proposal, restore_revision, propose_sentence_deletion,
 )
 from Quotation_KEKOREA.contracts.exports import export_contract
 from Quotation_KEKOREA.contracts.contract_versions import copy_contract, translate_contract, localized_term_label
@@ -54,6 +54,18 @@ from Quotation_KEKOREA.contracts.ai_graph import (
     generate_contract_draft_graph as generate_draft,
     analyze_contract_terms_graph as analyze_trade,
 )
+
+
+LANGUAGE_SUFFIXES = {"ko": "KR", "en": "EN", "zh": "CN", "zh-CN": "CN",
+                     "cn": "CN", "id": "IDN", "idn": "IDN"}
+
+
+def contract_list_label(record):
+    """Language is view metadata, not part of the legal contract title."""
+    title = str(record.get("title") or "Contract")
+    language = str(record.get("language") or "").strip()
+    suffix = LANGUAGE_SUFFIXES.get(language, LANGUAGE_SUFFIXES.get(language.lower()))
+    return f"{title} [{suffix}]" if suffix else title
 
 
 TYPE_LABELS = {
@@ -500,7 +512,7 @@ def _proposal_panel(repo, snapshot, proposal, state_key):
             st.caption("수정 전")
             st.write(change.get("original_text") or "—")
             st.caption("수정 후")
-            st.write(change.get("proposed_text") or "—")
+            st.write("**삭제 예정**" if change.get("delete_sentence") else (change.get("proposed_text") or "—"))
             if change.get("reason"):
                 st.caption("변경 이유: " + change["reason"])
             if is_required:
@@ -824,6 +836,20 @@ def _render_draft(repo, snapshot, state_key, env):
                                 st.button("메모 삭제", key=f"contract_note_remove_{contract_id}_{sentence_id}",
                                           on_click=_remove_note, args=(repo, snapshot, sentence_id, saved_notes,
                                                                       buffer_key, open_key, widget_key))
+                            # Deletion is a normal, reversible revision proposal,
+                            # never an immediate change to an approved contract.
+                            pending_proposal = st.session_state.get('contract_pending_proposal') or {}
+                            pending_here = pending_proposal.get('contract_id') == contract_id
+                            if st.button("문장 삭제", key=f"contract_delete_sentence_{contract_id}_{sentence_id}",
+                                         disabled=pending_here,
+                                         help="삭제 전 전체 계약서 비교·승인 단계가 표시됩니다."):
+                                try:
+                                    proposal = propose_sentence_deletion(snapshot, sentence_id)
+                                    st.session_state['contract_pending_proposal'] = proposal
+                                    st.session_state['contract_pending_proposal_key'] = state_key
+                                    st.rerun()
+                                except (ValueError, RevisionConflict) as exc:
+                                    st.error(str(exc))
                             if st.button("메모 닫기", key=f"contract_note_close_{contract_id}_{sentence_id}"):
                                 buffers[sentence_id] = note
                                 opened.remove(sentence_id)
@@ -1601,7 +1627,7 @@ def render_contract_page(page, env):
             contract_id = str(record["id"])
             title_col, delete_col = st.columns([12, 1])
             if title_col.button(
-                record["title"], key=f"contract_open_{page}_{contract_id}",
+                contract_list_label(record), key=f"contract_open_{page}_{contract_id}",
                 use_container_width=True,
             ):
                 st.session_state["contract_active_id"] = contract_id
