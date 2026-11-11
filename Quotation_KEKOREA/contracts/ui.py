@@ -1,4 +1,5 @@
 from Quotation_KEKOREA.contracts.clause_terms import clause_evidence, merge_clause_candidates
+from Quotation_KEKOREA.contracts.sale_scope_render import sales_scope_display_text
 from Quotation_KEKOREA.contracts.latest_instruction import (
     candidate_from_latest, instruction_hash, is_explicit_change, latest_unapplied_request,
 )
@@ -487,7 +488,7 @@ def _render_revision_preview(snapshot, heading):
         st.markdown(f"**{clause.get('title') or ''}**")
         for sentence in clause.get('sentences') or []:
             if str(sentence.get('text') or '').strip():
-                st.write(sentence['text'])
+                st.write(sales_scope_display_text(sentence))
     blockers = final_document_blockers(snapshot)
     if blockers:
         st.caption(f'최종 PDF 생성 전 해결할 실제 본문 조건 {len(blockers)}건. 미리보기와 최종 날인은 별개의 단계입니다.')
@@ -785,7 +786,8 @@ def _render_draft(repo, snapshot, state_key, env):
                 st.markdown(f"<h4>{escape(clause.get('title', ''))}</h4>", unsafe_allow_html=True)
                 for sentence in clause.get('sentences', []):
                     sentence_id = sentence['id']
-                    displayed_text = preview_texts.get(sentence_id, sentence['text'])
+                    displayed_text = sales_scope_display_text(
+                        sentence, preview_texts.get(sentence_id, sentence['text']))
                     is_open = sentence_id in opened
                     # A stable two-column row, even before the note is opened.
                     # Keeps document text aligned with a Word-style comment gutter.
