@@ -7,6 +7,7 @@ in-memory and invalidates generated contract clauses.
 from __future__ import annotations
 
 from copy import deepcopy
+from decimal import Decimal, InvalidOperation
 from dataclasses import dataclass
 from typing import Any, Mapping
 
@@ -106,8 +107,13 @@ def apply_answer(candidates: Mapping[str, Any], key: str, value: str) -> dict[st
         raise ValueError("내용을 입력해 주세요 (1~1,500자).")
     text = value.strip()
     if key in {"item.quantity", "item.unit_price"}:
-        # Numeric terms are handled by original deterministic document validator.
-        raise ValueError("숫자 조건 변경은 원래 검증 엔진에서 확인해 주세요.")
+        try:
+            number = Decimal(text.replace(",", ""))
+            if not number.is_finite() or number <= 0:
+                raise InvalidOperation
+        except (InvalidOperation, ValueError):
+            raise ValueError("수량·단가에는 0보다 큰 숫자를 입력해 주세요.") from None
+        text = format(number, "f")
     if not isinstance(candidates, Mapping):
         raise ValueError("거래조건이 없습니다.")
     revised = deepcopy(dict(candidates))
