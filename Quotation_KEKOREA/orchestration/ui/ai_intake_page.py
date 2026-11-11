@@ -58,6 +58,40 @@ def _handle_missing_answer(digest: str, key: str, widget_key: str) -> None:
     st.session_state.pop("ai_intake_followup_error", None)
 
 
+def _apply_pdf_required_fields(digest: str) -> None:
+    """Apply submitted form values before the next Streamlit widget render."""
+    saved = st.session_state.get("ai_intake_candidates")
+    if not saved or saved[0] != digest:
+        return
+    changed = deepcopy(saved[1])
+    fields = {name: str(st.session_state.get("master_pdf_" + name) or "").strip()
+              for name in ("doc_no", "buyer_name", "buyer_addr", "seller_name",
+                           "seller_addr", "currency", "incoterms", "payment",
+                           "product", "quantity", "unit", "price", "basis",
+                           "price_source", "shipment", "origin")}
+    for kind, trade in changed.items():
+        if kind not in ("PI", "PO", "CI", "PL") or not isinstance(trade, dict):
+            continue
+        currency = fields["currency"].upper()
+        trade.update(document_number=fields["doc_no"],
+                     currency={"$": "USD", "US$": "USD", "₩": "KRW"}.get(currency, currency),
+                     incoterms=fields["incoterms"], payment_terms=fields["payment"],
+                     shipment_reference=fields["shipment"], country_of_origin=fields["origin"])
+        trade["buyer"] = {**(trade.get("buyer") or {}),
+                          "legal_name": fields["buyer_name"], "address": fields["buyer_addr"]}
+        trade["seller"] = {**(trade.get("seller") or {}),
+                           "legal_name": fields["seller_name"], "address": fields["seller_addr"]}
+        items = deepcopy(trade.get("items") or [{}])
+        items[0] = {**items[0], "product_name": fields["product"],
+                    "quantity": fields["quantity"], "unit": fields["unit"].upper(),
+                    "unit_price": fields["price"], "price_basis": fields["basis"].upper(),
+                    "price_source": fields["price_source"]}
+        trade["items"] = items
+    _remember_candidate_bundle(digest, changed)
+    st.session_state.pop("master_legacy_files", None)
+    st.session_state["master_pdf_applied"] = True
+
+
 def _reference_panel():
     st.markdown("#### 기존 계약서 참고 (서버 내 조회 전용)")
     st.caption("기존 계약서는 모델에 전송하거나 새 계약서에 자동 복사하지 않습니다. 사용자가 직접 비교하기 위한 별도 읽기 전용 화면입니다.")
@@ -398,42 +432,26 @@ def render_ai_intake(principal: str):
             sample = next(iter(trade_data.values()))
             first_item = (sample.get("items") or [{}])[0]
             with st.form("master_pdf_required_fields"):
-                doc_no = st.text_input("문서번호 (초안은 DRAFT)", value=str(sample.get("document_number") or "DRAFT"))
-                buyer_name = st.text_input("Buyer 법인명", value=str((sample.get("buyer") or {}).get("legal_name") or ""))
-                buyer_addr = st.text_input("Buyer 영문 주소", value=str((sample.get("buyer") or {}).get("address") or ""))
-                seller_name = st.text_input("Seller 법인명", value=str((sample.get("seller") or {}).get("legal_name") or ""))
-                seller_addr = st.text_input("Seller 영문 주소", value=str((sample.get("seller") or {}).get("address") or ""))
-                doc_currency = st.text_input("통화 코드 (USD/KRW/EUR/CNY)", value=str(sample.get("currency") or "USD"))
-                incoterms = st.text_input("인도조건 및 장소", value=str(sample.get("incoterms") or ""))
-                payment = st.text_input("결제조건", value=str(sample.get("payment_terms") or ""))
-                product = st.text_input("영문 제품명", value=str(first_item.get("product_name") or ""))
-                quantity = st.text_input("수량", value=str(first_item.get("quantity") or ""))
-                unit = st.text_input("수량 단위", value=str(first_item.get("unit") or "PCS"))
-                price = st.text_input("단가", value=str(first_item.get("unit_price") or ""))
-                basis = st.text_input("단가 기준 (PCS, KG 등)", value=str(first_item.get("price_basis") or first_item.get("unit") or ""))
-                price_source = st.text_input("가격 출처 (실제 견적/사용자 확인)", value=str(first_item.get("price_source") or ""))
-                shipment = st.text_input("선적 참조번호 (CI/PL 필수)", value=str(sample.get("shipment_reference") or ""))
-                origin = st.text_input("원산지 (CI 필수)", value=str(sample.get("country_of_origin") or ""))
-                applied = st.form_submit_button("필수정보 적용 · PDF 생성 준비", type="primary")
-            if applied:
-                changed = deepcopy(candidates[1])
-                for kind, trade in changed.items():
-                    if kind not in trade_data:
-                        continue
-                    trade.update(document_number=doc_no.strip(), currency={"$": "USD", "US$": "USD", "₩": "KRW"}.get(doc_currency.strip().upper(), doc_currency.strip().upper()),
-                                 incoterms=incoterms.strip(), payment_terms=payment.strip(),
-                                 shipment_reference=shipment.strip(), country_of_origin=origin.strip())
-                    trade["buyer"] = {**(trade.get("buyer") or {}), "legal_name": buyer_name.strip(), "address": buyer_addr.strip()}
-                    trade["seller"] = {**(trade.get("seller") or {}), "legal_name": seller_name.strip(), "address": seller_addr.strip()}
-                    items = trade.get("items") or [{}]
-                    items[0] = {**items[0], "product_name": product.strip(), "quantity": quantity.strip(),
-                                "unit": unit.strip().upper(), "unit_price": price.strip(),
-                                "price_basis": basis.strip().upper(), "price_source": price_source.strip()}
-                    trade["items"] = items
-                _remember_candidate_bundle(digest, changed)
-                st.session_state.pop("master_legacy_files", None)
+                doc_no = st.text_input("문서번호 (초안은 DRAFT)", value=str(sample.get("document_number") or "DRAFT"), key="master_pdf_doc_no")
+                buyer_name = st.text_input("Buyer 법인명", value=str((sample.get("buyer") or {}).get("legal_name") or ""), key="master_pdf_buyer_name")
+                buyer_addr = st.text_input("Buyer 영문 주소", value=str((sample.get("buyer") or {}).get("address") or ""), key="master_pdf_buyer_addr")
+                seller_name = st.text_input("Seller 법인명", value=str((sample.get("seller") or {}).get("legal_name") or ""), key="master_pdf_seller_name")
+                seller_addr = st.text_input("Seller 영문 주소", value=str((sample.get("seller") or {}).get("address") or ""), key="master_pdf_seller_addr")
+                doc_currency = st.text_input("통화 코드 (USD/KRW/EUR/CNY)", value=str(sample.get("currency") or "USD"), key="master_pdf_currency")
+                incoterms = st.text_input("인도조건 및 장소", value=str(sample.get("incoterms") or ""), key="master_pdf_incoterms")
+                payment = st.text_input("결제조건", value=str(sample.get("payment_terms") or ""), key="master_pdf_payment")
+                product = st.text_input("영문 제품명", value=str(first_item.get("product_name") or ""), key="master_pdf_product")
+                quantity = st.text_input("수량", value=str(first_item.get("quantity") or ""), key="master_pdf_quantity")
+                unit = st.text_input("수량 단위", value=str(first_item.get("unit") or "PCS"), key="master_pdf_unit")
+                price = st.text_input("단가", value=str(first_item.get("unit_price") or ""), key="master_pdf_price")
+                basis = st.text_input("단가 기준 (PCS, KG 등)", value=str(first_item.get("price_basis") or first_item.get("unit") or ""), key="master_pdf_basis")
+                price_source = st.text_input("가격 출처 (실제 견적/사용자 확인)", value=str(first_item.get("price_source") or ""), key="master_pdf_price_source")
+                shipment = st.text_input("선적 참조번호 (CI/PL 필수)", value=str(sample.get("shipment_reference") or ""), key="master_pdf_shipment")
+                origin = st.text_input("원산지 (CI 필수)", value=str(sample.get("country_of_origin") or ""), key="master_pdf_origin")
+                st.form_submit_button("필수정보 적용 · PDF 생성 준비", type="primary",
+                                      on_click=_apply_pdf_required_fields, args=(digest,))
+            if st.session_state.pop("master_pdf_applied", False):
                 st.success("필수 거래정보를 반영했습니다. 아래 PDF 생성 버튼을 누르세요.")
-                st.rerun()
             for kind, trade in trade_data.items():
                 try:
                     check = validate_and_calculate(trade)
