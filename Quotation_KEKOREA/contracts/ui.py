@@ -783,44 +783,40 @@ def _render_draft(repo, snapshot, state_key, env):
         width:100%!important;max-width:none!important;min-width:0!important;
         margin:0!important;padding:0!important;text-align:left!important;
     }
-    /* Sentence text is real left-aligned document prose; the button is a click target only. */
+    /* Use the visible Streamlit button as the complete click surface.
+       An invisible absolute overlay previously drifted below wrapped lines. */
     .st-key-contract_document_paper [class*="st-key-contract_sentence_display_"] {
         position:relative;min-width:0;
     }
-    .st-key-contract_document_paper .contract-sentence-body {
-        display:block;width:100%;box-sizing:border-box;margin:0;padding:.35rem .5rem;
-        text-align:left!important;white-space:pre-wrap;overflow-wrap:anywhere;
-        word-break:break-word;font:normal clamp(.8rem,1vw,1rem)/1.7 Georgia,"Malgun Gothic",serif;
-        color:#172b3a;cursor:pointer;border-radius:2px;min-height:2rem;
-    }
-    /* Keep original button key and accessible label, but use it only as a full-surface hit area. */
     .st-key-contract_document_paper [class*="st-key-contract_sentence_display_"] [data-testid="stButton"] button {
-        position:absolute!important;inset:0!important;z-index:3;
-        display:block!important;width:100%!important;height:100%!important;
-        min-height:0!important;opacity:0!important;margin:0!important;
-        cursor:pointer!important;
-    }
-    .st-key-contract_document_paper [class*="st-key-contract_sentence_display_"]:has(button:hover) .contract-sentence-body {
-        background:#f0f7fc;
-    }
-    .st-key-contract_document_paper [class*="st-key-contract_sentence_display_"]:has(button:focus-visible) .contract-sentence-body {
-        outline:2px solid #0877c9;outline-offset:2px;
-    }
-    .st-key-contract_document_paper .contract-sentence-body.is-open {
-        background:#e7f2fa;border-left:3px solid #0877c9;padding-left:calc(.5rem - 3px);
-    }
-    /* Long clause readability: never shrink below a usable font size or clip text. */
-    .st-key-contract_document_paper [class*="st-key-contract_sentence_display_"] {
-        position:relative;min-width:0;}
-    .st-key-contract_document_paper [class*="st-key-contract_sentence_display_"] [data-testid="stButton"] button {
-        height:auto!important;max-height:none!important;min-height:2rem;
+        position:static!important;inset:auto!important;display:flex!important;
+        width:100%!important;height:auto!important;max-height:none!important;
+        min-height:2rem!important;opacity:1!important;margin:0!important;
+        justify-content:flex-start!important;align-items:flex-start!important;
+        padding:.35rem .5rem!important;cursor:pointer!important;
         white-space:normal!important;overflow:visible!important;text-overflow:clip!important;
-        width:100%;align-items:flex-start;}
+        border:1px solid transparent!important;border-radius:2px!important;
+        background:transparent!important;color:#172b3a!important;
+    }
+    .st-key-contract_document_paper [class*="st-key-contract_sentence_display_"] [data-testid="stButton"] button [data-testid="stMarkdownContainer"],
     .st-key-contract_document_paper [class*="st-key-contract_sentence_display_"] [data-testid="stButton"] button p {
-        display:block!important;white-space:pre-wrap!important;overflow:visible!important;
-        max-height:none!important;text-overflow:clip!important;overflow-wrap:anywhere;
-        word-break:break-word;font-size:clamp(.8rem,1vw,1rem)!important;
-        line-height:1.7!important;}
+        display:block!important;width:100%!important;min-width:0!important;
+        max-width:none!important;max-height:none!important;margin:0!important;
+        padding:0!important;text-align:left!important;
+        white-space:pre-wrap!important;overflow-wrap:anywhere!important;
+        word-break:break-word!important;text-overflow:clip!important;
+        font:normal clamp(.8rem,1vw,1rem)/1.7 Georgia,"Malgun Gothic",serif!important;
+    }
+    .st-key-contract_document_paper [class*="st-key-contract_sentence_display_"] [data-testid="stButton"] button:hover {
+        background:#f0f7fc!important;border-color:#b9d6ea!important;
+    }
+    .st-key-contract_document_paper [class*="st-key-contract_sentence_display_"] [data-testid="stButton"] button:focus-visible {
+        outline:2px solid #0877c9!important;outline-offset:2px;
+    }
+    .st-key-contract_document_paper [class*="st-key-contract_sentence_display_"] [data-testid="stButton"] button[kind="primary"] {
+        background:#e7f2fa!important;border-left:3px solid #0877c9!important;
+        color:#092b4c!important;
+    }
     .st-key-contract_document_paper .contract-full-sentence-hover {
         display:none;position:absolute;left:0;top:100%;z-index:50;
         width:min(38rem,80vw);max-height:65vh;overflow-y:auto;pointer-events:none;
@@ -861,12 +857,8 @@ def _render_draft(repo, snapshot, state_key, env):
                         with st.container(key=f"contract_sentence_display_{contract_id}_{sentence_id}"):
                             if sentence_id in preview_texts:
                                 st.caption("✎ AI 추천 수정안 미리보기 · 확정 저장 전")
-                            # Render document prose independently of Streamlit's button label alignment.
-                            # The same keyed button remains the clickable, keyboard-accessible hit area.
-                            st.markdown(
-                                '<div class="contract-sentence-body' + (' is-open' if is_open else '') + '">'
-                                + escape(displayed_text).replace('\n', '<br/>') + '</div>',
-                                unsafe_allow_html=True)
+                            # Visible sentence button provides its own full
+                            # click area even when the clause wraps across lines.
                             if st.button(displayed_text, key=f"contract_sentence_{contract_id}_{sentence_id}",
                                          help=(displayed_text if len(displayed_text) > 180 else
                                                "클릭해 이 문장의 메모를 열거나 선택합니다."),
