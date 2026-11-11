@@ -15,7 +15,7 @@ class LabelTypoTests(unittest.TestCase):
                 self.assertEqual(canonical_label(label), expected)
 
     def test_only_labels_rewritten(self):
-        source = "Buyr: TENGYAO TECHNOLOGY CO LTD\\nSeler = KE KOREA\\nQuantiy: 1,000,000\\nUnit Prce: USD 0.225"
+        source = "Buyr: TENGYAO TECHNOLOGY CO LTD\nSeler = KE KOREA\nQuantiy: 1,000,000\nUnit Prce: USD 0.225"
         normalized = normalize_trade_labels(source)
         self.assertIn("buyer: TENGYAO TECHNOLOGY CO LTD", normalized)
         self.assertIn("seller = KE KOREA", normalized)
@@ -28,7 +28,7 @@ class LabelTypoTests(unittest.TestCase):
         self.assertIsNone(canonical_label("prce"))
 
     def test_no_arbitrary_typo_rewriting(self):
-        self.assertEqual(normalize_trade_labels("buyer: seler\\nprice: 0.225"), "buyer: seler\\nprice: 0.225")
+        self.assertEqual(normalize_trade_labels("buyer: seler\nprice: 0.225"), "buyer: seler\nprice: 0.225")
 
 
 if __name__ == "__main__":
