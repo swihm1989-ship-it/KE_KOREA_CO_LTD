@@ -18,7 +18,7 @@ class PreviewUITest(unittest.TestCase):
         self.assertFalse(app.exception, [str(x.message) for x in app.exception])
         app.button(key="build_readonly_preview").click().run()
         self.assertFalse(app.exception, [str(x.message) for x in app.exception])
-        self.assertTrue(any("DRAFT - NOT FOR ISSUE" in x.message for x in app.warning))
+        self.assertEqual(app.session_state["preview_current"].watermark, "DRAFT - NOT FOR ISSUE")
         self.assertTrue(any("발송 권한 없음" in x.value for x in app.caption))
         self.assertTrue(any("20.00" in str(x.value) for x in app.metric))
 
