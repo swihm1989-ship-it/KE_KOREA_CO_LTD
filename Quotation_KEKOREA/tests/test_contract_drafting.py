@@ -185,11 +185,16 @@ class DraftingTests(unittest.TestCase):
                 response.value['clause_checks'][0]['evidence'][0]['quote'] = 'Never in the actual clause.'
             return response
 
-        with self.assertRaisesRegex(ValueError, 'clause_id=scope, sentence_id=scope_s1'):
-            generate_reviewed_draft(self.snapshot, [], env=ENV, client=always_bad)
+        result = generate_reviewed_draft(self.snapshot, [], env=ENV, client=always_bad)
         self.assertEqual([call['drafting_task'] for call in self.calls],
                          ['draft', 'audit', 'audit'])
         self.assertEqual(self.snapshot, original)
+        self.assertTrue(result['clauses'])
+        self.assertTrue(any(i.get('code') == 'draft_audit_citation_unverified'
+                            and i.get('severity') == 'block'
+                            for i in result['issues']))
+        self.assertTrue(all(check['status'] != 'complete'
+                            for check in result['draft_quality']['checks']))
 
     def test_invalid_audit_structure_is_not_retried(self):
         base = self.opener(complete=True)
@@ -230,8 +235,16 @@ class DraftingTests(unittest.TestCase):
                             {'kind': 'reference', 'document_id': 'not_selected', 'quote': 'Invented reference.'}]
                     return result
 
-                with self.assertRaises(ValueError):
-                    generate_reviewed_draft(self.snapshot, [], env=ENV, client=corrupt)
+                if mode == 'false_quote':
+                    draft = generate_reviewed_draft(self.snapshot, [], env=ENV, client=corrupt)
+                    self.assertTrue(any(issue.get('code') == 'draft_audit_citation_unverified'
+                                        and issue.get('severity') == 'block'
+                                        for issue in draft['issues']))
+                    self.assertEqual([call['drafting_task'] for call in self.calls],
+                                     ['draft', 'audit', 'audit'])
+                else:
+                    with self.assertRaises(ValueError):
+                        generate_reviewed_draft(self.snapshot, [], env=ENV, client=corrupt)
                 self.assertEqual(self.snapshot, original)
                 self.assertLessEqual(len(self.calls), 4)
 

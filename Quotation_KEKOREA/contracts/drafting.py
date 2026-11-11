@@ -276,8 +276,34 @@ def _audit(snapshot, plan, references, *, env, client, timeout, progress_callbac
     except AuditCitationMismatch:
         if progress_callback is not None:
             progress_callback('AI 검토 인용 불일치 · 동일 초안으로 근거 재검증 (1회)')
-        return _audit_once(snapshot, plan, references, env=env, client=client,
-                           timeout=budget(), strict_quotes=True)
+        try:
+            return _audit_once(snapshot, plan, references, env=env, client=client,
+                               timeout=budget(), strict_quotes=True)
+        except AuditCitationMismatch:
+            if progress_callback is not None:
+                progress_callback('AI 인용 재검증 실패 · 검토용 초안 보존 (최종 확정 차단)')
+            return _unverified_audit_checks(snapshot, plan)
+
+
+class UnverifiedAuditChecks(list):
+    """Quality results that cannot be considered verified."""
+    citation_unverified = True
+
+
+def _unverified_audit_checks(snapshot, plan):
+    """Return only conservative findings without fabricated citations."""
+    checks = [
+        {'topic': topic['key'], 'status': 'missing', 'clause_ids': [],
+         'missing_elements': list(topic['elements']),
+         'evidence': [], 'reason': 'AI 감사 인용을 검증하지 못하여 사용자 재검토가 필요합니다.'}
+        for topic in plan['topics']
+    ]
+    checks.extend({
+        'topic': 'clause_' + clause['id'], 'status': 'conflict',
+        'clause_ids': [clause['id']], 'missing_elements': [],
+        'evidence': [], 'reason': 'AI 감사 인용 실패: 해당 조항의 근거 검증 미완료.'
+    } for clause in snapshot['clauses'])
+    return UnverifiedAuditChecks(checks)
 
 
 def generate_reviewed_draft(snapshot, preferred_clauses, *, env, reference_context=None,
@@ -326,8 +352,9 @@ def generate_reviewed_draft(snapshot, preferred_clauses, *, env, reference_conte
     report('AI 초안 품질 검토 (API 응답 대기)')
     checks = _audit(draft, plan, references, env=env, client=client, timeout=remaining,
                     progress_callback=report)
+    audit_unverified = getattr(checks, 'citation_unverified', False)
     problems = [r for r in checks if r['status'] != 'complete']
-    if problems:
+    if problems and not audit_unverified:
         targets = {cid for row in problems for cid in row['clause_ids']}
         protected = {f'commission_payment_{i}' for i in range(3)}
         editable = targets - protected
@@ -365,6 +392,13 @@ def generate_reviewed_draft(snapshot, preferred_clauses, *, env, reference_conte
             draft['issues'].append({'id': 'draft_quality_' + row['topic'],
                                     'code': 'draft_quality_' + row['topic'], 'severity': 'confirm',
                                     'message': row['reason'], 'confirmed': False})
+    if audit_unverified:
+        draft['issues'].append({
+            'id': 'draft_audit_citation_unverified',
+            'code': 'draft_audit_citation_unverified', 'severity': 'block',
+            'message': 'AI 품질검사 인용을 검증하지 못했습니다. 초안은 검토용으로 보존하며, 재검토 전에는 최종 계약서로 확정할 수 없습니다.',
+            'confirmed': False,
+        })
     draft['draft_quality'] = {'version': 1, 'checks': checks, 'legal_certification': False}
     # Only report sources actually sent to generation; do not disclose unselected originals.
     used = {r['id'] for r in references}
