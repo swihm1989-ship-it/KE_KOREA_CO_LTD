@@ -116,6 +116,58 @@ def _delete_contract(repo, contract_id):
     repo.delete_contract(contract_id)
 
 
+def _rename_saved_contract(repo, contract_id, requested_title):
+    """Change only the document title via the atomic, revision-safe save path.
+
+    The same snapshot title drives the saved-list label, BOX 3 heading,
+    generated PDF/DOCX document title and new export filename.
+    """
+    title = str(requested_title or "").strip()
+    if not title:
+        raise ValueError("새 계약 제목을 입력해 주세요.")
+    if len(title) > 200:
+        raise ValueError("계약 제목은 200자 이하로 입력해 주세요.")
+    snapshot, _ = _load_snapshot(repo, contract_id)
+    if title == snapshot.get("title"):
+        return snapshot
+    updated = deepcopy(snapshot)
+    updated["title"] = title
+    return _save_snapshot(
+        repo, updated, "Renamed contract title",
+        expected_revision=snapshot["revision"],
+    )
+
+
+def _render_contract_rename_confirmation(repo, contract_id, current_title):
+    with st.container(border=True):
+        st.markdown("#### 저장된 계약 제목 변경")
+        st.caption("계약서 본문, 거래조건과 기존 Revision은 보존됩니다. 새 PDF·DOCX에도 변경된 제목이 적용됩니다.")
+        with st.form(key=f"contract_rename_form_{contract_id}"):
+            edited = st.text_input(
+                "새 계약 제목", value=str(current_title or ""),
+                key=f"contract_rename_input_{contract_id}",
+            )
+            save_col, cancel_col = st.columns(2)
+            save = save_col.form_submit_button("이름 변경 저장", type="primary")
+            cancel = cancel_col.form_submit_button("취소")
+        if save:
+            try:
+                saved = _rename_saved_contract(repo, contract_id, edited)
+                st.session_state.pop("contract_rename_pending_id", None)
+                st.session_state[f"contract_snapshot_{contract_id}"] = saved
+                for key in ("contract_revisions", "contract_pending_proposal",
+                            "contract_pending_terms", "contract_pending_proposal_key",
+                            f"contract_pending_analysis_{contract_id}"):
+                    st.session_state.pop(key, None)
+                st.success("계약서 목록과 실제 문서 제목을 변경했습니다.")
+                st.rerun()
+            except (ValueError, ContractRepositoryError) as exc:
+                st.error(str(exc))
+        if cancel:
+            st.session_state.pop("contract_rename_pending_id", None)
+            st.rerun()
+
+
 def _render_contract_delete_confirmation(repo, contract_id, title):
     with st.container(border=True):
         st.warning(f"정말 삭제하시겠습니까?\n\n**{title}** 계약과 연결된 기록 및 비공개 파일이 삭제됩니다.")
@@ -1726,7 +1778,7 @@ def render_contract_page(page, env):
         st.markdown("### 저장된 계약")
         for record in records:
             contract_id = str(record["id"])
-            title_col, delete_col = st.columns([12, 1])
+            title_col, rename_col, delete_col = st.columns([10, 2, 1])
             if title_col.button(
                 contract_list_label(record), key=f"contract_open_{page}_{contract_id}",
                 use_container_width=True,
@@ -1736,10 +1788,23 @@ def render_contract_page(page, env):
                 # Loading and legacy-revision recovery are handled below;
                 # opening a corrupt historical snapshot must not block access.
                 st.rerun()
+            if rename_col.button("Rename", key=f"contract_rename_{contract_id}",
+                                 help=f"{record['title']} 제목 변경",
+                                 use_container_width=True):
+                st.session_state["contract_rename_pending_id"] = contract_id
+                st.session_state.pop("contract_delete_pending_id", None)
+                st.rerun()
             if delete_col.button("X", key=f"contract_delete_{contract_id}",
                                  help=f"{record['title']} 삭제"):
                 st.session_state["contract_delete_pending_id"] = contract_id
+                st.session_state.pop("contract_rename_pending_id", None)
                 st.rerun()
+        pending_rename_id = st.session_state.get("contract_rename_pending_id")
+        if pending_rename_id in options:
+            _render_contract_rename_confirmation(
+                repo, pending_rename_id, options[pending_rename_id]["title"])
+        elif pending_rename_id:
+            st.session_state.pop("contract_rename_pending_id", None)
         pending_delete_id = st.session_state.get("contract_delete_pending_id")
         if pending_delete_id in options:
             _render_contract_delete_confirmation(
