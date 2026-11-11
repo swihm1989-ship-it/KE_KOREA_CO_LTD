@@ -10,6 +10,7 @@ from typing import Any, Mapping
 from uuid import uuid4
 
 from Quotation_KEKOREA.orchestration.router import DOC_TYPES
+from Quotation_KEKOREA.orchestration.workflows.label_typos import canonical_label
 from Quotation_KEKOREA.orchestration.workflows.label_typos import normalize_trade_labels
 
 _TERM_KEYS = {"products", "quantity", "unit", "unit_price", "currency", "delivery",
@@ -53,6 +54,11 @@ def _validated_analysis(analysis: Mapping[str, Any]) -> dict[str, Any]:
     for party in parties:
         if not isinstance(party, dict) or not isinstance(party.get("roles"), list):
             raise ValueError("당사자 형식이 유효하지 않습니다.")
+        party["roles"] = [canonical_label(str(role)) or str(role).strip().casefold() for role in party["roles"]]
+        party["roles"] = [role for role in party["roles"] if role in {"buyer", "seller", "agent", "introducer", "payer", "payee"}]
+        for field in ("legal_name", "address", "country"):
+            if party.get(field) is None:
+                party[field] = ""
         # NEVER treat model-produced party data as user-confirmed.
         if party.get("status") == "confirmed":
             raise ValueError("AI가 당사자 확정 상태를 임의로 지정했습니다.")
