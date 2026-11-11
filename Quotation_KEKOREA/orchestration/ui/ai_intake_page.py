@@ -386,6 +386,65 @@ def render_ai_intake(principal: str):
                             data=file["content"], file_name=file["filename"],
                             mime=file["mime"], key=f"ai_intake_download_{doc.kind}_{fmt}")
             st.caption("생성된 파일은 최종 발행·계약 체결·메일 발송에 사용할 수 없습니다.")
+        # The original renderer requires fields that the AI deliberately cannot confirm.
+        # Expose those fields on mobile instead of forcing users to edit JSON.
+        trade_data = {k: v for k, v in candidates[1].items()
+                      if k in ("PI", "PO", "CI", "PL") and isinstance(v, dict)}
+        if trade_data:
+            from Quotation_KEKOREA.agent.trade_documents import validate_and_calculate
+            st.markdown("#### PDF 생성 전 필수 거래정보")
+            st.caption("아래 내용은 AI가 자동 승인하지 않습니다. 실제 거래 자료와 대조한 뒤 입력하세요.")
+            sample = next(iter(trade_data.values()))
+            first_item = (sample.get("items") or [{}])[0]
+            with st.form("master_pdf_required_fields"):
+                doc_no = st.text_input("문서번호 (초안은 DRAFT)", value=str(sample.get("document_number") or "DRAFT"))
+                buyer_name = st.text_input("Buyer 법인명", value=str((sample.get("buyer") or {}).get("legal_name") or ""))
+                buyer_addr = st.text_input("Buyer 영문 주소", value=str((sample.get("buyer") or {}).get("address") or ""))
+                seller_name = st.text_input("Seller 법인명", value=str((sample.get("seller") or {}).get("legal_name") or ""))
+                seller_addr = st.text_input("Seller 영문 주소", value=str((sample.get("seller") or {}).get("address") or ""))
+                doc_currency = st.text_input("통화 코드 (USD/KRW/EUR/CNY)", value=str(sample.get("currency") or "USD"))
+                incoterms = st.text_input("인도조건 및 장소", value=str(sample.get("incoterms") or ""))
+                payment = st.text_input("결제조건", value=str(sample.get("payment_terms") or ""))
+                product = st.text_input("영문 제품명", value=str(first_item.get("product_name") or ""))
+                quantity = st.text_input("수량", value=str(first_item.get("quantity") or ""))
+                unit = st.text_input("수량 단위", value=str(first_item.get("unit") or "PCS"))
+                price = st.text_input("단가", value=str(first_item.get("unit_price") or ""))
+                basis = st.text_input("단가 기준 (PCS, KG 등)", value=str(first_item.get("price_basis") or first_item.get("unit") or ""))
+                price_source = st.text_input("가격 출처 (실제 견적/사용자 확인)", value=str(first_item.get("price_source") or ""))
+                shipment = st.text_input("선적 참조번호 (CI/PL 필수)", value=str(sample.get("shipment_reference") or ""))
+                origin = st.text_input("원산지 (CI 필수)", value=str(sample.get("country_of_origin") or ""))
+                applied = st.form_submit_button("필수정보 적용 · PDF 생성 준비", type="primary")
+            if applied:
+                changed = deepcopy(candidates[1])
+                for kind, trade in changed.items():
+                    if kind not in trade_data:
+                        continue
+                    trade.update(document_number=doc_no.strip(), currency={"$": "USD", "US$": "USD", "₩": "KRW"}.get(doc_currency.strip().upper(), doc_currency.strip().upper()),
+                                 incoterms=incoterms.strip(), payment_terms=payment.strip(),
+                                 shipment_reference=shipment.strip(), country_of_origin=origin.strip())
+                    trade["buyer"] = {**(trade.get("buyer") or {}), "legal_name": buyer_name.strip(), "address": buyer_addr.strip()}
+                    trade["seller"] = {**(trade.get("seller") or {}), "legal_name": seller_name.strip(), "address": seller_addr.strip()}
+                    items = trade.get("items") or [{}]
+                    items[0] = {**items[0], "product_name": product.strip(), "quantity": quantity.strip(),
+                                "unit": unit.strip().upper(), "unit_price": price.strip(),
+                                "price_basis": basis.strip().upper(), "price_source": price_source.strip()}
+                    trade["items"] = items
+                _remember_candidate_bundle(digest, changed)
+                st.session_state.pop("master_legacy_files", None)
+                st.success("필수 거래정보를 반영했습니다. 아래 PDF 생성 버튼을 누르세요.")
+                st.rerun()
+            for kind, trade in trade_data.items():
+                try:
+                    check = validate_and_calculate(trade)
+                    issues = check.get("blocking_issues") or []
+                    if issues:
+                        with st.expander(kind + " · PDF 생성 전 확인사항 (" + str(len(issues)) + ")", expanded=True):
+                            for issue in issues:
+                                st.write("• " + str(issue))
+                    else:
+                        st.success(kind + " 거래정보 검증 통과 · PDF 출력 준비 완료 (직인·은행정보 별도 확인)")
+                except (ValueError, TypeError, KeyError) as exc:
+                    st.warning(kind + " 거래정보 확인 필요: " + str(exc)[:250])
         st.divider()
         st.markdown("#### 기존 KE KOREA 양식 · PI / PO / CI / PL PDF·Excel")
         st.caption("현재 MASTER 앱에서 기존 업무 에이전트의 검증·직인·페이지 분할·PDF/XLSX 엔진을 직접 호출합니다. 기존 앱으로 이동하지 않습니다.")
