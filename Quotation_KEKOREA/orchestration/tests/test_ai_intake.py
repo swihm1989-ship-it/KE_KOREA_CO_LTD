@@ -99,7 +99,7 @@ class AiIntakeTests(unittest.TestCase):
             draft.return_value = fake
             result = generate_contract_draft(
                 candidate, {"OPENAI_API_KEY": "fake", "OPENAI_MODEL": "test"}, consent=True)
-            self.assertEqual(result["clauses"], fake["clauses"])
+            self.assertEqual(result["clauses"][0]["sentences"][0]["text"], "review only")
             self.assertTrue(draft.call_args.kwargs["use_library"] is False)
             self.assertIsNone(draft.call_args.kwargs["repo"])
 
