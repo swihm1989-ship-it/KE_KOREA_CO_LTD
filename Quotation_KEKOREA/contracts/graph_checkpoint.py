@@ -10,14 +10,14 @@ from uuid import uuid4
 from langgraph.checkpoint.memory import InMemorySaver
 
 
-# The checkpointer lives across graph compilations in this Python process.
+# Each graph invocation gets an isolated saver that is released when the call
+# ends. No accumulating sensitive contract snapshots in application globals.
 # Contract revision history remains solely in the existing Supabase RPC.
-_CHECKPOINTER = InMemorySaver()
 
 
 def invoke_checkpointed(graph, initial_state, *, workflow):
-    """Run a fresh checkpointed thread without changing returned graph state."""
+    """Checkpoint each graph node while preserving the original return value."""
     thread_id = f"contract-{workflow}-{uuid4().hex}"
     config = {"configurable": {"thread_id": thread_id}}
-    compiled = graph.compile(checkpointer=_CHECKPOINTER)
+    compiled = graph.compile(checkpointer=InMemorySaver())
     return compiled.invoke(initial_state, config=config)
