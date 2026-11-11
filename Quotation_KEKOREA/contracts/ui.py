@@ -535,6 +535,18 @@ def _proposal_panel(repo, snapshot, proposal, state_key):
     else:
         with st.expander('최종 수정안 전체 계약서 미리보기', expanded=True):
             _render_revision_preview(preview, '변경 적용 전 미리보기 — 아직 승인되지 않음')
+    # The existing checkboxes and revision RPC remain authoritative. An
+    # isolated LangGraph interrupt records the human review pause/resume;
+    # missing process-local checkpoints must never alter document contents.
+    review_key = f"contract_interrupt_{snapshot['contract_id']}_{snapshot['revision']}_{proposal['id']}"
+    if review_key not in st.session_state:
+        try:
+            from Quotation_KEKOREA.contracts.approval_interrupt import start_review
+            st.session_state[review_key] = start_review(
+                snapshot['contract_id'], snapshot['revision'], proposal['id'])
+        except (RuntimeError, ValueError):
+            # Existing manual approval path remains available on graph errors.
+            pass
     batch_reviewed = True
     if len(proposal.get('note_ids', [])) > 1:
         st.caption("같은 문장·조건의 충돌은 자동 차단합니다. 서로 다른 문장의 의미 충돌은 금액·기한·역할을 함께 대조해 확인하세요.")
@@ -546,6 +558,29 @@ def _proposal_panel(repo, snapshot, proposal, state_key):
                         disabled=stale or not batch_reviewed,
                         type="primary", key=f"proposal_apply_{proposal['id']}"):
         try:
+            # Only an actual user click resumes the paused review. The old
+            # apply_proposal and expected-revision save remain unchanged.
+            try:
+                from Quotation_KEKOREA.contracts.approval_interrupt import (
+                    complete_review, start_review,
+                )
+                token = st.session_state.get(review_key)
+                if token is None:
+                    token = start_review(snapshot['contract_id'], snapshot['revision'], proposal['id'])
+                try:
+                    complete_review(token, snapshot['contract_id'], snapshot['revision'],
+                                    proposal['id'], approved=True)
+                except ValueError:
+                    # Streamlit worker may have restarted while the user
+                    # reviewed. Start a fresh pause for THIS click only.
+                    token = start_review(snapshot['contract_id'], snapshot['revision'], proposal['id'])
+                    complete_review(token, snapshot['contract_id'], snapshot['revision'],
+                                    proposal['id'], approved=True)
+                st.session_state.pop(review_key, None)
+            except (RuntimeError, ValueError):
+                # Fail open only to the PRE-EXISTING user approval checks; no
+                # LangGraph failure can bypass apply_proposal or the RPC.
+                st.session_state.pop(review_key, None)
             updated = apply_proposal(snapshot, proposal, selected_ids)
             if (proposal.get('approved_chat_hash') and
                     set(selected_ids) == {change['id'] for change in proposal.get('changes', [])}):
