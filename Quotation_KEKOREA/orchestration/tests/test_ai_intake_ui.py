@@ -23,7 +23,7 @@ class AiIntakeUiTests(unittest.TestCase):
     def test_no_key_shows_configuration_warning_and_no_automatic_request(self):
         with patch.dict(os.environ, {"OPENAI_API_KEY": "", "OPENAI_MODEL": ""}):
             app = AppTest.from_file(str(PAGE), default_timeout=20).run()
-            app.radio[0].set_value("AI 거래조건 추출").run()
+            app.radio[0].set_value("AI 업무 요청").run()
             self.assertFalse(app.exception, [x.message for x in app.exception])
             self.assertTrue(any("AI 모델 연결" in x.value for x in app.warning))
             self.assertTrue(app.button(key="ai_intake_extract").disabled)
@@ -33,7 +33,7 @@ class AiIntakeUiTests(unittest.TestCase):
             "Quotation_KEKOREA.orchestration.workflows.ai_intake.extract_candidate"
         ) as api:
             app = AppTest.from_file(str(PAGE), default_timeout=20).run()
-            app.radio[0].set_value("AI 거래조건 추출").run()
+            app.radio[0].set_value("AI 업무 요청").run()
             self.assertFalse(app.exception, [x.message for x in app.exception])
             self.assertTrue(app.button(key="ai_intake_extract").disabled)
             api.assert_not_called()
