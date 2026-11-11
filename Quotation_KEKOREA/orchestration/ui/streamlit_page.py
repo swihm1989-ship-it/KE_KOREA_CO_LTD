@@ -42,7 +42,7 @@ if "mock_notes" not in st.session_state:
 
 st.sidebar.markdown("### KE KOREA")
 st.sidebar.caption("AI WORKSPACE · ISOLATED DEMO")
-page = st.sidebar.radio("업무 메뉴", ["업무 대시보드", "메일함", "AI 업무 요청", "문서 검토", "발송 대기", "엔진 사전검증", "실행 기록"], label_visibility="collapsed")
+page = st.sidebar.radio("업무 메뉴", ["업무 대시보드", "메일함", "AI 업무 요청", "문서 검토", "발송 대기", "엔진 사전검증", "문서 초안 미리보기", "실행 기록"], label_visibility="collapsed")
 st.sidebar.divider()
 st.sidebar.warning("샘플 데이터 전용\n\n후이즈메일/계약/PI·PO·CI·PL 실연동 없음. 외부 발송 불가.", icon="⚠️")
 
@@ -144,6 +144,63 @@ elif page == "엔진 사전검증":
             st.info("발송 권한: 없음 · 승인 및 저장: 수행하지 않음")
         except (ValueError, TypeError, KeyError) as exc:
             st.error(f"입력 또는 검증 오류: {exc}")
+
+elif page == "문서 초안 미리보기":
+    st.subheader("기존 엔진 기반 문서형 미리보기")
+    st.caption("기존 코드로 계산·검증한 내용을 표시합니다. AI 계약 조항을 생성하거나 PDF/직인/최종 발행을 수행하지 않습니다.")
+    kind = st.selectbox("문서 종류", ["PI", "PO", "CI", "PL", "CONTRACT"], key="preview_document_kind")
+    example = (
+        {"contract_id": "DRAFT-DEMO", "contract_type": "sale", "language": "ko",
+         "revision": 1, "parties": [], "terms": [], "clauses": [], "issues": []}
+        if kind == "CONTRACT" else
+        {"document_type": kind, "product_family": "solar_cell", "currency": "USD",
+         "document_number": "DRAFT", "seller": {"legal_name": "KE KOREA CO. LTD", "address": "Example Street"},
+         "buyer": {"legal_name": "Demo Buyer LLC", "address": "Example Street"},
+         "incoterms": "EXW Seoul", "payment_terms": "To confirm",
+         "items": [{"product_name": "M10 test cell", "quantity": "100", "unit": "PCS",
+                    "unit_price": "0.2", "price_basis": "PCS", "price_source": "demo"}]}
+    )
+    raw = st.text_area("거래 조건 또는 계약 스냅샷 (JSON)",
+                       value=json.dumps(example, ensure_ascii=False, indent=2), height=235,
+                       key=f"preview_json_{kind}")
+    if st.button("초안 미리보기 생성", key="build_readonly_preview", type="primary"):
+        try:
+            from Quotation_KEKOREA.orchestration.workflows.document_preview import build_preview
+            preview = build_preview(kind, json.loads(raw))
+            st.session_state["preview_current"] = preview
+        except (ValueError, KeyError, TypeError) as exc:
+            st.session_state.pop("preview_current", None)
+            st.error(f"초안 생성 불가: {exc}")
+    preview = st.session_state.get("preview_current")
+    if preview is not None and preview.kind == kind:
+        st.divider()
+        st.warning(preview.watermark)
+        st.markdown(f"### {preview.title}")
+        st.caption(f"검증 상태: {preview.status} · 승인/발송 권한 없음")
+        if preview.parties:
+            st.markdown("#### 거래 당사자")
+            st.dataframe(list(preview.parties), width="stretch", hide_index=True)
+        if preview.terms:
+            st.markdown("#### 주요 조건")
+            st.dataframe(list(preview.terms), width="stretch", hide_index=True)
+        if preview.items:
+            st.markdown("#### 품목 및 계산")
+            st.dataframe(list(preview.items), width="stretch", hide_index=True)
+        if preview.total:
+            st.metric(f"계산된 합계 ({preview.currency})", preview.total)
+        if preview.clauses:
+            st.markdown("#### 기존 작성 조항")
+            for clause in preview.clauses:
+                with st.container(border=True):
+                    st.markdown("**계약 조항**")
+                    st.text(clause["title"])
+                    for sentence in clause["sentences"]:
+                        st.text(sentence)
+        if preview.blockers:
+            with st.expander(f"미확정 항목 {len(preview.blockers)}개", expanded=True):
+                for issue in preview.blockers:
+                    st.text(issue)
+        st.info("이 화면은 검토용 미리보기입니다. 저장, 서명, 직인, 최종 PDF, 이메일 발송 기능이 없습니다.")
 
 elif page in ("문서 검토", "발송 대기", "실행 기록"):
     if not runs:
