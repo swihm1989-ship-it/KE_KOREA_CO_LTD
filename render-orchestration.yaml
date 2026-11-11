@@ -8,8 +8,22 @@ services:
     plan: free
     branch: main
     buildCommand: pip install -r Quotation_KEKOREA/orchestration/ui/requirements.txt
-    startCommand: streamlit run Quotation_KEKOREA/orchestration/ui/streamlit_page.py --server.address 0.0.0.0 --server.port $PORT --server.headless true --browser.gatherUsageStats false
+    startCommand: python -m Quotation_KEKOREA.orchestration.ui.secure_launch
     autoDeployTrigger: off
     envVars:
-      - key: ORCHESTRATION_ENABLED
-        value: 'false'
+      - key: ORCHESTRATION_ALLOWED_EMAILS
+        sync: false
+      - key: ORCHESTRATION_OIDC_CLIENT_ID
+        sync: false
+      - key: ORCHESTRATION_OIDC_CLIENT_SECRET
+        sync: false
+      - key: ORCHESTRATION_OIDC_METADATA_URL
+        sync: false
+      - key: ORCHESTRATION_OIDC_REDIRECT_URI
+        sync: false
+      - key: ORCHESTRATION_OIDC_COOKIE_SECRET
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SECRET_KEY
+        sync: false
