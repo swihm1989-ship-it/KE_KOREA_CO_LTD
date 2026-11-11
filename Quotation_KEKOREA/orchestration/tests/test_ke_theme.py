@@ -11,7 +11,7 @@ try:
 except ImportError:
     AppTest = None
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = Path(__file__).resolve().parents[2]
 SOURCE = ROOT / "app.py"
 PAGE = ROOT / "orchestration" / "ui" / "streamlit_page.py"
 
