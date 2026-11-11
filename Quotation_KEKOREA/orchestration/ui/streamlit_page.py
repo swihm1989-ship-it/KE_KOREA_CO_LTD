@@ -43,7 +43,7 @@ if "mock_notes" not in st.session_state:
 
 st.sidebar.markdown("### KE KOREA")
 st.sidebar.caption("AI WORKSPACE · ISOLATED DEMO")
-page = st.sidebar.radio("업무 메뉴", ["업무 대시보드", "메일함", "AI 업무 요청", "문서 검토", "발송 대기", "엔진 사전검증", "문서 초안 미리보기", "실행 기록"], label_visibility="collapsed")
+page = st.sidebar.radio("업무 메뉴", ["업무 대시보드", "메일함", "AI 업무 요청", "통합 업무 흐름", "문서 검토", "발송 대기", "엔진 사전검증", "문서 초안 미리보기", "실행 기록"], label_visibility="collapsed")
 st.sidebar.divider()
 st.sidebar.warning("샘플 데이터 전용\n\n후이즈메일/계약/PI·PO·CI·PL 실연동 없음. 외부 발송 불가.", icon="⚠️")
 
@@ -111,6 +111,97 @@ elif page == "AI 업무 요청":
             _save(start_mock_run(item))
             st.session_state.mock_selected = item.id
             st.success("Mock 라우팅 완료. 문서 검토 메뉴로 이동하세요.")
+
+elif page == "통합 업무 흐름":
+    st.subheader("요청부터 문서·이메일 초안 검토까지")
+    st.caption("키워드 기반 문서 분류 → 기존 엔진 검증 및 DRAFT 파일 생성 → 문서별 검토 → 이메일 초안 검토")
+    st.warning("실제 AI API, 메일 수신·발송, 서명 및 최종 문서 발행은 미연결입니다. 테스트 데이터만 사용하세요.")
+    from Quotation_KEKOREA.orchestration.workflows.unified_review import (
+        new_request, prepare_documents, approve_document, set_email_draft,
+        approve_email_review, verify_handoff,
+    )
+    demo_source = {"PI": {
+        "document_type": "PI", "product_family": "solar_cell", "currency": "USD",
+        "document_number": "DRAFT",
+        "seller": {"legal_name": "KE KOREA CO. LTD", "address": "Example Street"},
+        "buyer": {"legal_name": "Demo Buyer LLC", "address": "Example Street"},
+        "incoterms": "EXW Seoul", "payment_terms": "T/T",
+        "items": [{"product_name": "M10 test cell", "quantity": "100", "unit": "PCS",
+                   "unit_price": "0.20", "price_basis": "PCS", "price_source": "demo"}],
+    }}
+    instruction = st.text_input("업무 요청", value="PI 작성해줘", key="unified_instruction")
+    candidates_text = st.text_area(
+        "문서별 구조화 입력 (JSON, PI/PO/CI/PL/CONTRACT 키)",
+        value=json.dumps(demo_source, ensure_ascii=False, indent=2),
+        key="unified_candidates", height=250,
+    )
+    input_key = hashlib.sha256((instruction + "\\0" + candidates_text).encode("utf-8")).hexdigest()
+    if st.button("요청 분류 및 DRAFT 파일 생성", key="unified_prepare", type="primary"):
+        st.session_state.pop("unified_run", None)
+        st.session_state.pop("unified_input_key", None)
+        try:
+            candidate_map = json.loads(candidates_text)
+            if not isinstance(candidate_map, dict):
+                raise ValueError("JSON 최상위 값은 문서별 입력 객체여야 합니다.")
+            run = prepare_documents(new_request(instruction, candidate_map))
+            st.session_state["unified_run"] = run
+            st.session_state["unified_input_key"] = input_key
+        except (ValueError, TypeError, KeyError) as exc:
+            st.error(f"요청 처리 실패: {exc}")
+    run = st.session_state.get("unified_run")
+    stale = st.session_state.get("unified_input_key") != input_key
+    if run and stale:
+        st.error("요청문 또는 문서 입력값이 수정됐습니다. 새 DRAFT를 생성해야 하며 이전 승인은 사용할 수 없습니다.")
+    if run and not stale:
+        st.caption("분류된 문서: " + (", ".join(run.kinds) or "분류 불가") + " · " + run.status)
+        if not run.kinds:
+            st.info("문서 종류를 파악할 수 없습니다. PI, PO, CI, PL, 계약서 등을 명시하세요.")
+        for task in run.documents:
+            with st.container(border=True):
+                st.markdown(f"**{task.kind} · {'검토 확인' if task.approved else '검토 대기'}**")
+                if task.blockers:
+                    st.error(f"확인 필요: {len(task.blockers)}건")
+                    with st.expander("누락·미확정 조건"):
+                        for issue in task.blockers:
+                            st.write(issue)
+                if task.files:
+                    for fmt, file in task.files.items():
+                        st.caption(f"{file['filename']} · SHA-256 {file['sha256']}")
+                        st.download_button(f"{task.kind} DRAFT {fmt.upper()} 다운로드",
+                                           data=file["content"], file_name=file["filename"],
+                                           mime=file["mime"], key=f"unified_download_{task.kind}_{fmt}")
+                if st.button(f"{task.kind} DRAFT 검토 확인", key=f"unified_approve_{task.kind}",
+                             disabled=task.approved or bool(task.blockers) or not task.files):
+                    try:
+                        st.session_state["unified_run"] = approve_document(run, task.kind)
+                        st.rerun()
+                    except ValueError as exc:
+                        st.error(str(exc))
+        st.divider()
+        st.markdown("#### 이메일 초안 검토")
+        st.caption("이메일은 화면 검토만 가능하며 SMTP 발송 버튼은 제공하지 않습니다.")
+        with st.form("unified_email_form"):
+            recipient = st.text_input("수신자", value=run.email_to or "buyer@example.test")
+            subject = st.text_input("제목", value=run.email_subject or "[DRAFT] Documents for review")
+            body = st.text_area("본문", value=run.email_body or "안녕하세요. 첨부 예정 문서 검토를 요청드립니다. [DEMO]", height=110)
+            submitted = st.form_submit_button("이메일 초안 저장")
+        if submitted:
+            st.session_state["unified_run"] = set_email_draft(run, recipient, subject, body)
+            st.rerun()
+        all_approved = bool(run.documents) and all(t.approved and not t.blockers for t in run.documents)
+        if st.button("이메일 초안 최종 검토 확인", key="unified_email_approve",
+                     type="primary", disabled=not all_approved or not run.email_to or run.email_approved):
+            try:
+                st.session_state["unified_run"] = approve_email_review(run)
+                st.rerun()
+            except ValueError as exc:
+                st.error(str(exc))
+        if verify_handoff(run):
+            st.success("문서 및 이메일 초안 검토 완료. 실제 발송 권한은 부여되지 않았습니다.")
+        st.button("실제 이메일 발송 · 미연결", disabled=True)
+        with st.expander("업무 이력"):
+            for item in run.history:
+                st.write(item)
 
 elif page == "엔진 사전검증":
     st.subheader("기존 엔진 사전검증 · 읽기 전용")
