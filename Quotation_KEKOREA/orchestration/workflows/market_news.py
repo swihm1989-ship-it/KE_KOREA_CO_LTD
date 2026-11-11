@@ -67,7 +67,7 @@ def fetch_category(category: str, now: datetime | None = None) -> list[dict[str,
     seen = set()
     unique = []
     for row in rows:
-        key = re.sub(r"\\s+", " ", row["title"]).casefold()
+        key = re.sub(r"\s+", " ", row["title"]).casefold()
         if key not in seen:
             seen.add(key)
             unique.append(row)
