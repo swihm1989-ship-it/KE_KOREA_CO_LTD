@@ -31,7 +31,10 @@ def canonical_label(label: str) -> str | None:
     # and unknown labels are intentionally left untouched.
     if len(key) < 5 or not _ASCII_LABEL.fullmatch(key):
         return None
-    # Common transposition in explicit quantity labels must not be confused with values.\n    if key in {"quantiy", "quanity"}:\n        return "quantity"\n    scores = sorted(
+    # Common transposition in explicit quantity labels must not be confused with values.
+    if key in {"quantiy", "quanity"}:
+        return "quantity"
+    scores = sorted(
         ((SequenceMatcher(None, key, alias).ratio(), canonical)
          for alias, canonical in _ALIAS.items()
          if len(alias) >= 5 and _ASCII_LABEL.fullmatch(alias)),
