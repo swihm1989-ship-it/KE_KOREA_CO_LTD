@@ -98,6 +98,31 @@ def _reference_panel():
         st.error("기존 계약서 조회에 실패했습니다. 연결 상태와 저장 데이터를 확인하세요.")
 
 
+
+def _render_missing_inputs(digest: str, candidate_map: dict) -> None:
+    st.markdown("#### 부족한 정보 입력 · 실시간 반영")
+    st.caption("확인된 내용을 입력하고 Enter를 누르거나 다른 칸으로 이동하면 PI·계약서에 동시에 반영됩니다.")
+    gap_list = missing_fields(candidate_map)
+    answered = st.session_state.get("ai_intake_last_answer")
+    if answered:
+        st.success("입력 반영: " + str(answered) + " · 기존 초안·승인은 무효화되었습니다.")
+    error = st.session_state.get("ai_intake_followup_error")
+    if error:
+        st.error(error)
+    if gap_list:
+        st.warning(f"현재 누락된 항목 {len(gap_list)}개")
+        for gap in gap_list:
+            widget_key = "ai_intake_answer_" + gap.key.replace(".", "_")
+            st.text_input(
+                gap.label, key=widget_key,
+                placeholder="정확한 내용을 입력하고 Enter",
+                on_change=_handle_missing_answer,
+                args=(digest, gap.key, widget_key),
+            )
+    else:
+        st.success("필수 입력칸의 빈값을 모두 보완했습니다. AI 제안에 대한 실무 검토는 별도로 필요합니다.")
+
+
 def render_ai_intake(principal: str):
     if not principal:
         raise PermissionError("로그인이 필요합니다.")
@@ -148,6 +173,9 @@ def render_ai_intake(principal: str):
     if result and result[0] == digest:
         analysis = result[1]
         st.markdown("#### AI가 추출한 조건 · 모두 미확정")
+        current = st.session_state.get("ai_intake_candidates")
+        if current and current[0] == digest:
+            _render_missing_inputs(digest, current[1])
         if analysis.get("parties"):
             st.dataframe([{"역할": ", ".join(p.get("roles", [])),
                            "회사명": p.get("legal_name", ""),
@@ -180,27 +208,6 @@ def render_ai_intake(principal: str):
                 st.error("초안 입력 구성 실패: " + str(exc))
     candidates = st.session_state.get("ai_intake_candidates")
     if candidates and candidates[0] == digest:
-        st.markdown("#### 부족한 정보 입력 · 실시간 반영")
-        st.caption("확인된 내용을 입력하고 Enter를 누르거나 다른 칸으로 이동하면 PI·계약서에 동시에 반영됩니다.")
-        gap_list = missing_fields(candidates[1])
-        answered = st.session_state.get("ai_intake_last_answer")
-        if answered:
-            st.success("입력 반영: " + str(answered) + " · 기존 초안·승인은 무효화되었습니다.")
-        error = st.session_state.get("ai_intake_followup_error")
-        if error:
-            st.error(error)
-        if gap_list:
-            st.warning(f"현재 누락된 항목 {len(gap_list)}개")
-            for gap in gap_list:
-                widget_key = "ai_intake_answer_" + gap.key.replace(".", "_")
-                st.text_input(
-                    gap.label, key=widget_key,
-                    placeholder="정확한 내용을 입력하고 Enter",
-                    on_change=_handle_missing_answer,
-                    args=(digest, gap.key, widget_key),
-                )
-        else:
-            st.success("필수 입력칸의 빈값을 모두 보완했습니다. AI 제안에 대한 실무 검토는 별도로 필요합니다.")
         candidates = st.session_state.get("ai_intake_candidates")
         st.markdown("#### 실시간 반영 결과")
         for kind, data in candidates[1].items():
