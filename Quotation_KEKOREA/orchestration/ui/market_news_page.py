@@ -6,16 +6,17 @@ from Quotation_KEKOREA.orchestration.workflows.market_news import CATEGORIES, KS
 from datetime import datetime
 
 
-@st.cache_data(ttl=900, show_spinner=False)
+@st.cache_data(ttl=1800, show_spinner=False)
 def _cached_news(category: str):
     return fetch_category(category)
 
 
+@st.fragment(run_every="30m")
 def render_market_news() -> None:
     now = datetime.now(KST)
     st.subheader("KE KOREA · 시장 뉴스 브리핑")
     st.caption("한국시간 " + cutoff_kst(now).strftime("%m/%d %H:%M") +
-               " 이후 발행된 기사 · 로그인 시점 기준 · 15분 캐시")
+               " 이후 발행된 기사 · 로그인 시점 기준 · 30분 캐시")
     st.caption("제목과 원문 링크만 표시합니다. Bloomberg·PV Tech·PV Insights·Investing.com 등 개별 매체의 수록은 검색 인덱스 및 공개 RSS 제공 여부에 따라 달라집니다.")
     for category in CATEGORIES:
         st.markdown("#### " + category)
