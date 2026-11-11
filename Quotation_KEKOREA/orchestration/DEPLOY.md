@@ -48,3 +48,8 @@ Streamlit이 출력하는 로컬 주소(일반적으로 `http://localhost:8501`)
 - 세션 상태만 보존. 테스트 화면을 종료하면 작업 내역 보존이 보장되지 않음.
 - 기존 `agent/`, `contracts/`, `app.py`, DB, 기존 Render 설정은 변경 없음.
 - 실제 메일 연결·운영 데이터 사용은 별도 승인/인증/회귀 테스트 후에만 도입.
+
+
+## 2026-11-11 · 오케스트레이션 검토용 파일 생성 (PR #36)
+
+독립 `orchestration/workflows/draft_files.py`에서 기존 계약서 `contracts.draft_exports.export_draft`를 **그대로 호출**하여 이미 작성된 조항의 검토용 PDF/DOCX를 생성한다. PI/PO/CI/PL은 기존 `agent.trade_documents.validate_and_calculate` 결과가 차단 이슈 없이 확인된 경우 신규 **비직인·비공식 DRAFT DOCX 검토 시트**만 생성한다. 기존 `agent.pi_pdf.render_trade_document`는 회사 직인 파일을 필수로 요구하므로 **무역서류 PDF를 신규 UI에서 만들지 않으며** 직인·서명/최종 발행 절차를 우회하지 않는다. 신규 파일은 메모리에만 생성되며 다운로드 시 SHA-256 해시, DRAFT·비발행·발송불가가 명시되고, 입력값이 달라지면 기존 파일 다운로드를 노출하지 않는다. 신규 UI 의존성 `python-docx`, `reportlab`은 `orchestration/ui/requirements.txt`에만 추가했다. 기존 `app.py`, `agent/`, `contracts/`, 운영 `render.yaml`, DB, WHOIS POP3/SMTP는 변경하지 않았다. 별도 배포는 GitHub main 반영 후 다시 배포해야 새 기능을 볼 수 있다.
