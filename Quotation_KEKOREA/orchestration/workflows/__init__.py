@@ -1,0 +1,1 @@
+"""Standalone mock workflows. No I/O, SMTP, or production document creation."""
