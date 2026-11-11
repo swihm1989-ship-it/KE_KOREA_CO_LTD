@@ -10,6 +10,7 @@ from typing import Any, Mapping
 from uuid import uuid4
 
 from Quotation_KEKOREA.orchestration.router import DOC_TYPES
+from Quotation_KEKOREA.orchestration.workflows.label_typos import normalize_trade_labels
 
 _TERM_KEYS = {"products", "quantity", "unit", "unit_price", "currency", "delivery",
               "payment_trigger", "payment_deadline", "inspection_claims", "scope",
@@ -36,7 +37,7 @@ def extract_candidate(instruction: str, env: Mapping[str, str], *, consent: bool
     from Quotation_KEKOREA.contracts.models import new_snapshot
     snapshot = new_snapshot("temp-ai-intake", "sale", "ko")
     analysis = analyze_trade(
-        [{"role": "user", "content": instruction}], snapshot, [], env=dict(env),
+        [{"role": "user", "content": normalize_trade_labels(instruction)}], snapshot, [], env=dict(env),
     )
     return deepcopy(analysis)
 
