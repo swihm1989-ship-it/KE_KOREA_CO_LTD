@@ -71,7 +71,7 @@ class AiIntakeTests(unittest.TestCase):
         self.assertEqual(pi["items"][0]["unit_price"], "0.20")
         self.assertFalse(pi.get("ready_for_issue", False))
         self.assertEqual(pi["buyer"].get("address", ""), "")
-        self.assertNotEqual(pi["items"][0]["price_source"], "verified")
+        self.assertEqual(pi["items"][0]["price_source"], "")  # verified provenance must be user-supplied
         self.assertNotIn("price_override_confirmed", pi["items"][0])
 
     def test_prior_contract_reference_is_immutable_and_never_autofilled(self):
