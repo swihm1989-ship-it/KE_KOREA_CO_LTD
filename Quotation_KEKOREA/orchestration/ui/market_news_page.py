@@ -1,6 +1,7 @@
 """Read-only market headlines for the authenticated MASTER GRAPH home."""
 from __future__ import annotations
 import streamlit as st
+from urllib.parse import urlsplit
 from Quotation_KEKOREA.orchestration.workflows.market_news import CATEGORIES, KST, cutoff_kst, fetch_category
 from datetime import datetime
 
@@ -31,6 +32,7 @@ def render_market_news() -> None:
                             key="market_page_" + category,
                             format_func=lambda x: f"{x} / {total_pages} 페이지")
         for story in stories[(page - 1) * 5:page * 5]:
-            st.markdown("**[" + story["title"].replace("[", "［").replace("]", "］") +
-                        "](" + story["url"] + ")**")
+            st.write(story["title"])
+            if urlsplit(story["url"]).scheme == "https":
+                st.link_button("원문 보기", story["url"])
             st.caption(story["publisher"] + " · " + story["published"] + " KST")
