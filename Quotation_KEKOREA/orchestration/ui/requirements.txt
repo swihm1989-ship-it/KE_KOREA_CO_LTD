@@ -1,4 +1,4 @@
 # Standalone UI-only runtime. Existing Quotation_KEKOREA/requirements.txt unchanged.
-streamlit>=1.40,<2
+streamlit[auth]>=1.48,<2
 python-docx>=1.1,<2
 reportlab>=4,<5
