@@ -124,6 +124,49 @@ def _render_missing_inputs(digest: str, candidate_map: dict) -> None:
         st.success("필수 입력칸의 빈값을 모두 보완했습니다. AI 제안에 대한 실무 검토는 별도로 필요합니다.")
 
 
+
+def _render_quick_corrections(digest: str, candidate_map: dict) -> None:
+    """Always-visible editable commercial facts, even if AI marked them complete.
+
+    Form submit updates both trade and contract candidates. It does not approve
+    legal parties or generate any final document.
+    """
+    st.markdown("#### ✏️ 거래조건 직접 입력 · 수정")
+    st.caption("AI가 Buyer/Seller를 잘못 판단했거나 통화를 비워둔 경우 여기서 직접 수정하세요.")
+    trade = next((v for k, v in candidate_map.items()
+                  if k in {"PI", "PO", "CI", "PL"} and isinstance(v, dict)), {})
+    contract = candidate_map.get("CONTRACT") or {}
+    def current_party(role: str) -> str:
+        from Quotation_KEKOREA.orchestration.workflows.label_typos import canonical_label
+        party = trade.get(role) or {}
+        name = str(party.get("legal_name") or "").strip()
+        if name:
+            return name
+        return next((str(p.get("legal_name") or "") for p in contract.get("parties", [])
+                     if role in [canonical_label(str(x)) or str(x) for x in p.get("roles", [])]), "")
+    with st.form("ai_intake_quick_corrections", clear_on_submit=False):
+        buyer = st.text_input("Buyer · 구매자 법인명", value=current_party("buyer"))
+        seller = st.text_input("Seller · 판매자 법인명", value=current_party("seller"))
+        currency = st.text_input("통화 (예: USD)", value=str(trade.get("currency") or ""))
+        additional = st.text_area("추가 거래조건 메모 (참고용 · 자동 적용되지 않음)",
+                                  placeholder="예: Buyer는 TENGYAO, Seller는 KE KOREA")
+        submitted = st.form_submit_button("입력한 거래조건 적용", type="primary")
+    if submitted:
+        try:
+            updated = deepcopy(candidate_map)
+            for key, value in (("buyer.legal_name", buyer),
+                               ("seller.legal_name", seller),
+                               ("currency", currency)):
+                if value.strip():
+                    updated = apply_answer(updated, key, value)
+            _remember_candidate_bundle(digest, updated)
+            st.session_state["ai_intake_last_answer"] = "Buyer / Seller / 통화"
+            st.success("입력 내용이 PI·계약서 후보에 반영됐습니다. 아래 실시간 반영 결과를 확인하세요.")
+            st.rerun()
+        except (ValueError, TypeError) as exc:
+            st.error("거래조건 수정 실패: " + str(exc))
+
+
 def render_ai_intake(principal: str):
     if not principal:
         raise PermissionError("로그인이 필요합니다.")
@@ -193,6 +236,9 @@ def render_ai_intake(principal: str):
             with st.expander("추가 AI 검토 사항"):
                 for issue in analysis["issues"]:
                     st.write(str(issue.get("message") or issue))
+        current = st.session_state.get("ai_intake_candidates")
+        if current and current[0] == digest:
+            _render_quick_corrections(digest, current[1])
         st.caption("모든 금액·수량·법인명은 원문과 대조해야 합니다. AI 제안만으로 최종 문서 승인은 할 수 없습니다.")
         if st.button("기존 엔진용 초안 입력 만들기", key="ai_intake_build_candidates"):
             try:
