@@ -1,0 +1,15 @@
+# Separate Render Blueprint. This NEVER changes the existing render.yaml service.
+# Render Dashboard > New > Blueprint > Blueprint Path: render-orchestration.yaml
+services:
+  - type: web
+    name: ke-korea-orchestration-demo
+    runtime: python
+    region: singapore
+    plan: free
+    branch: main
+    buildCommand: pip install -r Quotation_KEKOREA/orchestration/ui/requirements.txt
+    startCommand: streamlit run Quotation_KEKOREA/orchestration/ui/streamlit_page.py --server.address 0.0.0.0 --server.port $PORT --server.headless true --browser.gatherUsageStats false
+    autoDeployTrigger: off
+    envVars:
+      - key: ORCHESTRATION_ENABLED
+        value: 'false'
