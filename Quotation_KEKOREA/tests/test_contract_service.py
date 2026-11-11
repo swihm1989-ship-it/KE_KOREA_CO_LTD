@@ -142,10 +142,15 @@ class ContractServiceTests(unittest.TestCase):
         self.assertEqual(result["terms"][0]["value"], "Upon delivery")
 
         response["terms"][0]["source_refs"][0]["quote"] = "Payment is due in advance."
-        with self.assertRaisesRegex(ValueError, "not found"):
-            analyze_trade([{"role": "user", "content": "Use the reference."}],
-                          {"revision": 1}, source, env=env,
-                          client=self.opener_for(response))
+        unverified = analyze_trade(
+            [{"role": "user", "content": "Use the reference."}],
+            {"revision": 1}, source, env=env,
+            client=self.opener_for(response))
+        self.assertEqual(unverified["terms"][0]["source_refs"], [])
+        self.assertEqual(unverified["terms"][0]["status"], "suggested")
+        self.assertTrue(any(issue["code"] == "unverified_ai_source_ref"
+                            and issue["severity"] == "confirm"
+                            for issue in unverified["issues"]))
 
     def test_analysis_normalizes_absent_and_single_source_references(self):
         quote = 'Price is USD 0.225 per PCS.'
@@ -213,11 +218,21 @@ class ContractServiceTests(unittest.TestCase):
                     'questions': [], 'issues': [],
                 }
                 snapshot = {'contract_type': 'sale', 'revision': 1}
-                with self.assertRaises(ValueError):
-                    analyze_trade(
+                def call():
+                    return analyze_trade(
                         [{'id': 'm1', 'role': 'user', 'content': 'Price is USD 0.225.'}],
                         snapshot, [], env={'OPENAI_API_KEY': 'test', 'OPENAI_MODEL': 'test'},
                         client=self.opener_for(response))
+                if refs in (['m1'], [None], {}):
+                    with self.assertRaises(ValueError):
+                        call()
+                else:
+                    result = call()
+                    self.assertEqual(result['terms'][0]['source_refs'], [])
+                    self.assertEqual(result['terms'][0]['status'], 'suggested')
+                    self.assertTrue(any(issue['code'] == 'unverified_ai_source_ref'
+                                        and issue['severity'] == 'confirm'
+                                        for issue in result['issues']))
                 self.assertEqual(snapshot, {'contract_type': 'sale', 'revision': 1})
 
     def test_korean_input_can_generate_english_only_and_preserve_ids(self):
