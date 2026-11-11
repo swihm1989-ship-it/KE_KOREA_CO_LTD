@@ -31,7 +31,7 @@ class AuthGateTests(unittest.TestCase):
         self.assertIsNone(authorized_email({**base, "exp": "not-a-timestamp"}, "owner@example.com"))
 
     def test_multiple_explicit_allowed_addresses(self):
-        self.assertEqual(authorized_email({"is_logged_in": True, "email": "B@example.com", "email_verified": True},
+        self.assertEqual(authorized_email({"is_logged_in": True, "email": "B@example.com", "email_verified": True, "exp": 4102444800},
                                           "a@example.com, b@example.com"), "b@example.com")
 
 
