@@ -48,8 +48,24 @@ def parse_rss(xml_bytes: bytes, cutoff: datetime, now: datetime) -> list[dict[st
             continue
         rows.append({"title": title[:240], "url": link,
                      "publisher": publisher or "Google News",
-                     "published": published.strftime("%m-%d %H:%M")})
+                     "published": published.strftime("%m-%d %H:%M"),
+                     "published_at": published.isoformat()})
     return rows
+
+
+def retain_last_24_hours(rows: list[dict[str, str]], now: datetime) -> list[dict[str, str]]:
+    """Exclude unverified/undated entries rather than retaining them forever."""
+    now = now.astimezone(KST)
+    earliest = now - timedelta(hours=24)
+    kept = []
+    for row in rows:
+        try:
+            published = datetime.fromisoformat(row["published_at"]).astimezone(KST)
+        except (KeyError, ValueError, TypeError):
+            continue
+        if earliest <= published <= now:
+            kept.append(row)
+    return kept
 
 
 def fetch_category(category: str, now: datetime | None = None) -> list[dict[str, str]]:
@@ -71,4 +87,4 @@ def fetch_category(category: str, now: datetime | None = None) -> list[dict[str,
         if key not in seen:
             seen.add(key)
             unique.append(row)
-    return unique[:25]
+    return retain_last_24_hours(unique, now)[:25]
