@@ -28,16 +28,8 @@ from Quotation_KEKOREA.orchestration.security.auth_gate import require_authentic
 _authenticated_principal = require_authentication(st)
 
 
-st.markdown("""
-<style>
-:root { --ink:#172b37; --accent:#087f72; --line:#dfe9e9; }
-.block-container { max-width:1460px; padding-top:1.6rem; }
-[data-testid="stSidebar"] { background:#f4f7f7; border-right:1px solid var(--line); }
-h1,h2,h3 { color:var(--ink); letter-spacing:-.03em; }
-[data-testid="stMetric"] { border:1px solid var(--line); padding:1rem; border-radius:10px; background:#fff; }
-.stButton button[kind="primary"] { background:var(--accent); border-color:var(--accent); }
-</style>
-""", unsafe_allow_html=True)
+from Quotation_KEKOREA.orchestration.ui.ke_theme import STYLE, logo_path, header_html
+st.markdown(STYLE, unsafe_allow_html=True)
 
 if "mock_runs" not in st.session_state:
     st.session_state.mock_runs = {}
@@ -46,8 +38,13 @@ if "mock_selected" not in st.session_state:
 if "mock_notes" not in st.session_state:
     st.session_state.mock_notes = []
 
-st.sidebar.markdown("### KE KOREA")
-st.sidebar.caption("AI WORKSPACE · ISOLATED DEMO")
+with st.sidebar:
+    logo = logo_path()
+    if logo.exists():
+        st.image(str(logo), use_container_width=True)
+    st.markdown("### MASTER GRAPH")
+    st.caption("KE KOREA CO. LTD · AI WORKSPACE")
+    st.markdown("---")
 page = st.sidebar.radio("업무 메뉴", ["업무 대시보드", "메일함", "AI 업무 요청", "통합 업무 흐름", "문서 검토", "발송 대기", "엔진 사전검증", "문서 초안 미리보기", "저장된 계약서", "실행 기록"], label_visibility="collapsed")
 st.sidebar.divider()
 st.sidebar.caption("접속 계정: " + _authenticated_principal)
@@ -70,8 +67,15 @@ def _start(message: MockMessage):
     st.session_state.mock_selected = message.id
     return run
 
-st.title("Trade operations, in one workspace")
-st.caption("후이즈메일 오케스트레이션 설계 검증용 독립 화면 · 기존 업무 에이전트에 영향 없음")
+st.markdown(
+    header_html(
+        "MASTER GRAPH",
+        "KE KOREA 업무 자동화 · AI 업무 요청, 무역서류 및 계약서 검토",
+        eyebrow="KE KOREA · AI WORKSPACE",
+    ),
+    unsafe_allow_html=True,
+)
+st.caption("독립 업무 화면 · 기존 KE KOREA 계약서 시스템은 변경하지 않습니다.")
 col_a, col_b, col_c, col_d = st.columns(4)
 runs = list(st.session_state.mock_runs.values())
 col_a.metric("샘플 메일", len(SAMPLE_MESSAGES))
