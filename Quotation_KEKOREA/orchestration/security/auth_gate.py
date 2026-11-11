@@ -6,6 +6,7 @@ server-configured email allowlist. No homegrown passwords or auth bypass.
 from __future__ import annotations
 
 import os
+import time
 from collections.abc import Mapping
 
 
@@ -14,6 +15,13 @@ def authorized_email(user: Mapping, allowed: str) -> str | None:
     if not isinstance(user, Mapping) or user.get("is_logged_in") is not True:
         return None
     if user.get("email_verified") is not True:
+        return None
+    # Streamlit OIDC cookies can outlive an ID token. Refuse stale sessions.
+    try:
+        expiration = int(user.get("exp"))
+    except (ValueError, TypeError):
+        return None
+    if expiration <= int(time.time()):
         return None
     email = str(user.get("email") or "").strip().casefold()
     addresses = {s.strip().casefold() for s in str(allowed).split(",")
