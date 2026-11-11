@@ -336,17 +336,32 @@ def analyze_trade(messages, current_snapshot, reference_context, *, env, client=
                 quote = source_ref.get("quote")
                 if kind == "reference":
                     source = reference_by_id.get(str(source_ref.get("document_id") or ""))
-                    if source is None or not quote_matches(quote, source):
-                        raise ValueError(f"Contract AI cited text not found in the selected reference material ({owner_label}).")
+                    valid_quote = source is not None and quote_matches(quote, source)
                 elif kind == "user":
                     message_id = source_ref.get("message_id")
+                    # A model may invent/alter a message ID while quoting real
+                    # source text. Verify against the supplied conversation in
+                    # that case; never accept a quote absent from ALL inputs.
                     source = message_by_id.get(str(message_id)) if message_id else None
                     valid_quote = (quote_matches(quote, source) if source is not None
                                    else any(quote_matches(quote, item) for item in message_texts))
-                    if not valid_quote:
-                        raise ValueError(f"Contract AI cited text not found in the user conversation ({owner_label}).")
                 else:
                     raise ValueError(f"Contract AI returned an unsupported source reference kind for {owner_label}.")
+                if not valid_quote:
+                    # AI citations are unreliable evidence, not grounds to
+                    # discard user-supplied business terms or reject an entire
+                    # analysis. Remove ONLY the unverifiable citation and
+                    # require explicit review. Terms remain 'suggested'.
+                    data["issues"].append({
+                        "code": "unverified_ai_source_ref",
+                        "severity": "confirm",
+                        "message": (f"{owner_label}에 대한 AI 인용을 원문에서 확인하지 못했습니다. "
+                                    "추출된 거래정보를 BOX 2에서 확인해 주세요."
+                                    if response_language == "ko" else
+                                    f"AI citation for {owner_label} was not found verbatim in the provided "
+                                    "source. Verify the extracted transaction information in BOX 2."),
+                    })
+                    continue
                 verified_refs.append(source_ref)
             owner["source_refs"] = verified_refs
     return _localize_contract_followups(data, response_language, env=env,
