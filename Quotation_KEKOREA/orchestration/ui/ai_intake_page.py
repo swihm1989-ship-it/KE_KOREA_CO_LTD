@@ -34,7 +34,6 @@ def _model_config():
 def _remember_candidate_bundle(digest: str, candidate_map: dict) -> None:
     """Synchronize answer widgets and advanced editor in memory."""
     st.session_state["ai_intake_candidates"] = (digest, candidate_map)
-    st.session_state["ai_intake_editable"] = json.dumps(candidate_map, ensure_ascii=False, indent=2)
     st.session_state.pop("ai_intake_drafts", None)
 
 
@@ -47,9 +46,9 @@ def _handle_missing_answer(digest: str, key: str, widget_key: str) -> None:
     if not answer:
         return
     try:
-        source = json.loads(st.session_state.get("ai_intake_editable") or "{}")
+        source = saved[1]
         if not isinstance(source, dict):
-            raise ValueError("JSON 객체 형식이 필요합니다.")
+            raise ValueError("문서 조건이 올바르지 않습니다.")
         updated = apply_answer(source, key, answer)
     except (ValueError, TypeError) as exc:
         st.session_state["ai_intake_followup_error"] = str(exc)
@@ -353,10 +352,12 @@ def render_ai_intake(principal: str):
                     st.write("가격 확인 출처:", (data.get("items") or [{}])[0].get("price_source") or "미입력")
             elif kind == "CONTRACT":
                 st.caption("계약서 당사자와 조건에도 답변을 함께 반영합니다. 생성된 조항은 조건이 바뀌면 무효화됩니다.")
+        # A new editor key for each candidate revision prevents stale widget state.
+        editor_revision = _fingerprint(json.dumps(candidates[1], ensure_ascii=False, sort_keys=True))[:16]
         with st.expander("고급 설정 · 전체 문서 JSON 직접 수정"):
             raw = st.text_area("문서별 JSON 조건 (고급 편집)",
                 value=json.dumps(candidates[1], ensure_ascii=False, indent=2),
-                height=310, key="ai_intake_editable")
+                height=310, key="ai_intake_editable_" + editor_revision)
         edited_key = _fingerprint(digest + raw)
         if st.button("기존 문서 엔진으로 검증·DRAFT 생성", key="ai_intake_prepare"):
             st.session_state.pop("ai_intake_drafts", None)
