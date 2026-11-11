@@ -1,5 +1,6 @@
 """Smoke-test the separate read-only legacy-engine validation UI."""
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 try:
@@ -12,6 +13,13 @@ UI = Path(__file__).resolve().parents[1] / "ui" / "streamlit_page.py"
 
 @unittest.skipUnless(AppTest is not None, "Streamlit AppTest unavailable")
 class EnginePreflightUITest(unittest.TestCase):
+    def setUp(self):
+        # Only fake UI identity inside tests; never a production auth bypass.
+        gate = patch("Quotation_KEKOREA.orchestration.security.auth_gate.require_authentication",
+                     return_value="test@example.com")
+        gate.start()
+        self.addCleanup(gate.stop)
+
     def test_missing_pi_data_displays_blockers(self):
         app = AppTest.from_file(str(UI), default_timeout=15).run()
         app.radio[0].set_value("엔진 사전검증").run()
