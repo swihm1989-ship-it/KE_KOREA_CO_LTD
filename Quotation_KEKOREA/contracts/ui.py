@@ -1997,7 +1997,15 @@ def render_contract_page(page, env):
             _batch_request_panel(repo, snapshot, state_key, env, pending, buffers)
             proposal = st.session_state.get('contract_pending_proposal')
             if proposal and proposal.get('contract_id') == active_id:
-                _proposal_panel(repo, snapshot, proposal, state_key)
+                # Single-sentence deletion is confirmed inline beside the
+                # selected sentence. Do not show a second distant approval UI.
+                is_inline_delete = (
+                    len(proposal.get('changes') or []) == 1
+                    and proposal['changes'][0].get('delete_sentence') is True
+                    and proposal.get('target_sentence_id') == proposal['changes'][0].get('sentence_id')
+                )
+                if not is_inline_delete:
+                    _proposal_panel(repo, snapshot, proposal, state_key)
             # Following an approved commit, show the saved full contract immediately.
             if st.session_state.get(f"contract_approved_preview_{active_id}") == snapshot['revision']:
                 with st.expander('최종 수정 완료 — 전체 계약서 미리보기', expanded=True):
