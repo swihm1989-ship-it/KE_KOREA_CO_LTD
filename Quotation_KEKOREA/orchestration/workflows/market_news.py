@@ -79,7 +79,7 @@ def fetch_category(category: str, now: datetime | None = None) -> list[dict[str,
         content = response.read(1_000_001)
     if len(content) > 1_000_000:
         raise ValueError("RSS feed too large")
-    rows = parse_rss(content, cutoff_kst(now), now)
+    rows = parse_rss(content, now - timedelta(hours=24), now)
     seen = set()
     unique = []
     for row in rows:
