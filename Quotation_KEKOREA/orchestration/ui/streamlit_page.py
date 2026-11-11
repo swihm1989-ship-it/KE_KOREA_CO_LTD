@@ -5,6 +5,7 @@
 All data is fake and all approvals are UI-only. NO external mailbox or sends.
 """
 from __future__ import annotations
+import json
 import sys
 from pathlib import Path
 
@@ -41,7 +42,7 @@ if "mock_notes" not in st.session_state:
 
 st.sidebar.markdown("### KE KOREA")
 st.sidebar.caption("AI WORKSPACE · ISOLATED DEMO")
-page = st.sidebar.radio("업무 메뉴", ["업무 대시보드", "메일함", "AI 업무 요청", "문서 검토", "발송 대기", "실행 기록"], label_visibility="collapsed")
+page = st.sidebar.radio("업무 메뉴", ["업무 대시보드", "메일함", "AI 업무 요청", "문서 검토", "발송 대기", "엔진 사전검증", "실행 기록"], label_visibility="collapsed")
 st.sidebar.divider()
 st.sidebar.warning("샘플 데이터 전용\n\n후이즈메일/계약/PI·PO·CI·PL 실연동 없음. 외부 발송 불가.", icon="⚠️")
 
@@ -109,6 +110,40 @@ elif page == "AI 업무 요청":
             _save(start_mock_run(item))
             st.session_state.mock_selected = item.id
             st.success("Mock 라우팅 완료. 문서 검토 메뉴로 이동하세요.")
+
+elif page == "엔진 사전검증":
+    st.subheader("기존 엔진 사전검증 · 읽기 전용")
+    st.caption("기존 무역서류·계약서의 검증 함수만 호출합니다. 저장·승인·PDF 발행·메일 발송은 하지 않습니다.")
+    st.warning("현재 화면은 개발·검증용입니다. 실제 계약서·거래처 기밀은 입력하지 마세요.")
+    doc_kind = st.selectbox("검증 유형", ["PI", "PO", "CI", "PL", "CONTRACT"], key="preflight_kind")
+    example = ({"contract_id": "DEMO-001", "revision": 1,
+                "contract_type": "sale", "language": "ko", "parties": [],
+                "terms": [], "clauses": [], "issues": [], "omissions": {}}
+               if doc_kind == "CONTRACT" else
+               {"document_type": doc_kind, "product_family": "solar_cell", "items": []})
+    raw_json = st.text_area("검토할 구조화 데이터 (JSON)",
+                            value=json.dumps(example, ensure_ascii=False, indent=2),
+                            height=225, key=f"preflight_json_{doc_kind}")
+    if st.button("기존 엔진으로 사전검증", type="primary", key="validate_existing_engine"):
+        try:
+            candidate = json.loads(raw_json)
+            if not isinstance(candidate, dict):
+                raise ValueError("최상위 JSON은 객체여야 합니다.")
+            from Quotation_KEKOREA.orchestration.adapters.engine_bridge import (
+                evaluate_trade_candidate, evaluate_contract_candidate,
+            )
+            report = (evaluate_contract_candidate(candidate) if doc_kind == "CONTRACT"
+                      else evaluate_trade_candidate({**candidate, "document_type": doc_kind}))
+            st.markdown(f"**검증 결과: {report.status}**")
+            if report.blockers:
+                st.error(f"확인·수정할 항목 {len(report.blockers)}개")
+                for issue in report.blockers:
+                    st.write("- " + issue)
+            else:
+                st.success("검증상 필수조건 충족. 실제 문서 승인 및 발송은 별도로 필요합니다.")
+            st.info("발송 권한: 없음 · 승인 및 저장: 수행하지 않음")
+        except (ValueError, TypeError, KeyError) as exc:
+            st.error(f"입력 또는 검증 오류: {exc}")
 
 elif page in ("문서 검토", "발송 대기", "실행 기록"):
     if not runs:

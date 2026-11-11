@@ -232,3 +232,8 @@ python -c "from Quotation_KEKOREA.orchestration.master_graph import run_dry_run;
 ## 11. UI 검증 자동화 (2026-11-11 · PR #32 브랜치)
 
 기존 계약서 회귀 테스트는 UI 신규 경로를 검증하지 않기 때문에 **독립 GitHub Actions 워크플로** `.github/workflows/orchestration-mock-ui.yml`과 `tests/test_streamlit_ui.py`를 추가했다. `python -m unittest discover -s Quotation_KEKOREA/orchestration/tests -p 'test_*.py' -v`에서 Router, Mock 승인 상태, 실제 Streamlit AppTest 화면 렌더링, 가상 업무 시작, 비활성화된 SMTP 발송 버튼을 테스트한다. 기존 배포 파이프라인 및 기존 앱 파일은 변경하지 않는다. **실제 브라우저 수동 검증·후이즈 실계정·실제 문서 어댑터/발송은 여전히 미검증/미구현**이며, GitHub 검사 결과가 나오기 전에는 통과라고 선언하지 않는다.
+
+
+## 2026-11-11 · 오케스트레이션 읽기 전용 기존 엔진 사전검증 (PR #34)
+
+신규 `Quotation_KEKOREA/orchestration/adapters/engine_bridge.py`에서 **기존** `agent.trade_documents.validate_and_calculate`(PI/PO/CI/PL) 및 `contracts.models.validate_snapshot`, `contracts.rules.validate_snapshot`(계약) 함수를 **새 데이터 복사본으로 호출**하여 누락 정보·차단 조건을 표시한다. 독립 Streamlit UI의 **엔진 사전검증** 메뉴에서는 테스트용 JSON을 입력해 결과를 볼 수 있다. 호출 결과는 발송/최종 확정 권한이 아니며 기존 Streamlit 앱·계약 저장소·문서 발행·PDF 생성·Supabase·후이즈 POP3/SMTP는 호출하지 않는다. 기존 업무 에이전트 파일과 배포 설정을 변경하지 않았다. 실제 문서 자동 생성/승인 연동은 후속 단계다. 신규 테스트는 `orchestration/tests/test_engine_bridge.py`, `test_engine_preflight_ui.py`이며 PR CI 통과 전까지 미검증이다.
