@@ -28,6 +28,12 @@ def candidates():
 
 
 class FollowupTests(unittest.TestCase):
+    def test_korean_particles_after_document_abbreviations(self):
+        from Quotation_KEKOREA.orchestration.router import classify
+        self.assertEqual(classify("", "PI와 영문 매매계약서 초안 작성"), ["PI", "CONTRACT"])
+        self.assertEqual(classify("", "PO를 만들고 CI와 PL도 작성"), ["PO", "CI", "PL"])
+        self.assertEqual(classify("", "PILOT 주문"), [])
+
     def test_find_missing_buyer_and_seller_and_price_source(self):
         keys = [x.key for x in missing_fields(candidates())]
         self.assertIn("buyer.legal_name", keys)
