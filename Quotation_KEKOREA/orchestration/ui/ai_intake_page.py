@@ -167,6 +167,68 @@ def _render_quick_corrections(digest: str, candidate_map: dict) -> None:
             st.error("거래조건 수정 실패: " + str(exc))
 
 
+
+def _render_recovery_inputs(digest: str, analysis: dict, requested: list[str]) -> None:
+    """Independent of candidate builders; never hide editing after extraction."""
+    st.markdown("#### ✏️ 부족한 거래정보 입력 · 반드시 확인")
+    st.caption("아래 칸은 모바일에서도 입력할 수 있습니다. 적용하면 문서 후보를 다시 구성합니다.")
+    parties = analysis.get("parties") or []
+    def found(role: str) -> str:
+        return next((str(p.get("legal_name") or "") for p in parties
+                     if isinstance(p, dict) and role in [
+                         canonical_label(str(x)) or str(x) for x in (p.get("roles") or [])
+                     ]), "")
+    terms = analysis.get("terms") or []
+    currency = next((str(t.get("value") or "") for t in terms
+                     if isinstance(t, dict) and t.get("key") == "currency"), "")
+    with st.form("ai_intake_recovery_form", clear_on_submit=False):
+        buyer = st.text_input("Buyer · 구매자 법인명", value=found("buyer"))
+        seller = st.text_input("Seller · 판매자 법인명", value=found("seller"))
+        currency_value = st.text_input("통화 · USD 등", value=currency)
+        submitted = st.form_submit_button("거래조건 저장 및 문서정보 다시 만들기", type="primary")
+    if not submitted:
+        return
+    revised = deepcopy(analysis)
+    revised.setdefault("parties", [])
+    for role, value in (("buyer", buyer), ("seller", seller)):
+        if not value.strip():
+            continue
+        party = next((p for p in revised["parties"] if isinstance(p, dict) and role in [
+            canonical_label(str(x)) or str(x) for x in (p.get("roles") or [])
+        ]), None)
+        if party is None:
+            party = {"roles": [role], "legal_name": "", "address": "",
+                     "country": "", "status": "suggested", "source_refs": []}
+            revised["parties"].append(party)
+        party["legal_name"] = value.strip()
+    if currency_value.strip():
+        revised.setdefault("terms", [])
+        term = next((t for t in revised["terms"] if isinstance(t, dict)
+                     and t.get("key") == "currency"), None)
+        if term is None:
+            term = {"key": "currency", "value": "", "status": "suggested", "source_refs": []}
+            revised["terms"].append(term)
+        term["value"] = currency_value.strip()
+    st.session_state["ai_intake_result"] = (digest, revised)
+    st.session_state.pop("ai_intake_drafts", None)
+    try:
+        bundle = {}
+        for kind in requested:
+            if kind == "CONTRACT":
+                bundle[kind] = make_contract_candidate(revised, "ko" if st.session_state.get("ai_intake_language") == "한국어" else "en")
+            else:
+                bundle[kind] = make_trade_candidate(kind, revised,
+                    product_family=st.session_state.get("ai_intake_family", "solar_cell"))
+        if bundle:
+            _remember_candidate_bundle(digest, bundle)
+        st.session_state.pop("ai_intake_recovery_error", None)
+        st.success("입력한 거래조건을 저장하고 문서정보를 다시 만들었습니다.")
+    except (ValueError, TypeError, KeyError, RuntimeError) as exc:
+        st.session_state["ai_intake_recovery_error"] = str(exc)[:300]
+        st.warning("입력 내용은 저장했습니다. 문서 생성에 필요한 추가 항목을 확인하세요.")
+    st.rerun()
+
+
 def render_ai_intake(principal: str):
     if not principal:
         raise PermissionError("로그인이 필요합니다.")
@@ -216,6 +278,9 @@ def render_ai_intake(principal: str):
         st.warning("원래 업무 요청이 변경되었습니다. 기존 AI 추출 결과 및 검토 승인은 사용하지 마세요.")
     if result and result[0] == digest:
         analysis = result[1]
+        _render_recovery_inputs(digest, analysis, requested)
+        if st.session_state.get("ai_intake_recovery_error"):
+            st.warning("문서 후보 재생성 오류: " + st.session_state["ai_intake_recovery_error"])
         st.markdown("#### AI가 추출한 조건 · 모두 미확정")
         current = st.session_state.get("ai_intake_candidates")
         if current and current[0] == digest:
