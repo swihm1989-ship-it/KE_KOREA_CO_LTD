@@ -632,6 +632,71 @@ def _proposal_panel(repo, snapshot, proposal, state_key):
         st.rerun()
 
 
+def _commit_confirmed_sentence_deletion(repo, snapshot, proposal):
+    """Apply one user-confirmed deletion, then store a reversible revision.
+
+    Never delete on the initial button click. Keep the same edit validator,
+    expected-revision RPC and annotation conventions as the proposal panel.
+    """
+    changes = proposal.get("changes") or []
+    if (proposal.get("contract_id") != snapshot.get("contract_id")
+            or proposal.get("base_revision") != snapshot.get("revision")
+            or len(changes) != 1 or changes[0].get("delete_sentence") is not True
+            or changes[0].get("term_key")):
+        raise RevisionConflict("삭제 요청이 현재 계약서 버전과 일치하지 않습니다.")
+    change = changes[0]
+    updated = apply_proposal(snapshot, proposal, [change["id"]])
+    saved = _save_snapshot(
+        repo, updated, "User-approved deletion of one contract sentence",
+        expected_revision=snapshot["revision"],
+    )
+    # The revision RPC has committed by this point. Never retry the commit
+    # if an annotation fails, or create another deletion revision.
+    try:
+        repo.save_annotation({
+            "id": proposal["id"].replace("proposal_", ""),
+            "contract_id": snapshot["contract_id"],
+            "sentence_id": change["sentence_id"],
+            "base_revision": proposal["base_revision"],
+            "instruction": proposal.get("instruction", ""),
+            "proposal": proposal,
+            "status": "applied",
+        })
+    except ContractRepositoryError:
+        st.session_state[f"contract_commit_notice_{snapshot['contract_id']}"] = (
+            "문장 삭제 revision은 저장됐지만 수정 이력 기록은 확인이 필요합니다. 다시 삭제하지 마세요."
+        )
+    return saved
+
+
+def _render_inline_deletion_confirmation(repo, snapshot, proposal, state_key):
+    """Show the pending deletion right beside its sentence instead of below BOX 3."""
+    change = (proposal.get("changes") or [{}])[0]
+    sentence_id = change.get("sentence_id")
+    st.warning("이 문장을 삭제하시겠습니까? 승인하면 새 revision에 저장됩니다.")
+    st.caption("삭제 전: " + str(change.get("original_text") or ""))
+    st.caption("삭제 후: 문장 제거 · 이전 revision에서 복구 가능")
+    confirm, cancel = st.columns(2)
+    if confirm.button("삭제 확정·저장", type="primary",
+                      key=f"contract_delete_confirm_{proposal['id']}"):
+        try:
+            saved = _commit_confirmed_sentence_deletion(repo, snapshot, proposal)
+            st.session_state[state_key] = saved
+            st.session_state[f"contract_last_saved_revision_{snapshot['contract_id']}"] = saved["revision"]
+            st.session_state[f"contract_approved_preview_{snapshot['contract_id']}"] = saved["revision"]
+            st.session_state.pop("contract_pending_proposal", None)
+            st.session_state.pop("contract_pending_proposal_key", None)
+            st.session_state.pop("contract_pending_terms", None)
+            st.success(f"문장이 삭제되어 revision {saved['revision']}에 저장됐습니다.")
+            st.rerun()
+        except (ValueError, RevisionConflict, ContractRepositoryError) as exc:
+            st.error("문장 삭제를 저장하지 못했습니다: " + str(exc))
+    if cancel.button("삭제 취소", key=f"contract_delete_cancel_{proposal['id']}"):
+        st.session_state.pop("contract_pending_proposal", None)
+        st.session_state.pop("contract_pending_proposal_key", None)
+        st.rerun()
+
+
 def _note_buffer_key(snapshot):
     return f"contract_note_buffer_{snapshot['contract_id']}_{snapshot['revision']}"
 
@@ -879,7 +944,7 @@ def _render_draft(repo, snapshot, state_key, env):
                             pending_here = pending_proposal.get('contract_id') == contract_id
                             if st.button("문장 삭제", key=f"contract_delete_sentence_{contract_id}_{sentence_id}",
                                          disabled=pending_here,
-                                         help="삭제 전 전체 계약서 비교·승인 단계가 표시됩니다."):
+                                         help="이 문장 옆에서 삭제를 확인한 뒤 새 revision으로 저장합니다."):
                                 try:
                                     proposal = propose_sentence_deletion(snapshot, sentence_id)
                                     st.session_state['contract_pending_proposal'] = proposal
@@ -887,6 +952,13 @@ def _render_draft(repo, snapshot, state_key, env):
                                     st.rerun()
                                 except (ValueError, RevisionConflict) as exc:
                                     st.error(str(exc))
+                            pending_deletion = st.session_state.get('contract_pending_proposal') or {}
+                            if (pending_deletion.get('contract_id') == contract_id
+                                    and pending_deletion.get('target_sentence_id') == sentence_id
+                                    and len(pending_deletion.get('changes') or []) == 1
+                                    and pending_deletion['changes'][0].get('delete_sentence') is True):
+                                _render_inline_deletion_confirmation(
+                                    repo, snapshot, pending_deletion, state_key)
                             if st.button("메모 닫기", key=f"contract_note_close_{contract_id}_{sentence_id}"):
                                 buffers[sentence_id] = note
                                 opened.remove(sentence_id)
@@ -1925,7 +1997,15 @@ def render_contract_page(page, env):
             _batch_request_panel(repo, snapshot, state_key, env, pending, buffers)
             proposal = st.session_state.get('contract_pending_proposal')
             if proposal and proposal.get('contract_id') == active_id:
-                _proposal_panel(repo, snapshot, proposal, state_key)
+                # Single-sentence deletion is confirmed inline beside the
+                # selected sentence. Do not show a second distant approval UI.
+                is_inline_delete = (
+                    len(proposal.get('changes') or []) == 1
+                    and proposal['changes'][0].get('delete_sentence') is True
+                    and proposal.get('target_sentence_id') == proposal['changes'][0].get('sentence_id')
+                )
+                if not is_inline_delete:
+                    _proposal_panel(repo, snapshot, proposal, state_key)
             # Following an approved commit, show the saved full contract immediately.
             if st.session_state.get(f"contract_approved_preview_{active_id}") == snapshot['revision']:
                 with st.expander('최종 수정 완료 — 전체 계약서 미리보기', expanded=True):
