@@ -17,6 +17,7 @@ from Quotation_KEKOREA.orchestration.workflows.unified_review import (
     new_request, prepare_documents,
 )
 from Quotation_KEKOREA.orchestration.ui.saved_contracts import _server_value
+from Quotation_KEKOREA.orchestration.workflows.intake_followups import missing_fields, apply_answer
 
 
 def _fingerprint(text: str) -> str:
@@ -27,6 +28,34 @@ def _model_config():
     return {k: _server_value(k) for k in (
         "OPENAI_API_KEY", "OPENAI_MODEL", "CONTRACT_OPENAI_MODEL",
     )}
+
+
+def _remember_candidate_bundle(digest: str, candidate_map: dict) -> None:
+    """Synchronize answer widgets and advanced editor in memory."""
+    st.session_state["ai_intake_candidates"] = (digest, candidate_map)
+    st.session_state["ai_intake_editable"] = json.dumps(candidate_map, ensure_ascii=False, indent=2)
+    st.session_state.pop("ai_intake_drafts", None)
+
+
+def _handle_missing_answer(digest: str, key: str, widget_key: str) -> None:
+    """On Enter/blur, update both draft types and revoke old previews."""
+    saved = st.session_state.get("ai_intake_candidates")
+    if not saved or saved[0] != digest:
+        return
+    answer = str(st.session_state.get(widget_key, "")).strip()
+    if not answer:
+        return
+    try:
+        source = json.loads(st.session_state.get("ai_intake_editable") or "{}")
+        if not isinstance(source, dict):
+            raise ValueError("JSON 객체 형식이 필요합니다.")
+        updated = apply_answer(source, key, answer)
+    except (ValueError, TypeError) as exc:
+        st.session_state["ai_intake_followup_error"] = str(exc)
+        return
+    _remember_candidate_bundle(digest, updated)
+    st.session_state["ai_intake_last_answer"] = key
+    st.session_state.pop("ai_intake_followup_error", None)
 
 
 def _reference_panel():
@@ -101,6 +130,15 @@ def render_ai_intake(principal: str):
             with st.spinner("거래조건을 분석합니다."):
                 extracted = extract_candidate(instruction, config, consent=consent)
             st.session_state["ai_intake_result"] = (digest, extracted)
+            candidate_map = {}
+            for kind in requested:
+                if kind == "CONTRACT":
+                    candidate_map[kind] = make_contract_candidate(
+                        extracted, "ko" if language == "한국어" else "en")
+                else:
+                    candidate_map[kind] = make_trade_candidate(
+                        kind, extracted, product_family=family)
+            _remember_candidate_bundle(digest, candidate_map)
         except (PermissionError, ValueError, RuntimeError, TypeError) as exc:
             st.error("AI 거래조건 추출 실패: " + str(exc)[:400])
 
@@ -137,17 +175,47 @@ def render_ai_intake(principal: str):
                     else:
                         candidate_map[kind] = make_trade_candidate(kind, analysis,
                                                                   product_family=family)
-                st.session_state["ai_intake_candidates"] = (digest, candidate_map)
-                st.session_state.pop("ai_intake_drafts", None)
+                _remember_candidate_bundle(digest, candidate_map)
             except (ValueError, TypeError) as exc:
                 st.error("초안 입력 구성 실패: " + str(exc))
     candidates = st.session_state.get("ai_intake_candidates")
     if candidates and candidates[0] == digest:
-        st.markdown("#### 문서 조건 직접 확인·수정")
-        st.caption("AI 추출값은 확정값이 아닙니다. 누락된 주소, 출처, 규격 및 수량 등을 반드시 확인해 수정하세요.")
-        raw = st.text_area("문서별 JSON 조건 (직접 수정 후 검증)",
-            value=json.dumps(candidates[1], ensure_ascii=False, indent=2),
-            height=310, key="ai_intake_editable")
+        st.markdown("#### 부족한 정보 입력 · 실시간 반영")
+        st.caption("확인된 내용을 입력하고 Enter를 누르거나 다른 칸으로 이동하면 PI·계약서에 동시에 반영됩니다.")
+        gap_list = missing_fields(candidates[1])
+        answered = st.session_state.get("ai_intake_last_answer")
+        if answered:
+            st.success("입력 반영: " + str(answered) + " · 기존 초안·승인은 무효화되었습니다.")
+        error = st.session_state.get("ai_intake_followup_error")
+        if error:
+            st.error(error)
+        if gap_list:
+            st.warning(f"현재 누락된 항목 {len(gap_list)}개")
+            for gap in gap_list:
+                widget_key = "ai_intake_answer_" + gap.key.replace(".", "_")
+                st.text_input(
+                    gap.label, key=widget_key,
+                    placeholder="정확한 내용을 입력하고 Enter",
+                    on_change=_handle_missing_answer,
+                    args=(digest, gap.key, widget_key),
+                )
+        else:
+            st.success("필수 입력칸의 빈값을 모두 보완했습니다. AI 제안에 대한 실무 검토는 별도로 필요합니다.")
+        candidates = st.session_state.get("ai_intake_candidates")
+        st.markdown("#### 실시간 반영 결과")
+        for kind, data in candidates[1].items():
+            if kind in ("PI", "PO", "CI", "PL"):
+                with st.container(border=True):
+                    st.markdown("**" + kind + " · 현재 거래정보**")
+                    st.write("Buyer:", (data.get("buyer") or {}).get("legal_name") or "미입력")
+                    st.write("Seller:", (data.get("seller") or {}).get("legal_name") or "미입력")
+                    st.write("가격 확인 출처:", (data.get("items") or [{}])[0].get("price_source") or "미입력")
+            elif kind == "CONTRACT":
+                st.caption("계약서 당사자와 조건에도 답변을 함께 반영합니다. 생성된 조항은 조건이 바뀌면 무효화됩니다.")
+        with st.expander("고급 설정 · 전체 문서 JSON 직접 수정"):
+            raw = st.text_area("문서별 JSON 조건 (고급 편집)",
+                value=json.dumps(candidates[1], ensure_ascii=False, indent=2),
+                height=310, key="ai_intake_editable")
         edited_key = _fingerprint(digest + raw)
         if st.button("기존 문서 엔진으로 검증·DRAFT 생성", key="ai_intake_prepare"):
             st.session_state.pop("ai_intake_drafts", None)
@@ -196,9 +264,7 @@ def render_ai_intake(principal: str):
                     # Use an explicit callback state, never modify saved contract.
                     updated = deepcopy(edited)
                     updated["CONTRACT"] = generated
-                    st.session_state["ai_intake_candidates"] = (digest, updated)
-                    st.session_state.pop("ai_intake_drafts", None)
-                    st.session_state.pop("ai_intake_editable", None)
+                    _remember_candidate_bundle(digest, updated)
                     st.success("새 DRAFT 조항을 생성했습니다. 조건과 문구를 확인한 뒤 검증·다운로드하세요.")
                     st.rerun()
                 except (ValueError, RuntimeError, KeyError, TypeError) as exc:

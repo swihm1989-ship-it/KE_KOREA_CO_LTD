@@ -48,7 +48,7 @@ if "mock_notes" not in st.session_state:
 
 st.sidebar.markdown("### KE KOREA")
 st.sidebar.caption("AI WORKSPACE · ISOLATED DEMO")
-page = st.sidebar.radio("업무 메뉴", ["업무 대시보드", "메일함", "AI 업무 요청", "AI 거래조건 추출", "통합 업무 흐름", "문서 검토", "발송 대기", "엔진 사전검증", "문서 초안 미리보기", "저장된 계약서", "실행 기록"], label_visibility="collapsed")
+page = st.sidebar.radio("업무 메뉴", ["업무 대시보드", "메일함", "AI 업무 요청", "통합 업무 흐름", "문서 검토", "발송 대기", "엔진 사전검증", "문서 초안 미리보기", "저장된 계약서", "실행 기록"], label_visibility="collapsed")
 st.sidebar.divider()
 st.sidebar.caption("접속 계정: " + _authenticated_principal)
 if st.sidebar.button("로그아웃", key="master_logout"):
@@ -104,23 +104,6 @@ if page in ("업무 대시보드", "메일함"):
             st.write(f"**{run.subject}** · {run.status} · {', '.join(t.kind for t in run.tasks) or '분류 필요'}")
 
 elif page == "AI 업무 요청":
-    st.subheader("자연어 업무 요청 · Mock router")
-    st.caption("AI API를 호출하지 않습니다. 문서 키워드를 찾아 가상 워크플로만 만듭니다.")
-    with st.form("mock_task_form"):
-        subject = st.text_input("업무 제목", placeholder="PI and Contract draft")
-        instruction = st.text_area("업무 지시", placeholder="거래조건과 필요한 문서를 설명하세요. 실거래 기밀은 입력하지 마세요.", height=130)
-        submitted = st.form_submit_button("샘플 업무 생성", type="primary")
-    if submitted:
-        if not (subject.strip() or instruction.strip()):
-            st.error("업무 제목 또는 지시문을 입력하세요.")
-        else:
-            number = len(st.session_state.mock_runs) + 1
-            item = MockMessage(f"manual-{number}", "reviewer@example.test", subject, instruction, "manual")
-            _save(start_mock_run(item))
-            st.session_state.mock_selected = item.id
-            st.success("Mock 라우팅 완료. 문서 검토 메뉴로 이동하세요.")
-
-elif page == "AI 거래조건 추출":
     from Quotation_KEKOREA.orchestration.ui.ai_intake_page import render_ai_intake
     render_ai_intake(_authenticated_principal)
 
