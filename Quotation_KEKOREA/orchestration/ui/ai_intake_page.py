@@ -220,6 +220,9 @@ def render_ai_intake(principal: str):
         current = st.session_state.get("ai_intake_candidates")
         if current and current[0] == digest:
             _render_missing_inputs(digest, current[1])
+        current = st.session_state.get("ai_intake_candidates")
+        if current and current[0] == digest:
+            _render_quick_corrections(digest, current[1])
         if analysis.get("parties"):
             st.dataframe([{"역할": ", ".join(canonical_label(str(role)) or str(role) for role in p.get("roles", [])),
                            "회사명": p.get("legal_name") or "미입력",
@@ -236,9 +239,6 @@ def render_ai_intake(principal: str):
             with st.expander("추가 AI 검토 사항"):
                 for issue in analysis["issues"]:
                     st.write(str(issue.get("message") or issue))
-        current = st.session_state.get("ai_intake_candidates")
-        if current and current[0] == digest:
-            _render_quick_corrections(digest, current[1])
         st.caption("모든 금액·수량·법인명은 원문과 대조해야 합니다. AI 제안만으로 최종 문서 승인은 할 수 없습니다.")
         if st.button("기존 엔진용 초안 입력 만들기", key="ai_intake_build_candidates"):
             try:
