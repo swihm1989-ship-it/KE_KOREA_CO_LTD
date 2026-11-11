@@ -4,7 +4,7 @@ on:
     - cron: '*/30 * * * *'
   workflow_dispatch:
 permissions:
-  contents: write
+  contents: read
 concurrency:
   group: market-news-refresh
   cancel-in-progress: false
@@ -17,17 +17,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Fetch public RSS headlines
+      - name: Check news database configuration
+        env:
+          NEWS_SUPABASE_URL: ${{ secrets.NEWS_SUPABASE_URL }}
+          NEWS_SUPABASE_SECRET_KEY: ${{ secrets.NEWS_SUPABASE_SECRET_KEY }}
+        run: |
+          test -n "$NEWS_SUPABASE_URL" || { echo "::error::NEWS_SUPABASE_URL is missing"; exit 1; }
+          test -n "$NEWS_SUPABASE_SECRET_KEY" || { echo "::error::NEWS_SUPABASE_SECRET_KEY is missing"; exit 1; }
+      - name: Fetch public RSS headlines and store in Supabase
         env:
           NEWS_SUPABASE_URL: ${{ secrets.NEWS_SUPABASE_URL }}
           NEWS_SUPABASE_SECRET_KEY: ${{ secrets.NEWS_SUPABASE_SECRET_KEY }}
         run: python -m Quotation_KEKOREA.orchestration.workflows.refresh_market_news
-      - name: Commit snapshot if changed (legacy fallback only)
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Quotation_KEKOREA/data/market_news_snapshot.json
-          if ! git diff --cached --quiet; then
-            git commit -m "chore(news): refresh headlines [skip ci]"
-            git push
-          fi
