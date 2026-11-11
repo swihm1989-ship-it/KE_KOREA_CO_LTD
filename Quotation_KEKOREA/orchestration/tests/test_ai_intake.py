@@ -103,6 +103,12 @@ class AiIntakeTests(unittest.TestCase):
             self.assertTrue(draft.call_args.kwargs["use_library"] is False)
             self.assertIsNone(draft.call_args.kwargs["repo"])
 
+    def test_recovery_does_not_change_strict_ai_confirmation_guard(self):
+        bad = copy.deepcopy(self.ai)
+        bad["terms"][0]["status"] = "confirmed"
+        with self.assertRaises(ValueError):
+            make_trade_candidate("PI", bad)
+
     def test_ai_terms_must_be_suggested_even_if_model_claims_confirmed(self):
         bad = copy.deepcopy(self.ai)
         bad["terms"][0]["status"] = "confirmed"
