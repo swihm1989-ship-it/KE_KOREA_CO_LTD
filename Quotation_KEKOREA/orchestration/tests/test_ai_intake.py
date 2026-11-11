@@ -5,7 +5,7 @@ from unittest.mock import patch, Mock
 
 from Quotation_KEKOREA.orchestration.workflows.ai_intake import (
     extract_candidate, make_contract_candidate, make_trade_candidate,
-    selected_contract_reference,
+    selected_contract_reference, generate_contract_draft,
 )
 
 
@@ -87,6 +87,21 @@ class AiIntakeTests(unittest.TestCase):
         self.assertEqual(copied, reference)
         repo.commit_revision.assert_not_called()
         repo.save_export.assert_not_called()
+
+    def test_contract_drafting_is_opt_in_and_never_saves_to_existing_repo(self):
+        candidate = make_contract_candidate(self.ai, "ko")
+        with patch("Quotation_KEKOREA.contracts.ai_graph.generate_contract_draft_graph") as draft:
+            with self.assertRaises(PermissionError):
+                generate_contract_draft(candidate, {}, consent=False)
+            draft.assert_not_called()
+            fake = copy.deepcopy(candidate)
+            fake["clauses"] = [{"title": "DRAFT", "sentences": [{"text": "review only"}]}]
+            draft.return_value = fake
+            result = generate_contract_draft(
+                candidate, {"OPENAI_API_KEY": "fake", "OPENAI_MODEL": "test"}, consent=True)
+            self.assertEqual(result["clauses"], fake["clauses"])
+            self.assertTrue(draft.call_args.kwargs["use_library"] is False)
+            self.assertIsNone(draft.call_args.kwargs["repo"])
 
     def test_ai_terms_must_be_suggested_even_if_model_claims_confirmed(self):
         bad = copy.deepcopy(self.ai)
