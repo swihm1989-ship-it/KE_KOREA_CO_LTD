@@ -5,6 +5,7 @@ import os
 from datetime import datetime
 from pathlib import Path
 from Quotation_KEKOREA.orchestration.workflows.market_news import CATEGORIES, KST, fetch_category, retain_last_24_hours
+from Quotation_KEKOREA.orchestration.workflows.news_supabase import NewsSupabase
 
 SNAPSHOT = Path(__file__).resolve().parents[2] / "data" / "market_news_snapshot.json"
 
@@ -27,6 +28,11 @@ def main() -> None:
             result[category] = retain_last_24_hours(previous.get(category, []), now)
     if len(failures) == len(CATEGORIES):
         raise RuntimeError("All feeds failed: " + ", ".join(failures))
+    store = NewsSupabase.from_config()
+    if store is not None:
+        count = store.upsert_categories(result, now=now)
+        print("Supabase news rows upserted:", count)
+        return
     payload = {"updated_at": now.isoformat(), "categories": result,
                "errors": failures}
     SNAPSHOT.parent.mkdir(parents=True, exist_ok=True)
