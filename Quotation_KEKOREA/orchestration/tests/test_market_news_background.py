@@ -16,13 +16,22 @@ class BackgroundNewsTests(unittest.TestCase):
             with patch.object(job, "SNAPSHOT", target), patch.object(
                 job, "fetch_category", return_value=[
                     {"title": "Solar news", "url": "https://example.com/news",
-                     "publisher": "Example", "published": "11-11 19:00"}
+                     "publisher": "Example", "published": "11-11 19:00",
+                     "published_at": datetime.now(ZoneInfo("Asia/Seoul")).isoformat()}
                 ]
             ):
                 job.main()
             data = json.loads(target.read_text(encoding="utf-8"))
             self.assertEqual(set(data["categories"]), set(job.CATEGORIES))
             self.assertEqual(data["categories"]["태양광"][0]["title"], "Solar news")
+
+    def test_expired_articles_are_removed(self):
+        from datetime import timedelta
+        from Quotation_KEKOREA.orchestration.workflows.market_news import retain_last_24_hours
+        now = datetime.now(ZoneInfo("Asia/Seoul"))
+        rows = [{"published_at": (now - timedelta(hours=25)).isoformat()},
+                {"published_at": (now - timedelta(hours=1)).isoformat()}]
+        self.assertEqual(retain_last_24_hours(rows, now), [rows[1]])
 
     def test_all_sources_failing_does_not_overwrite(self):
         with TemporaryDirectory() as tmp:
