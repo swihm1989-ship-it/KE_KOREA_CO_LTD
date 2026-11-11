@@ -69,6 +69,7 @@ class AiIntakeUiTests(unittest.TestCase):
             self.assertIn("PI", app.session_state["ai_intake_candidates"][1])
             self.assertTrue(app.text_input(key="ai_intake_answer_buyer_legal_name"))
             self.assertTrue(app.text_input(key="ai_intake_answer_seller_legal_name"))
+            self.assertTrue(any(f.key == "ai_intake_quick_corrections" for f in app.get("form")))
             app.text_input(key="ai_intake_answer_buyer_legal_name").set_value("TENGYAO TECHNOLOGY CO. LTD").run()
             self.assertFalse(app.exception, [x.message for x in app.exception])
             result = app.session_state["ai_intake_candidates"][1]
