@@ -418,3 +418,44 @@ $LASTEXITCODE
 - `analyze_trade()`의 최상위 `source_refs` 문자열은 출처로 인정하지 않고 `[]`로 정규화하며 `unverified_ai_source_ref`/`confirm` 검토사항을 추가한다. `None`과 빈 문자열은 경고 없이 `[]`로 처리한다. 단일 객체는 목록으로 변환한 뒤 원문 인용·문서 ID 검증을 유지한다.
 - 문자열을 복구하라는 테스트와 문자열도 예외 처리하라는 기존 테스트의 충돌을 수정 전 보고했다. 문자열 사례는 빈 배열·경고·원본 보존을 검증하는 별도 테스트로 분리했다. 리스트 내부 문자열/None, 허위 인용문, 없는 문서 ID의 ValueError 검증은 유지한다.
 - 실행 코드 변경은 출처 문자열 처리 분기로 제한했다. 계약 작성·번역·검토·PDF 경로는 변경하지 않았다. 지정한 두 테스트 파일의 21개 테스트 및 Python 138개 파일의 문법 검사는 통과했다. 전체 `test_contract*.py` 361개(69.003초)와 전체 회귀 586개(168.699초)가 모두 통과했다. 실패·오류·생략은 없으며 기존 Streamlit/PyMuPDF 경고는 남아 있다. GitHub Push와 운영 검증은 수행하지 않았다.
+
+---
+
+## 2026-11-11 변경 기록 — 계약 에이전트 안정화·UX·출력 (PR #20–#27)
+
+> **이 절은 11월 11일 개인 저장소 `main`에 병합된 코드 변경 이력이다.** 상단의 11월 10일 기준 구조 설명보다 최신이다. GitHub Actions 회귀 테스트 통과와 실제 Streamlit 배포/실거래 검증은 다르다. 팀 프로젝트에는 자동 반영되지 않았다.
+
+| PR | 적용된 기능 | 핵심 파일·검증 포인트 |
+| --- | --- | --- |
+| [#20](https://github.com/swihm1989-ship-it/KE_KOREA_CO_LTD/pull/20) | `Parties and Scope of Sale` 거래명세를 PDF/DOCX 2열 표로 출력; 제안 상태를 값과 분리 | `sale_scope_template.py`, `sale_scope_render.py`, `exports.py`, `draft_exports.py`; 단가/수량 불변 |
+| [#21](https://github.com/swihm1989-ship-it/KE_KOREA_CO_LTD/pull/21) | LangGraph `InMemorySaver` Checkpointer, 사용자 수정안 승인 `interrupt/Command(resume=...)` | `graph_checkpoint.py`, `approval_interrupt.py`, `ai_graph.py`, `ui.py`; Supabase revision은 승인 이후에만 저장. 프로세스 재시작 후 복구·속도 향상은 아직 보장하지 않음 |
+| [#22](https://github.com/swihm1989-ship-it/KE_KOREA_CO_LTD/pull/22) | 기존 저장 계약 BOX 3의 `제안(미확정)`/`Proposed (not agreed)` 반복 접두어 표시 제거 | 저장된 snapshot은 변경하지 않고 표시만 정리 |
+| [#23](https://github.com/swihm1989-ship-it/KE_KOREA_CO_LTD/pull/23) | 문장 선택 → 삭제 제안 → 인라인 `삭제 확정·저장`/`삭제 취소` → 새 revision | 다른 문장·과거 revision 보존, 동시 수정 충돌 차단 |
+| [#24](https://github.com/swihm1989-ship-it/KE_KOREA_CO_LTD/pull/24) | `party[1]` 등 부정확한 AI 출처 인용 때문에 추출 전체가 실패하던 문제 복구 | 정확한 출처 인용만 유지, 검증 불가 인용 제외 + `confirm` 검토사항. 추출값은 `suggested` |
+| [#25](https://github.com/swihm1989-ship-it/KE_KOREA_CO_LTD/pull/25) | 초안 감사의 인용 불일치가 2회 계속되면 초안 폐기 대신 검토용 보존 | 검증 실패는 `block` 이슈로 기록; FINAL 차단. 감사 구조 자체가 잘못된 경우는 기존 실패 처리 |
+| [#26](https://github.com/swihm1989-ship-it/KE_KOREA_CO_LTD/pull/26) | 문장 위의 투명 절대 위치 버튼과 실제 클릭 범위 어긋남 수정 | 눈에 보이는 전체 너비 버튼이 클릭 영역. 줄바꿈·메모·삭제 테스트 |
+| [#27](https://github.com/swihm1989-ship-it/KE_KOREA_CO_LTD/pull/27) | 표 아래 `Pending confirmation`/`확인 필요 (미승인 조건)` 자동 안내를 DRAFT·FINAL PDF/DOCX 본문에서 제거 | 미승인 상태·FINAL 승인 검증 유지; 상태 안내와 계약서 본문 분리 |
+
+**기존 기능 확인 / 추가 취소:** 저장된 계약을 열어 **계약 정보 수정 → 계약 제목 수정 → 계약 정보 저장**으로 변경할 수 있다. `snapshot.title`을 이용하므로 이후 생성하는 PDF/DOCX 본문 제목도 변경된다. 목록의 별도 Rename 버튼 PR [#28](https://github.com/swihm1989-ship-it/KE_KOREA_CO_LTD/pull/28)은 **병합 없이 종료**했다. 기존 다운로드 파일과 과거 revision의 이름은 소급 변경되지 않는다.
+
+### 반드시 유지할 불변 조건
+- AI 추출값은 승인 전 `suggested`이고, 잘못된 인용은 근거로 인정하지 않는다.
+- 원본 계약 조항과 검증 로직의 삭제·우회 금지. 문장 삭제·수정은 명시적 승인 뒤 새로운 revision에 저장한다.
+- 초안에 인용 오류가 있어도 검토용으로 보존할 수 있으나, 검증 실패를 정상 완료로 표시하거나 FINAL 출력을 허용해서는 안 된다.
+- `Pending confirmation`은 **자동 생성된 UI 상태 문구**로서 법률 문서 본문에 넣지 않는다. 실제 사용자가 작성한 내용은 별도 검토한다.
+- AI 초안 생성·품질검사·PDF 출력·저장 계약 목록은 단위 테스트뿐 아니라 Streamlit에서 직접 확인한다.
+- 성능 측정 예시: 초안 생성 52.2초, AI 품질 검토 66.9초, 검색 0.7초(한 번의 화면 측정). 평균치가 아니며 Checkpointer 도입으로 120초가 줄었다고 주장하지 않는다.
+
+### 팀원이 기능을 골라 AI에게 재구현 요청하는 절차
+1. 위 표에서 필요한 **PR 한 건**을 정해 열고, 해당 PR의 `Files changed`와 테스트를 본다.
+2. 자신의 저장소에서 해당 기능의 대응 파일을 찾아 설계하고, **원본 저장소 코드를 바로 수정하지 않는다.**
+3. 아래 템플릿을 복사해 기능명만 바꾼다. 먼저 기존 구현 유무를 확인하고, 이미 있으면 **중복 구현하지 않는다**.
+
+```text
+내 저장소에서 [PR #번호 / 기능명]의 동작을 재구현해줘.
+먼저 내 코드의 같은 기능 유무를 확인하고, 이미 동등하게 구현되어 있으면 수정하지 말고 근거를 알려줘.
+원본 KE_KOREA_CO_LTD는 읽기 전용 참고이며 수정하지 마.
+차이가 있을 때만 내 저장소의 기존 아키텍처·승인/DB·출력 경로에 맞는 최소 변경을 별도 브랜치/PR로 적용해줘.
+입력→검토→명시적 승인→새 revision/결과물 흐름을 유지하고, 정상·실패·취소·중복 클릭 회귀 테스트를 실행해줘.
+실제 앱 실행/배포 확인이 안 되면 통과했다고 주장하지 마.
+```
