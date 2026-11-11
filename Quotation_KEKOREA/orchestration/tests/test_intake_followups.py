@@ -34,6 +34,14 @@ class FollowupTests(unittest.TestCase):
         self.assertEqual(classify("", "PO를 만들고 CI와 PL도 작성"), ["PO", "CI", "PL"])
         self.assertEqual(classify("", "PILOT 주문"), [])
 
+    def test_misspelled_buyer_role_still_prompts_for_name(self):
+        sample = candidates()
+        sample["CONTRACT"]["parties"] = [{"roles": ["buyеr"], "legal_name": None}]
+        # A Cyrillic confusable is not silently trusted as a legal role.
+        self.assertIn("buyer.legal_name", [x.key for x in missing_fields(sample)])
+        sample["CONTRACT"]["parties"] = [{"roles": ["buyr"], "legal_name": None}]
+        self.assertIn("buyer.legal_name", [x.key for x in missing_fields(sample)])
+
     def test_find_missing_buyer_and_seller_and_price_source(self):
         keys = [x.key for x in missing_fields(candidates())]
         self.assertIn("buyer.legal_name", keys)
