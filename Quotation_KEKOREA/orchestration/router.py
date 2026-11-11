@@ -4,10 +4,10 @@ import re
 
 DOC_TYPES = ("PI", "PO", "CI", "PL", "CONTRACT")
 _PATTERNS = {
-    "PI": (r"\bpro\s*forma\s*invoice\b", r"\bPI\b", r"견적송장", r"견적\s*인보이스"),
-    "PO": (r"\bpurchase\s*order\b", r"\bPO\b", r"발주서"),
-    "CI": (r"\bcommercial\s*invoice\b", r"\bCI\b", r"상업송장"),
-    "PL": (r"\bpacking\s*list\b", r"\bPL\b", r"포장명세서", r"패킹리스트"),
+    "PI": (r"\bpro\s*forma\s*invoice\b", r"\bPI(?![A-Za-z0-9_])", r"견적송장", r"견적\s*인보이스"),
+    "PO": (r"\bpurchase\s*order\b", r"\bPO(?![A-Za-z0-9_])", r"발주서"),
+    "CI": (r"\bcommercial\s*invoice\b", r"\bCI(?![A-Za-z0-9_])", r"상업송장"),
+    "PL": (r"\bpacking\s*list\b", r"\bPL(?![A-Za-z0-9_])", r"포장명세서", r"패킹리스트"),
     "CONTRACT": (r"\bcontract\b", r"\bagreement\b", r"계약서", r"계약\s*초안"),
 }
 
