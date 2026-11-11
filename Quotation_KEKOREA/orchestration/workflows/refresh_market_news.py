@@ -4,7 +4,7 @@ import json
 import os
 from datetime import datetime
 from pathlib import Path
-from Quotation_KEKOREA.orchestration.workflows.market_news import CATEGORIES, KST, fetch_category
+from Quotation_KEKOREA.orchestration.workflows.market_news import CATEGORIES, KST, fetch_category, retain_last_24_hours
 
 SNAPSHOT = Path(__file__).resolve().parents[2] / "data" / "market_news_snapshot.json"
 
@@ -21,10 +21,10 @@ def main() -> None:
     failures = []
     for category in CATEGORIES:
         try:
-            result[category] = fetch_category(category, now=now)
+            result[category] = retain_last_24_hours(fetch_category(category, now=now), now)
         except (OSError, ValueError, TimeoutError) as exc:
             failures.append(f"{category}: {type(exc).__name__}")
-            result[category] = previous.get(category, [])
+            result[category] = retain_last_24_hours(previous.get(category, []), now)
     if len(failures) == len(CATEGORIES):
         raise RuntimeError("All feeds failed: " + ", ".join(failures))
     payload = {"updated_at": now.isoformat(), "categories": result,
