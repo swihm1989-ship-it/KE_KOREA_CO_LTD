@@ -124,7 +124,7 @@ def make_trade_candidate(kind: str, analysis: Mapping[str, Any],
             "unit": terms.get("unit", ""),
             "unit_price": terms.get("unit_price", ""),
             "price_basis": terms.get("unit", ""),
-            "price_source": "AI extracted; user confirmation required",
+            "price_source": "",  # must be entered by the user; extraction is not verified provenance
         }],
     }
     return result
