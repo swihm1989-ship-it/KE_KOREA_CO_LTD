@@ -19,7 +19,7 @@ LABELS = {
     "product": ("product", "prodcut", "products", "품목", "제품"),
 }
 _ALIAS = {alias.casefold(): canonical for canonical, aliases in LABELS.items() for alias in aliases}
-_LABEL_LINE = re.compile(r"(?m)^(?P<indent>[ \\t]*)(?P<label>[^\\n:=]{2,36}?)(?P<sep>[ \\t]*[:=][ \\t]*)")
+_LABEL_LINE = re.compile(r"(?m)^(?P<indent>[ \t]*)(?P<label>[^\n:=]{2,36}?)(?P<sep>[ \t]*[:=][ \t]*)")
 _ASCII_LABEL = re.compile(r"^[A-Za-z][A-Za-z _-]*$")
 
 
