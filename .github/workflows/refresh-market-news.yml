@@ -1,0 +1,30 @@
+name: Refresh market headlines
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: market-news-refresh
+  cancel-in-progress: false
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Fetch public RSS headlines
+        run: python -m Quotation_KEKOREA.orchestration.workflows.refresh_market_news
+      - name: Commit snapshot if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Quotation_KEKOREA/data/market_news_snapshot.json
+          if ! git diff --cached --quiet; then
+            git commit -m "chore(news): refresh headlines [skip ci]"
+            git push
+          fi

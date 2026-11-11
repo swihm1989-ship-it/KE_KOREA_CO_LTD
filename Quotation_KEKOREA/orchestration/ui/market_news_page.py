@@ -1,14 +1,26 @@
 """Read-only market headlines for the authenticated MASTER GRAPH home."""
 from __future__ import annotations
 import streamlit as st
+import json
+from pathlib import Path
 from urllib.parse import urlsplit
 from Quotation_KEKOREA.orchestration.workflows.market_news import CATEGORIES, KST, cutoff_kst, fetch_category
 from datetime import datetime
+from Quotation_KEKOREA.orchestration.workflows.market_news import parse_rss
 
 
 @st.cache_data(ttl=1800, show_spinner=False)
 def _cached_news(category: str):
-    return fetch_category(category)
+    snapshot = Path(__file__).resolve().parents[2] / "data" / "market_news_snapshot.json"
+    if snapshot.exists():
+        try:
+            payload = json.loads(snapshot.read_text(encoding="utf-8"))
+            updated = datetime.fromisoformat(payload["updated_at"])
+            if (datetime.now(KST) - updated).total_seconds() < 5400:
+                return payload["categories"].get(category, []), updated
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+    return fetch_category(category), None
 
 
 @st.fragment(run_every="30m")
@@ -21,7 +33,11 @@ def render_market_news() -> None:
     for category in CATEGORIES:
         st.markdown("#### " + category)
         try:
-            stories = _cached_news(category)
+            stories, updated = _cached_news(category)
+            if updated:
+                st.caption("백그라운드 수집: " + updated.astimezone(KST).strftime("%m/%d %H:%M") + " KST")
+            else:
+                st.caption("실시간 RSS 조회 · 저장된 최신 수집본 없음")
         except Exception:
             st.warning("현재 " + category + " 뉴스 수집이 지연되고 있습니다. 잠시 후 다시 시도하세요.")
             continue
