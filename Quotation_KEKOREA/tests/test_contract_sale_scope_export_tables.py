@@ -26,7 +26,7 @@ class SaleScopeExportPresentationTests(unittest.TestCase):
         snapshot["terms"][3]["status"] = "suggested"
         return apply_sale_scope_template(snapshot)
 
-    def test_scope_rows_display_once_with_separate_unconfirmed_notice(self):
+    def test_scope_rows_have_no_workflow_status_notice(self):
         snap = self.snapshot()
         items = scope_display_items(snap["clauses"][0]["sentences"], "en")
         tables = [value for kind, value in items if kind == "table"]
@@ -35,8 +35,7 @@ class SaleScopeExportPresentationTests(unittest.TestCase):
         self.assertEqual(values["Brand"], "Hanwha")
         self.assertEqual(values["Price"], "USD 0.225/pc")
         paragraphs = [value for kind, value in items if kind == "paragraph"]
-        self.assertTrue(any("Pending confirmation" in value and "Price" in value
-                            for value in paragraphs))
+        self.assertFalse(any("Pending confirmation" in value for value in paragraphs))
         self.assertNotIn("Proposed (not agreed)", str(items))
 
     def test_draft_and_final_docx_have_real_specification_tables(self):
@@ -51,7 +50,8 @@ class SaleScopeExportPresentationTests(unittest.TestCase):
             self.assertEqual(rows["Price"], "USD 0.225/pc")
             self.assertNotIn("Proposed (not agreed)", str(rows))
             body_text = " ".join(paragraph.text for paragraph in document.paragraphs)
-            self.assertIn("Pending confirmation", body_text)
+            self.assertNotIn("Pending confirmation", body_text)
+            self.assertNotIn("확인 필요 (미승인 조건)", body_text)
 
     def test_draft_and_final_pdf_include_table_values_and_pending_notice(self):
         snap = self.snapshot()
@@ -61,8 +61,22 @@ class SaleScopeExportPresentationTests(unittest.TestCase):
                 text = "\n".join(page.get_text() for page in pdf)
                 self.assertIn("Hanwha", text)
                 self.assertIn("0.225", text)
-                self.assertIn("Pending confirmation", text)
+                self.assertNotIn("Pending confirmation", text)
+                self.assertNotIn("확인 필요 (미승인 조건)", text)
                 self.assertNotIn("Proposed (not agreed)", text)
+
+    def test_suggested_term_status_is_preserved_but_never_printed(self):
+        snap = self.snapshot()
+        price = next(term for term in snap["terms"] if term["key"] == "unit_price")
+        self.assertEqual(price["status"], "suggested")
+        sentences = snap["clauses"][0]["sentences"]
+        row = next(item for item in sentences if item.get("sale_spec_field") == "unit_price")
+        self.assertEqual(row["sale_spec_status"], "suggested")
+        for language in ("en", "ko"):
+            display = str(scope_display_items(sentences, language))
+            self.assertNotIn("Pending confirmation", display)
+            self.assertNotIn("확인 필요 (미승인 조건)", display)
+            self.assertNotIn("제안(미확정)", display)
 
     def test_saved_legacy_prefix_is_hidden_but_original_is_unchanged(self):
         snap = self.snapshot()
