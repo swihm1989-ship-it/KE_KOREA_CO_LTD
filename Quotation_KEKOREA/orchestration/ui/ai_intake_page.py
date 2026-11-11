@@ -9,6 +9,7 @@ import os
 import streamlit as st
 
 from Quotation_KEKOREA.orchestration.router import classify
+from Quotation_KEKOREA.orchestration.workflows.label_typos import canonical_label
 from Quotation_KEKOREA.orchestration.workflows.ai_intake import (
     extract_candidate, make_contract_candidate, make_trade_candidate,
     generate_contract_draft, selected_contract_reference,
@@ -177,9 +178,9 @@ def render_ai_intake(principal: str):
         if current and current[0] == digest:
             _render_missing_inputs(digest, current[1])
         if analysis.get("parties"):
-            st.dataframe([{"역할": ", ".join(p.get("roles", [])),
-                           "회사명": p.get("legal_name", ""),
-                           "주소": p.get("address", "")}
+            st.dataframe([{"역할": ", ".join(canonical_label(str(role)) or str(role) for role in p.get("roles", [])),
+                           "회사명": p.get("legal_name") or "미입력",
+                           "주소": p.get("address") or "미입력"}
                           for p in analysis["parties"]], width="stretch", hide_index=True)
         if analysis.get("terms"):
             st.dataframe([{"항목": x.get("key"), "값": x.get("value"),
