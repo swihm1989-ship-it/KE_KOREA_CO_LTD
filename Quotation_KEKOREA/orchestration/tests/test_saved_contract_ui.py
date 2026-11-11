@@ -38,7 +38,7 @@ class AuthenticatedLibraryUiTests(unittest.TestCase):
                 }], "issues": [],
             }
         }]
-        with patch("Quotation_KEKOREA.orchestration.security.auth_gate.require_authentication", return_value="owner@example.com"), patch(
+        with patch.dict(os.environ, {"SUPABASE_URL": "https://demo.supabase.co", "SUPABASE_SECRET_KEY": "fake-test-key"}), patch("Quotation_KEKOREA.orchestration.security.auth_gate.require_authentication", return_value="owner@example.com"), patch(
             "Quotation_KEKOREA.orchestration.adapters.contract_library.make_reader", return_value=repo
         ):
             app = AppTest.from_file(str(PAGE), default_timeout=25).run()
