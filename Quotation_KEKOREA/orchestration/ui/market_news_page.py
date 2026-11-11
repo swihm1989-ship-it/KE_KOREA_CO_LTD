@@ -4,7 +4,7 @@ import streamlit as st
 import json
 from pathlib import Path
 from urllib.parse import urlsplit
-from Quotation_KEKOREA.orchestration.workflows.market_news import CATEGORIES, KST, cutoff_kst, fetch_category
+from Quotation_KEKOREA.orchestration.workflows.market_news import CATEGORIES, KST, cutoff_kst, fetch_category, retain_last_24_hours
 from datetime import datetime
 from Quotation_KEKOREA.orchestration.workflows.market_news import parse_rss
 
@@ -17,10 +17,10 @@ def _cached_news(category: str):
             payload = json.loads(snapshot.read_text(encoding="utf-8"))
             updated = datetime.fromisoformat(payload["updated_at"])
             if (datetime.now(KST) - updated).total_seconds() < 5400:
-                return payload["categories"].get(category, []), updated
+                return retain_last_24_hours(payload["categories"].get(category, []), datetime.now(KST)), updated
         except (OSError, ValueError, KeyError, TypeError):
             pass
-    return fetch_category(category), None
+    return retain_last_24_hours(fetch_category(category), datetime.now(KST)), None
 
 
 @st.fragment(run_every="30m")
