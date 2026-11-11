@@ -48,7 +48,7 @@ if "mock_notes" not in st.session_state:
 
 st.sidebar.markdown("### KE KOREA")
 st.sidebar.caption("AI WORKSPACE · ISOLATED DEMO")
-page = st.sidebar.radio("업무 메뉴", ["업무 대시보드", "메일함", "AI 업무 요청", "통합 업무 흐름", "문서 검토", "발송 대기", "엔진 사전검증", "문서 초안 미리보기", "저장된 계약서", "실행 기록"], label_visibility="collapsed")
+page = st.sidebar.radio("업무 메뉴", ["업무 대시보드", "메일함", "AI 업무 요청", "AI 거래조건 추출", "통합 업무 흐름", "문서 검토", "발송 대기", "엔진 사전검증", "문서 초안 미리보기", "저장된 계약서", "실행 기록"], label_visibility="collapsed")
 st.sidebar.divider()
 st.sidebar.caption("접속 계정: " + _authenticated_principal)
 if st.sidebar.button("로그아웃", key="master_logout"):
@@ -119,6 +119,10 @@ elif page == "AI 업무 요청":
             _save(start_mock_run(item))
             st.session_state.mock_selected = item.id
             st.success("Mock 라우팅 완료. 문서 검토 메뉴로 이동하세요.")
+
+elif page == "AI 거래조건 추출":
+    from Quotation_KEKOREA.orchestration.ui.ai_intake_page import render_ai_intake
+    render_ai_intake(_authenticated_principal)
 
 elif page == "통합 업무 흐름":
     st.subheader("요청부터 문서·이메일 초안 검토까지")
