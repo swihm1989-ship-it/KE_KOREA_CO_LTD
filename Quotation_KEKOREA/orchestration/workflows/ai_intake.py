@@ -137,3 +137,33 @@ def selected_contract_reference(repo, contract_id: str, revision: int) -> dict[s
         if entry["revision"] == revision:
             return deepcopy(entry["snapshot"])
     raise ValueError("선택한 계약서 리비전을 찾지 못했습니다.")
+
+
+def generate_contract_draft(snapshot: Mapping[str, Any], env: Mapping[str, str],
+                            *, consent: bool) -> dict[str, Any]:
+    """Call the existing reviewed drafting graph on a NEW in-memory candidate.
+
+    No saved contract content is passed. No Supabase reads/writes or sample
+    library use. Results still require manual review and separate approval.
+    """
+    if not consent:
+        raise PermissionError("명시적인 AI 계약서 생성 동의가 필요합니다.")
+    if not env.get("OPENAI_API_KEY") or not (
+        env.get("CONTRACT_OPENAI_MODEL") or env.get("OPENAI_MODEL")
+    ):
+        raise ValueError("AI 문서 생성 API 설정이 없습니다.")
+    from Quotation_KEKOREA.contracts.models import validate_snapshot
+    from Quotation_KEKOREA.contracts.ai_graph import generate_contract_draft_graph
+    candidate = validate_snapshot(deepcopy(dict(snapshot)))
+    if not str(candidate["contract_id"]).startswith("orchestration-"):
+        raise ValueError("기존 계약서를 자동 재작성할 수 없습니다. 새 초안만 지원합니다.")
+    if candidate["clauses"]:
+        raise ValueError("이미 작성된 계약 조항은 기존 수정·검토 절차를 사용하세요.")
+    generated = generate_contract_draft_graph(
+        candidate, [], env=dict(env), reference_context=[],
+        transaction_messages=[], repo=None, use_library=False,
+    )
+    reviewed = validate_snapshot(generated)
+    if not reviewed["clauses"]:
+        raise ValueError("AI 계약 초안에 실제 조항이 없습니다.")
+    return reviewed
