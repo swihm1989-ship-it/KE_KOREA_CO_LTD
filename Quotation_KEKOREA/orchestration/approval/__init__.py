@@ -1,0 +1,1 @@
+"""Separate human approval boundary. No SMTP invocation."""
