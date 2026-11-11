@@ -18,8 +18,12 @@ jobs:
         with:
           python-version: '3.11'
       - name: Fetch public RSS headlines
+        env:
+          NEWS_SUPABASE_URL: ${{ secrets.NEWS_SUPABASE_URL }}
+          NEWS_SUPABASE_SECRET_KEY: ${{ secrets.NEWS_SUPABASE_SECRET_KEY }}
         run: python -m Quotation_KEKOREA.orchestration.workflows.refresh_market_news
-      - name: Commit snapshot if changed
+      - name: Commit snapshot if changed (legacy fallback only)
+        if: ${{ secrets.NEWS_SUPABASE_URL == '' || secrets.NEWS_SUPABASE_SECRET_KEY == '' }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
