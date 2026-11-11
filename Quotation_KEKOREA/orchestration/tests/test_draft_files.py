@@ -32,7 +32,7 @@ class DraftFileTests(unittest.TestCase):
         text = "\n".join(p.text for p in doc.paragraphs)
         self.assertIn("DRAFT", text)
         self.assertIn("20.00", text)
-        self.assertIn("M10 test cell", text)
+        self.assertIn("M10 test cell", "\\n".join(cell.text for table in doc.tables for row in table.rows for cell in row.cells))
         self.assertNotIn("AUTHORIZED REPRESENTATIVE", text)
         self.assertEqual(len(asset["sha256"]), 64)
 
