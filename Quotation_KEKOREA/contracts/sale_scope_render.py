@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 
-_PROPOSAL_PREFIX = re.compile(r"(?:Proposed \\(not agreed\\):\\s*|제안\\(미확정\\):\\s*)", re.I)
+_PROPOSAL_PREFIX = re.compile(r"(?:Proposed \(not agreed\):\s*|제안\(미확정\):\s*)", re.I)
 
 
 def sales_scope_display_text(sentence, text=None):
