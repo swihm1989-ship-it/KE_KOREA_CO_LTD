@@ -184,14 +184,16 @@ def _render_recovery_inputs(digest: str, analysis: dict, requested: list[str]) -
     with st.form("ai_intake_recovery_form", clear_on_submit=False):
         buyer = st.text_input("Buyer · 구매자 법인명", value=found("buyer"))
         seller = st.text_input("Seller · 판매자 법인명", value=found("seller"))
+        buyer_address = st.text_input("Buyer · 구매자 법인 주소", value=next((str(p.get("address") or "") for p in parties if isinstance(p, dict) and "buyer" in [canonical_label(str(x)) or str(x) for x in (p.get("roles") or [])]), ""))
+        seller_address = st.text_input("Seller · 판매자 법인 주소", value=next((str(p.get("address") or "") for p in parties if isinstance(p, dict) and "seller" in [canonical_label(str(x)) or str(x) for x in (p.get("roles") or [])]), ""))
         currency_value = st.text_input("통화 · USD 등", value=currency)
         submitted = st.form_submit_button("거래조건 저장 및 문서정보 다시 만들기", type="primary")
     if not submitted:
         return
     revised = deepcopy(analysis)
     revised.setdefault("parties", [])
-    for role, value in (("buyer", buyer), ("seller", seller)):
-        if not value.strip():
+    for role, value, address in (("buyer", buyer, buyer_address), ("seller", seller, seller_address)):
+        if not value.strip() and not address.strip():
             continue
         party = next((p for p in revised["parties"] if isinstance(p, dict) and role in [
             canonical_label(str(x)) or str(x) for x in (p.get("roles") or [])
@@ -200,7 +202,11 @@ def _render_recovery_inputs(digest: str, analysis: dict, requested: list[str]) -
             party = {"roles": [role], "legal_name": "", "address": "",
                      "country": "", "status": "suggested", "source_refs": []}
             revised["parties"].append(party)
-        party["legal_name"] = value.strip()
+        if value.strip():
+            party["legal_name"] = value.strip()
+        if address.strip():
+            party["address"] = address.strip()
+        party["status"] = "suggested"
     if currency_value.strip():
         revised.setdefault("terms", [])
         term = next((t for t in revised["terms"] if isinstance(t, dict)
