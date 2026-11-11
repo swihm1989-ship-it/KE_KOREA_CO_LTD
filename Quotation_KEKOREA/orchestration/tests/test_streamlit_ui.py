@@ -24,6 +24,8 @@ class StreamlitMockUiTests(unittest.TestCase):
     def _app(self):
         app = AppTest.from_file(str(UI_FILE), default_timeout=15).run()
         self.assertEqual(len(app.exception), 0, [str(x.message) for x in app.exception])
+        app.radio[0].set_value("업무 대시보드").run()
+        self.assertEqual(len(app.exception), 0, [str(x.message) for x in app.exception])
         return app
 
     def test_dashboard_renders_without_mail_connection(self):
