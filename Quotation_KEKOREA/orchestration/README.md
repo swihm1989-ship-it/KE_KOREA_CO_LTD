@@ -195,3 +195,28 @@ Superpowers brainstorming/writing-plans 기준으로 [단계 번호] 하나를 �
 - **새 README 경로:** `Quotation_KEKOREA/orchestration/README.md`
 - **변경 내용:** 폴더 분리·후이즈 POP3/SMTP·Master LangGraph·기존 PI/PO/CI/PL/계약 재사용·사람 승인·회귀 테스트 로드맵.
 - **현재 구현 여부:** 새 mail orchestration 코드 **미구현**, 메일 계정 연결/발송 **미수행**, 기존 앱/DB/설정 **수정 없음**.
+
+
+## 10. 실제 1단계 구현 상태 (2026-11-11 · 별도 PR, 아직 main 미병합)
+
+**앞선 1~9절은 원래 목표/미래 폴더 구조를 설명한 설계 기록이다. 그 안의 `[FUTURE]` 문구는 최초 작성 시점 기준이며 아래 구현 현황을 우선 적용한다.** 현재 구현된 것은 메일 수신기가 아니라 **기존 앱과 연결되지 않는 독립 코어**이다.
+
+| 파일 | 현재 수준 |
+| --- | --- |
+| `__init__.py`, `state.py`, `router.py` | 패키지, 독립 State, PI/PO/CI/PL/CONTRACT 보수적 분류 |
+| `master_graph.py` | `classify → prepare → END` 독립 LangGraph. 결과는 `needs_input`에서 정지 |
+| `adapters/trade_adapter.py`, `adapters/contract_adapter.py` | **인터페이스 자리만 준비**. 기존 문서 생성/저장 함수를 아직 호출하지 않음 |
+| `security/attachment_manifest.py` | 검토 바이트에 대한 SHA-256 생성/검증 |
+| `approval/send_gate.py` | 수신자·제목·본문·첨부 지문을 포함한 이메일 승인 무효화 판단만 구현; **SMTP 권한/승인/전송 미구현** |
+| `tests/test_master.py` | 분류, 해시변조, 승인 무효화 및 LangGraph가 승인/발송하지 않는지 테스트 |
+
+**실행 (개발자, 실제 메일 연결 없음):**
+
+```powershell
+python -m unittest discover -s Quotation_KEKOREA/orchestration/tests -v
+python -c "from Quotation_KEKOREA.orchestration.master_graph import run_dry_run; print(run_dry_run('PI and Contract', 'Please review'))"
+```
+
+테스트 실행 환경에는 프로젝트 의존성 `langgraph` 설치가 필요하다. 해당 패키지가 없다면 `master_graph` 경로가 실행되지 않으며 테스트 하나가 skip된다. 테스트 **전체 통과/기존 회귀 결과는 PR CI 확인 전까지 미확인**이다. 기존 `app.py` 실행으로 이 기능이 자동 표시되지는 않는다.
+
+**코어 코드는 네트워크 접근을 하지 않음:** POP3/SMTP 호스트 및 비밀번호 사용 안 함, 사용자 데이터 추출/계약 생성 안 함, 메일 발송 절대 안 함. 다음 단계에서는 기존 함수의 실제 호출 방식/승인 상태를 별도로 검증한 뒤, 어댑터 추가와 독립 Streamlit UI를 각각 작은 PR로 진행할 것. 실계정 연결은 마지막에 별도 동의와 테스트를 거친다.
