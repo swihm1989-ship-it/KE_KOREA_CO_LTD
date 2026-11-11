@@ -179,13 +179,13 @@ elif page == "문서 초안 미리보기":
         st.caption(f"검증 상태: {preview.status} · 승인/발송 권한 없음")
         if preview.parties:
             st.markdown("#### 거래 당사자")
-            st.dataframe(list(preview.parties), use_container_width=True, hide_index=True)
+            st.dataframe(list(preview.parties), width="stretch", hide_index=True)
         if preview.terms:
             st.markdown("#### 주요 조건")
-            st.dataframe(list(preview.terms), use_container_width=True, hide_index=True)
+            st.dataframe(list(preview.terms), width="stretch", hide_index=True)
         if preview.items:
             st.markdown("#### 품목 및 계산")
-            st.dataframe(list(preview.items), use_container_width=True, hide_index=True)
+            st.dataframe(list(preview.items), width="stretch", hide_index=True)
         if preview.total:
             st.metric(f"계산된 합계 ({preview.currency})", preview.total)
         if preview.clauses:
