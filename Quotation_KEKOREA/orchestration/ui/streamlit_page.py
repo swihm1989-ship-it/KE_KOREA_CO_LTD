@@ -23,6 +23,11 @@ from Quotation_KEKOREA.orchestration.workflows.mock_workflow import (
 
 st.set_page_config(page_title="KE KOREA | Orchestration Demo", page_icon="📑", layout="wide")
 
+# FAIL-CLOSED: protects every menu before session state, sidebar, or database access.
+from Quotation_KEKOREA.orchestration.security.auth_gate import require_authentication
+_authenticated_principal = require_authentication(st)
+
+
 st.markdown("""
 <style>
 :root { --ink:#172b37; --accent:#087f72; --line:#dfe9e9; }
@@ -43,9 +48,12 @@ if "mock_notes" not in st.session_state:
 
 st.sidebar.markdown("### KE KOREA")
 st.sidebar.caption("AI WORKSPACE · ISOLATED DEMO")
-page = st.sidebar.radio("업무 메뉴", ["업무 대시보드", "메일함", "AI 업무 요청", "통합 업무 흐름", "문서 검토", "발송 대기", "엔진 사전검증", "문서 초안 미리보기", "실행 기록"], label_visibility="collapsed")
+page = st.sidebar.radio("업무 메뉴", ["업무 대시보드", "메일함", "AI 업무 요청", "통합 업무 흐름", "문서 검토", "발송 대기", "엔진 사전검증", "문서 초안 미리보기", "저장된 계약서", "실행 기록"], label_visibility="collapsed")
 st.sidebar.divider()
-st.sidebar.warning("샘플 데이터 전용\n\n후이즈메일/계약/PI·PO·CI·PL 실연동 없음. 외부 발송 불가.", icon="⚠️")
+st.sidebar.caption("접속 계정: " + _authenticated_principal)
+if st.sidebar.button("로그아웃", key="master_logout"):
+    st.logout()
+st.sidebar.warning("메일 및 신규 문서 작성은 검증용입니다. 저장된 계약서는 권한 확인 후 읽기 전용으로 조회합니다. 외부 발송 불가.", icon="⚠️")
 
 def _message() -> MockMessage:
     return next((m for m in SAMPLE_MESSAGES if m.id == st.session_state.mock_selected), SAMPLE_MESSAGES[0])
@@ -202,6 +210,10 @@ elif page == "통합 업무 흐름":
         with st.expander("업무 이력"):
             for item in run.history:
                 st.write(item)
+
+elif page == "저장된 계약서":
+    from Quotation_KEKOREA.orchestration.ui.saved_contracts import render_saved_contracts
+    render_saved_contracts(_authenticated_principal)
 
 elif page == "엔진 사전검증":
     st.subheader("기존 엔진 사전검증 · 읽기 전용")
