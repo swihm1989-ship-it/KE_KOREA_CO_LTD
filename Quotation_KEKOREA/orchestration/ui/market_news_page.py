@@ -6,11 +6,24 @@ from pathlib import Path
 from urllib.parse import urlsplit
 from Quotation_KEKOREA.orchestration.workflows.market_news import CATEGORIES, KST, cutoff_kst, fetch_category, retain_last_24_hours
 from datetime import datetime
-from Quotation_KEKOREA.orchestration.workflows.market_news import parse_rss
+from Quotation_KEKOREA.orchestration.workflows.news_supabase import NewsSupabase
 
 
 @st.cache_data(ttl=1800, show_spinner=False)
 def _cached_news(category: str):
+    try:
+        secrets = dict(st.secrets)
+    except (FileNotFoundError, KeyError):
+        secrets = {}
+    store = NewsSupabase.from_config(secrets)
+    if store is not None:
+        try:
+            stories = store.fetch_category(category)
+            updated_times = [item.get("collected_at") for item in stories if item.get("collected_at")]
+            updated = datetime.fromisoformat(max(updated_times)) if updated_times else None
+            return stories, updated
+        except Exception:
+            st.warning("Supabase 뉴스 조회 실패 · 기존 뉴스 소스로 전환합니다.")
     snapshot = Path(__file__).resolve().parents[2] / "data" / "market_news_snapshot.json"
     if snapshot.exists():
         try:
