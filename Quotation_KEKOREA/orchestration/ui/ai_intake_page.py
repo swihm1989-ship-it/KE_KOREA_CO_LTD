@@ -215,8 +215,23 @@ def _render_recovery_inputs(digest: str, analysis: dict, requested: list[str]) -
             term = {"key": "currency", "value": "", "status": "suggested", "source_refs": []}
             revised["terms"].append(term)
         term["value"] = currency_value.strip()
+    # Recovery is an explicit user edit, not an AI confirmation or legal approval.
+    # Normalize *all* AI statuses before reusing the strict candidate builders;
+    # otherwise an unrelated confirmed term can block even a valid Buyer edit.
+    for party in revised.get("parties", []):
+        if isinstance(party, dict):
+            party["status"] = "suggested"
+    for term in revised.get("terms", []):
+        if isinstance(term, dict):
+            term["status"] = "suggested"
+            if term.get("key") == "currency":
+                raw_currency = str(term.get("value") or "").strip()
+                currency_aliases = {"$": "USD", "US$": "USD", "USD$": "USD",
+                                    "₩": "KRW", "￦": "KRW", "€": "EUR"}
+                term["value"] = currency_aliases.get(raw_currency.upper(), raw_currency.upper())
     st.session_state["ai_intake_result"] = (digest, revised)
     st.session_state.pop("ai_intake_drafts", None)
+    st.session_state.pop("master_legacy_files", None)
     try:
         bundle = {}
         for kind in requested:
