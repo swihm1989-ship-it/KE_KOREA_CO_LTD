@@ -1,0 +1,28 @@
+name: Orchestration mock UI tests
+
+on:
+  pull_request:
+    paths:
+      - 'Quotation_KEKOREA/orchestration/**'
+      - '.github/workflows/orchestration-mock-ui.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mock-ui-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install minimal isolated test dependencies
+        run: |
+          python -m pip install 'streamlit>=1.40,<2' 'langgraph>=1.0,<2'
+      - name: Compile isolated modules
+        run: python -m compileall -q Quotation_KEKOREA/orchestration
+      - name: Run mock workflow and Streamlit AppTest smoke tests
+        run: python -m unittest discover -s Quotation_KEKOREA/orchestration/tests -p 'test_*.py' -v
