@@ -51,7 +51,8 @@ def format_field_label(key: str) -> str:
 
 def _party(candidate: Mapping[str, Any], role: str) -> Mapping[str, Any]:
     contract = candidate.get("CONTRACT") or {}
-    return next((p for p in contract.get("parties", []) if role in p.get("roles", [])), {})
+    from Quotation_KEKOREA.orchestration.workflows.label_typos import canonical_label
+    return next((p for p in contract.get("parties", []) if role in [canonical_label(str(x)) or str(x).casefold() for x in p.get("roles", [])]), {})
 
 
 def missing_fields(candidates: Mapping[str, Any]) -> tuple[MissingField, ...]:
