@@ -1,0 +1,207 @@
+"""Authenticated AI intake screen; no stored private contract sent to the model."""
+from __future__ import annotations
+
+from copy import deepcopy
+from hashlib import sha256
+import json
+import os
+
+import streamlit as st
+
+from Quotation_KEKOREA.orchestration.router import classify
+from Quotation_KEKOREA.orchestration.workflows.ai_intake import (
+    extract_candidate, make_contract_candidate, make_trade_candidate,
+    generate_contract_draft, selected_contract_reference,
+)
+from Quotation_KEKOREA.orchestration.workflows.unified_review import (
+    new_request, prepare_documents,
+)
+from Quotation_KEKOREA.orchestration.ui.saved_contracts import _server_value
+
+
+def _fingerprint(text: str) -> str:
+    return sha256(text.encode("utf-8")).hexdigest()
+
+
+def _model_config():
+    return {k: _server_value(k) for k in (
+        "OPENAI_API_KEY", "OPENAI_MODEL", "CONTRACT_OPENAI_MODEL",
+    )}
+
+
+def _reference_panel():
+    st.markdown("#### 기존 계약서 참고 (서버 내 조회 전용)")
+    st.caption("기존 계약서는 모델에 전송하거나 새 계약서에 자동 복사하지 않습니다. 사용자가 직접 비교하기 위한 별도 읽기 전용 화면입니다.")
+    try:
+        from Quotation_KEKOREA.orchestration.adapters.contract_library import (
+            make_reader, read_contract_list,
+        )
+        env = {key: _server_value(key) for key in ("SUPABASE_URL", "SUPABASE_SECRET_KEY")}
+        if not all(env.values()):
+            st.caption("기존 계약서 조회를 사용하려면 Supabase 서버 연결이 필요합니다.")
+            return
+        repo = make_reader(env)
+        records = read_contract_list(repo)
+        if not records:
+            st.caption("저장된 계약서가 없습니다.")
+            return
+        options = {f"{r.get('title') or 'Untitled'} · {r['id']}": str(r["id"])
+                   for r in records if r.get("id")}
+        selected = st.selectbox("참고할 계약서", ["선택 안 함"] + list(options),
+                                key="ai_intake_reference")
+        if selected == "선택 안 함":
+            return
+        identifier = options[selected]
+        from Quotation_KEKOREA.orchestration.adapters.contract_library import read_contract_versions
+        versions = read_contract_versions(repo, identifier)
+        if not versions:
+            st.info("선택한 계약서에 저장된 버전이 없습니다.")
+            return
+        revision = st.selectbox("참고 리비전", [v["revision"] for v in versions],
+                                key="ai_intake_reference_revision")
+        snapshot = selected_contract_reference(repo, identifier, revision)
+        st.markdown("**선택한 기존 계약서의 조항 (참고 전용)**")
+        for clause in snapshot.get("clauses", []):
+            st.markdown("**" + str(clause.get("title") or "조항") + "**")
+            for sentence in clause.get("sentences", []):
+                st.write(str(sentence.get("text") or ""))
+    except (ValueError, TypeError, KeyError) as exc:
+        st.error("기존 계약서 조회에 실패했습니다. 연결 상태와 저장 데이터를 확인하세요.")
+
+
+def render_ai_intake(principal: str):
+    if not principal:
+        raise PermissionError("로그인이 필요합니다.")
+    st.subheader("AI 거래조건 추출 · 기존 문서 엔진 연결")
+    st.caption("기존 계약서 분석 AI를 사용해 자연어에서 거래조건을 제안합니다. 확정·발행·전송은 자동으로 하지 않습니다.")
+    st.info("AI 요청에는 아래 입력창에서 직접 작성한 내용만 전송합니다. 저장된 계약서는 모델에 전달되지 않습니다.")
+    instruction = st.text_area("업무 요청 및 거래조건", height=185,
+        placeholder="예: 한화 M10 solar cell 100 PCS, USD 0.20/pc, EXW Seoul 조건으로 PI와 계약서 초안을 만들어줘.",
+        key="ai_intake_instruction")
+    requested = classify("", instruction)
+    st.caption("감지된 문서 종류: " + (", ".join(requested) if requested else "없음 · PI/PO/CI/PL/계약서를 명시하세요"))
+    language = st.radio("계약서 언어", ["한국어", "English"], horizontal=True,
+                        key="ai_intake_language")
+    family = st.selectbox("무역서류 상품군", ["solar_cell", "wafer", "polysilicon",
+                                            "solar_module", "cosmetics"], key="ai_intake_family")
+    config = _model_config()
+    ready = bool(config.get("OPENAI_API_KEY") and
+                 (config.get("OPENAI_MODEL") or config.get("CONTRACT_OPENAI_MODEL")))
+    if not ready:
+        st.warning("AI 모델 연결을 위해 별도 MASTER GRAPH 앱의 Secrets에 OPENAI_API_KEY와 OPENAI_MODEL이 필요합니다.")
+    consent = st.checkbox("위 입력 내용만 외부 AI API에 전송하는 데 동의합니다. 저장된 계약서는 전송하지 않습니다.",
+                          value=False, key="ai_intake_consent")
+    digest = _fingerprint(instruction + "|" + language + "|" + family)
+    if st.button("AI 거래조건 추출", key="ai_intake_extract", type="primary",
+                 disabled=not (consent and ready and requested and instruction.strip())):
+        st.session_state.pop("ai_intake_result", None)
+        st.session_state.pop("ai_intake_candidates", None)
+        st.session_state.pop("ai_intake_drafts", None)
+        try:
+            with st.spinner("거래조건을 분석합니다."):
+                extracted = extract_candidate(instruction, config, consent=consent)
+            st.session_state["ai_intake_result"] = (digest, extracted)
+        except (PermissionError, ValueError, RuntimeError, TypeError) as exc:
+            st.error("AI 거래조건 추출 실패: " + str(exc)[:400])
+
+    result = st.session_state.get("ai_intake_result")
+    if result and result[0] != digest:
+        st.warning("원래 업무 요청이 변경되었습니다. 기존 AI 추출 결과 및 검토 승인은 사용하지 마세요.")
+    if result and result[0] == digest:
+        analysis = result[1]
+        st.markdown("#### AI가 추출한 조건 · 모두 미확정")
+        if analysis.get("parties"):
+            st.dataframe([{"역할": ", ".join(p.get("roles", [])),
+                           "회사명": p.get("legal_name", ""),
+                           "주소": p.get("address", "")}
+                          for p in analysis["parties"]], width="stretch", hide_index=True)
+        if analysis.get("terms"):
+            st.dataframe([{"항목": x.get("key"), "값": x.get("value"),
+                           "검토 상태": "AI 제안"} for x in analysis["terms"]],
+                         width="stretch", hide_index=True)
+        if analysis.get("questions"):
+            for question in analysis["questions"][:2]:
+                st.warning("필수 확인: " + str(question))
+        if analysis.get("issues"):
+            with st.expander("추가 AI 검토 사항"):
+                for issue in analysis["issues"]:
+                    st.write(str(issue.get("message") or issue))
+        st.caption("모든 금액·수량·법인명은 원문과 대조해야 합니다. AI 제안만으로 최종 문서 승인은 할 수 없습니다.")
+        if st.button("기존 엔진용 초안 입력 만들기", key="ai_intake_build_candidates"):
+            try:
+                candidate_map = {}
+                for kind in requested:
+                    if kind == "CONTRACT":
+                        candidate_map[kind] = make_contract_candidate(
+                            analysis, "ko" if language == "한국어" else "en")
+                    else:
+                        candidate_map[kind] = make_trade_candidate(kind, analysis,
+                                                                  product_family=family)
+                st.session_state["ai_intake_candidates"] = (digest, candidate_map)
+                st.session_state.pop("ai_intake_drafts", None)
+            except (ValueError, TypeError) as exc:
+                st.error("초안 입력 구성 실패: " + str(exc))
+    candidates = st.session_state.get("ai_intake_candidates")
+    if candidates and candidates[0] == digest:
+        st.markdown("#### 문서 조건 직접 확인·수정")
+        st.caption("AI 추출값은 확정값이 아닙니다. 누락된 주소, 출처, 규격 및 수량 등을 반드시 확인해 수정하세요.")
+        raw = st.text_area("문서별 JSON 조건 (직접 수정 후 검증)",
+            value=json.dumps(candidates[1], ensure_ascii=False, indent=2),
+            height=310, key="ai_intake_editable")
+        edited_key = _fingerprint(digest + raw)
+        if st.button("기존 문서 엔진으로 검증·DRAFT 생성", key="ai_intake_prepare"):
+            st.session_state.pop("ai_intake_drafts", None)
+            try:
+                data = json.loads(raw)
+                if not isinstance(data, dict):
+                    raise ValueError("최상위 값은 문서별 JSON 객체여야 합니다.")
+                run = prepare_documents(new_request(instruction, data))
+                st.session_state["ai_intake_drafts"] = (edited_key, run)
+            except (ValueError, TypeError, KeyError) as exc:
+                st.error("문서 생성 실패: " + str(exc))
+        drafts = st.session_state.get("ai_intake_drafts")
+        if drafts and drafts[0] != edited_key:
+            st.warning("거래조건을 수정했습니다. 이전 파일은 더 이상 사용할 수 없습니다. 재검증하세요.")
+        if drafts and drafts[0] == edited_key:
+            run = drafts[1]
+            st.caption("문서 상태: " + run.status)
+            for doc in run.documents:
+                with st.container(border=True):
+                    st.markdown("**" + doc.kind + " · 검토용 초안**")
+                    if doc.blockers:
+                        with st.expander("누락·확인 필요 사항", expanded=True):
+                            for issue in doc.blockers:
+                                st.write(str(issue))
+                    for fmt, file in (doc.files or {}).items():
+                        st.download_button(f"{doc.kind} {fmt.upper()} DRAFT 다운로드",
+                            data=file["content"], file_name=file["filename"],
+                            mime=file["mime"], key=f"ai_intake_download_{doc.kind}_{fmt}")
+            st.caption("생성된 파일은 최종 발행·계약 체결·메일 발송에 사용할 수 없습니다.")
+        doc = candidates[1].get("CONTRACT")
+        if doc and not doc.get("clauses"):
+            st.divider()
+            st.markdown("#### 기존 LangGraph로 계약서 AI 초안 작성")
+            st.warning("실제 AI 문서 생성에는 API 요금이 발생할 수 있으며, 수정한 계약서 조건이 AI 모델로 전송됩니다.")
+            draft_consent = st.checkbox("현재 계약서 조건을 AI에 전송해 검토용 조항을 생성하는 데 동의합니다.",
+                                       key="ai_intake_contract_consent")
+            if st.button("AI 계약서 초안 작성", disabled=not (draft_consent and ready),
+                         key="ai_intake_contract_draft"):
+                try:
+                    edited = json.loads(raw)
+                    current = edited.get("CONTRACT")
+                    if not isinstance(current, dict):
+                        raise ValueError("현재 계약서 데이터를 입력해 주세요.")
+                    with st.spinner("기존 계약서 LangGraph가 검토용 조항을 생성합니다."):
+                        generated = generate_contract_draft(current, config, consent=draft_consent)
+                    # Use an explicit callback state, never modify saved contract.
+                    updated = deepcopy(edited)
+                    updated["CONTRACT"] = generated
+                    st.session_state["ai_intake_candidates"] = (digest, updated)
+                    st.session_state.pop("ai_intake_drafts", None)
+                    st.session_state.pop("ai_intake_editable", None)
+                    st.success("새 DRAFT 조항을 생성했습니다. 조건과 문구를 확인한 뒤 검증·다운로드하세요.")
+                    st.rerun()
+                except (ValueError, RuntimeError, KeyError, TypeError) as exc:
+                    st.error("AI 계약서 생성 실패: " + str(exc)[:400])
+    with st.expander("기존 저장된 계약서 참고 · AI에 전송하지 않음"):
+        _reference_panel()
