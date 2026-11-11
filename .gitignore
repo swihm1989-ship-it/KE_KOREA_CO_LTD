@@ -21,3 +21,5 @@ env/
 __pycache__/
 *.pyc
 .pytest_cache/
+# Runtime-only Streamlit OIDC secrets (must never be committed)
+/.streamlit/secrets.toml
