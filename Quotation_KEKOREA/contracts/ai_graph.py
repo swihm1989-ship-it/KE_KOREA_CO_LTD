@@ -9,6 +9,7 @@ from typing import Any, TypedDict
 
 from langgraph.graph import StateGraph, START, END
 
+from Quotation_KEKOREA.contracts.graph_checkpoint import invoke_checkpointed
 from Quotation_KEKOREA.contracts.models import validate_snapshot
 from Quotation_KEKOREA.contracts.drafting import generate_reviewed_draft
 from Quotation_KEKOREA.contracts.service import analyze_trade
@@ -62,7 +63,7 @@ def generate_contract_draft_graph(snapshot, preferred_clauses, *, env,
     graph.add_edge("prepare", "generate_and_audit")
     graph.add_edge("generate_and_audit", "validate_reviewed_result")
     graph.add_edge("validate_reviewed_result", END)
-    result = graph.compile().invoke({"snapshot": deepcopy(snapshot)})
+    result = invoke_checkpointed(graph, {"snapshot": deepcopy(snapshot)}, workflow="draft")
     return result["draft"]
 
 
@@ -104,4 +105,4 @@ def analyze_contract_terms_graph(messages, current_snapshot, reference_context,
     graph.add_edge(START, "extract_contract_terms")
     graph.add_edge("extract_contract_terms", "validate_contract_terms")
     graph.add_edge("validate_contract_terms", END)
-    return graph.compile().invoke({})["normalized"]
+    return invoke_checkpointed(graph, {}, workflow="analysis")["normalized"]
