@@ -220,3 +220,15 @@ python -c "from Quotation_KEKOREA.orchestration.master_graph import run_dry_run;
 테스트 실행 환경에는 프로젝트 의존성 `langgraph` 설치가 필요하다. 해당 패키지가 없다면 `master_graph` 경로가 실행되지 않으며 테스트 하나가 skip된다. 테스트 **전체 통과/기존 회귀 결과는 PR CI 확인 전까지 미확인**이다. 기존 `app.py` 실행으로 이 기능이 자동 표시되지는 않는다.
 
 **코어 코드는 네트워크 접근을 하지 않음:** POP3/SMTP 호스트 및 비밀번호 사용 안 함, 사용자 데이터 추출/계약 생성 안 함, 메일 발송 절대 안 함. 다음 단계에서는 기존 함수의 실제 호출 방식/승인 상태를 별도로 검증한 뒤, 어댑터 추가와 독립 Streamlit UI를 각각 작은 PR로 진행할 것. 실계정 연결은 마지막에 별도 동의와 테스트를 거친다.
+
+
+## 2026-11-11 · 독립 오케스트레이션 Mock UI (후속 브랜치, 미병합)
+
+독립 `orchestration/ui/streamlit_page.py`에서 Streamlit **메일함, 업무 대시보드, 자연어 요청 Mock 라우팅, 문서별 가상 검토/수정, 이메일 초안/승인, 실행 기록** 화면을 구현한다. `workflows/mock_workflow.py`는 샘플 주소 `example.test`만 사용하는 메모리 내 불변 데이터 모델이며 문서 수정 시 이전 승인, 이메일 변경 시 이메일 승인을 무효화한다. **실제 후이즈 POP3/SMTP, 기존 agent/contracts 호출, 실문서 PDF 생성, DB 저장/발송은 모두 미구현**이다. 기존 앱/설정/DB/실거래 경로는 수정하지 않았으며, 해당 독립 화면은 기존 `app.py` 메뉴에 나타나지 않는다. 이 설명은 별도 UI 브랜치가 승인·병합되기 전까지 운영 기능이 아니다.
+
+실행: 저장소 루트에서 `streamlit run Quotation_KEKOREA/orchestration/ui/streamlit_page.py` (Streamlit 설치 환경). 격리 테스트: `python -m unittest discover -s Quotation_KEKOREA/orchestration/tests -v` (Master LangGraph 시험은 langgraph 설치 필요). 실제 Streamlit 화면 렌더링 및 현재 GitHub Actions 실행 결과는 별도로 검증 필요.
+
+
+## 11. UI 검증 자동화 (2026-11-11 · PR #32 브랜치)
+
+기존 계약서 회귀 테스트는 UI 신규 경로를 검증하지 않기 때문에 **독립 GitHub Actions 워크플로** `.github/workflows/orchestration-mock-ui.yml`과 `tests/test_streamlit_ui.py`를 추가했다. `python -m unittest discover -s Quotation_KEKOREA/orchestration/tests -p 'test_*.py' -v`에서 Router, Mock 승인 상태, 실제 Streamlit AppTest 화면 렌더링, 가상 업무 시작, 비활성화된 SMTP 발송 버튼을 테스트한다. 기존 배포 파이프라인 및 기존 앱 파일은 변경하지 않는다. **실제 브라우저 수동 검증·후이즈 실계정·실제 문서 어댑터/발송은 여전히 미검증/미구현**이며, GitHub 검사 결과가 나오기 전에는 통과라고 선언하지 않는다.

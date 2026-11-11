@@ -1,0 +1,1 @@
+"""Independent mock Streamlit view. No existing app navigation modified."""
