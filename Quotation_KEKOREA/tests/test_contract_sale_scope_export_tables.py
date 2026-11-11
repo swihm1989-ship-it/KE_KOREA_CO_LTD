@@ -7,7 +7,7 @@ from docx import Document
 
 from Quotation_KEKOREA.contracts.draft_exports import export_draft
 from Quotation_KEKOREA.contracts.exports import export_contract
-from Quotation_KEKOREA.contracts.sale_scope_render import scope_display_items
+from Quotation_KEKOREA.contracts.sale_scope_render import scope_display_items, sales_scope_display_text
 from Quotation_KEKOREA.contracts.sale_scope_template import apply_sale_scope_template
 from Quotation_KEKOREA.tests.test_contract_sale_scope_template import fixture
 
@@ -63,6 +63,28 @@ class SaleScopeExportPresentationTests(unittest.TestCase):
                 self.assertIn("0.225", text)
                 self.assertIn("Pending confirmation", text)
                 self.assertNotIn("Proposed (not agreed)", text)
+
+    def test_saved_legacy_prefix_is_hidden_but_original_is_unchanged(self):
+        snap = self.snapshot()
+        rows = snap["clauses"][0]["sentences"]
+        row = next(item for item in rows if item.get("sale_spec_field") == "unit_price")
+        original = row["text"]
+        row["text"] = "Price: Proposed (not agreed): USD 0.225/pc"
+        before = row["text"]
+        self.assertEqual(sales_scope_display_text(row), "Price: USD 0.225/pc")
+        self.assertEqual(row["text"], before)
+        items = scope_display_items(rows, "en")
+        self.assertEqual(dict(next(data for kind, data in items if kind == "table"))["Price"], "USD 0.225/pc")
+        self.assertNotIn("Proposed (not agreed)", str(items))
+        self.assertNotEqual(original, before)
+
+    def test_saved_korean_legacy_prefix_only_hidden_in_display(self):
+        row = {"id": "sample", "sale_spec_field": "products",
+               "text": "제품: 제안(미확정): 태양광 셀 제안(미확정): 2,324,938 장"}
+        self.assertEqual(sales_scope_display_text(row), "제품: 태양광 셀 2,324,938 장")
+        self.assertIn("제안(미확정)", row["text"])
+        unrelated = {"text": "상태: 제안(미확정): 별도 검토 필요"}
+        self.assertEqual(sales_scope_display_text(unrelated), unrelated["text"])
 
 
 if __name__ == "__main__":
