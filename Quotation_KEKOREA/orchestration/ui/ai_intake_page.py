@@ -239,6 +239,8 @@ def render_ai_intake(principal: str):
     if not principal:
         raise PermissionError("로그인이 필요합니다.")
     st.subheader("AI 거래조건 추출 · 기존 문서 엔진 연결")
+    st.info("PI·PO·CI·PL·계약서의 기존 검증·직인·PDF/DOCX 최종 출력은 완성된 KE KOREA 업무 에이전트에서 이용할 수 있습니다. 이 MASTER GRAPH 화면의 DRAFT 생성은 별도 검토 단계입니다.")
+    st.link_button("기존 업무 에이전트에서 문서 PDF 생성 열기", "https://ke-korea.streamlit.app/")
     st.caption("기존 계약서 분석 AI를 사용해 자연어에서 거래조건을 제안합니다. 확정·발행·전송은 자동으로 하지 않습니다.")
     st.info("AI 요청에는 아래 입력창에서 직접 작성한 내용만 전송합니다. 저장된 계약서는 모델에 전달되지 않습니다.")
     instruction = st.text_area("업무 요청 및 거래조건", height=185,
