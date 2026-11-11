@@ -5,6 +5,7 @@
 All data is fake and all approvals are UI-only. NO external mailbox or sends.
 """
 from __future__ import annotations
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -200,7 +201,34 @@ elif page == "문서 초안 미리보기":
             with st.expander(f"미확정 항목 {len(preview.blockers)}개", expanded=True):
                 for issue in preview.blockers:
                     st.text(issue)
-        st.info("이 화면은 검토용 미리보기입니다. 저장, 서명, 직인, 최종 PDF, 이메일 발송 기능이 없습니다.")
+        st.info("화면 미리보기는 검토용입니다. 파일도 최종 발행·승인·메일 발송에 사용할 수 없습니다.")
+        st.markdown("#### 검토용 파일 생성 및 다운로드")
+        st.caption("계약: 기존 계약서 DRAFT 엔진으로 PDF·DOCX 생성. 무역서류: 기존 계산 검증 후 무직인·비발행 DOCX 검토본만 생성합니다.")
+        source_key = hashlib.sha256((kind + "\\0" + raw).encode("utf-8")).hexdigest()
+        if st.button("검토용 파일 생성", key="create_review_files", type="secondary"):
+            st.session_state.pop("review_file_bundle", None)
+            st.session_state.pop("review_file_source", None)
+            try:
+                from Quotation_KEKOREA.orchestration.workflows.draft_files import create_review_files
+                source = json.loads(raw)
+                files = create_review_files(kind, source)
+                st.session_state["review_file_bundle"] = files
+                st.session_state["review_file_source"] = source_key
+            except (ValueError, TypeError, KeyError, ImportError) as exc:
+                st.error(f"검토용 파일을 생성하지 못했습니다: {exc}")
+        if st.session_state.get("review_file_source") == source_key:
+            for extension, file in st.session_state.get("review_file_bundle", {}).items():
+                st.download_button(
+                    f"DRAFT {extension.upper()} 다운로드", data=file["content"],
+                    file_name=file["filename"], mime=file["mime"],
+                    key=f"download_draft_{extension}",
+                )
+                st.caption(f"SHA-256: {file['sha256']}")
+        else:
+            st.caption("입력 내용이 변경되었거나 생성된 파일이 없습니다. 현재 조건으로 검토본을 생성하세요.")
+        if kind != "CONTRACT":
+            st.warning("무역서류 PDF는 기존 생성 엔진의 회사 직인 필수 조건 때문에 이 화면에서 제공하지 않습니다.")
+
 
 elif page in ("문서 검토", "발송 대기", "실행 기록"):
     if not runs:
