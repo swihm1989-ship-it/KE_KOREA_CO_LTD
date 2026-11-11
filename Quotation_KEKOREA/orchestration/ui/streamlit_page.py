@@ -45,7 +45,7 @@ with st.sidebar:
     st.markdown("### MASTER GRAPH")
     st.caption("KE KOREA CO. LTD · AI WORKSPACE")
     st.markdown("---")
-page = st.sidebar.radio("업무 메뉴", ["업무 대시보드", "메일함", "AI 업무 요청", "통합 업무 흐름", "문서 검토", "발송 대기", "엔진 사전검증", "문서 초안 미리보기", "저장된 계약서", "실행 기록"], label_visibility="collapsed")
+page = st.sidebar.radio("업무 메뉴", ["시장 뉴스", "업무 대시보드", "메일함", "AI 업무 요청", "통합 업무 흐름", "문서 검토", "발송 대기", "엔진 사전검증", "문서 초안 미리보기", "저장된 계약서", "실행 기록"], label_visibility="collapsed")
 st.sidebar.divider()
 st.sidebar.caption("접속 계정: " + _authenticated_principal)
 if st.sidebar.button("로그아웃", key="master_logout"):
@@ -84,7 +84,11 @@ col_c.metric("문서 검토 대기", sum(r.status == "awaiting_document_approval
 col_d.metric("발송 대기(모의)", sum(r.status == "ready_for_future_integration" for r in runs))
 st.divider()
 
-if page in ("업무 대시보드", "메일함"):
+if page == "시장 뉴스":
+    from Quotation_KEKOREA.orchestration.ui.market_news_page import render_market_news
+    render_market_news()
+
+elif page in ("업무 대시보드", "메일함"):
     st.subheader("받은편지함 · Demo inbox")
     st.caption("실제 후이즈메일을 읽지 않습니다. 모든 주소는 example.test 테스트 주소입니다.")
     search = st.text_input("메일 검색", placeholder="제목 또는 발신자")
