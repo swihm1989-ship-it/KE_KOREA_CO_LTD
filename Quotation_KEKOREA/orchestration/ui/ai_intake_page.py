@@ -371,6 +371,48 @@ def render_ai_intake(principal: str):
                             data=file["content"], file_name=file["filename"],
                             mime=file["mime"], key=f"ai_intake_download_{doc.kind}_{fmt}")
             st.caption("생성된 파일은 최종 발행·계약 체결·메일 발송에 사용할 수 없습니다.")
+        st.divider()
+        st.markdown("#### 기존 KE KOREA 양식 · PI / PO / CI / PL PDF·Excel")
+        st.caption("현재 MASTER 앱에서 기존 업무 에이전트의 검증·직인·페이지 분할·PDF/XLSX 엔진을 직접 호출합니다. 기존 앱으로 이동하지 않습니다.")
+        trade_kinds = [kind for kind in candidates[1] if kind in ("PI", "PO", "CI", "PL")]
+        if trade_kinds:
+            if st.button("기존 양식으로 무역서류 PDF·Excel 생성", key="master_legacy_export"):
+                st.session_state.pop("master_legacy_files", None)
+                try:
+                    from Quotation_KEKOREA.orchestration.workflows.legacy_document_exports import render_master_trade_draft
+                    updated = json.loads(raw)
+                    if not isinstance(updated, dict):
+                        raise ValueError("문서 데이터는 JSON 객체여야 합니다.")
+                    env_keys = ("SUPABASE_URL", "SUPABASE_SECRET_KEY", "KEKOREA_COMPANY_SEAL_BASE64",
+                                "KEKOREA_USD_BENEFICIARY", "KEKOREA_USD_BANK_NAME", "KEKOREA_USD_BRANCH",
+                                "KEKOREA_USD_SWIFT", "KEKOREA_USD_ACCOUNT_NUMBER", "KEKOREA_USD_BANK_ADDRESS")
+                    env = {name: _server_value(name) for name in env_keys}
+                    results = {}
+                    errors = {}
+                    for kind in trade_kinds:
+                        try:
+                            results[kind] = render_master_trade_draft(kind, updated[kind], env)
+                        except (ValueError, TypeError, KeyError, RuntimeError, OSError) as exc:
+                            errors[kind] = str(exc)[:450]
+                    st.session_state["master_legacy_files"] = (edited_key, results, errors)
+                except (ValueError, TypeError, KeyError) as exc:
+                    st.error("PDF·Excel 생성 실패: " + str(exc)[:450])
+            export_bundle = st.session_state.get("master_legacy_files")
+            if export_bundle and export_bundle[0] != edited_key:
+                st.warning("거래조건이 변경되어 이전 PDF·Excel 파일을 무효화했습니다. 다시 생성하세요.")
+            if export_bundle and export_bundle[0] == edited_key:
+                for kind, reason in export_bundle[2].items():
+                    st.warning(kind + " 출력 보류: " + reason)
+                for kind, files in export_bundle[1].items():
+                    with st.container(border=True):
+                        st.markdown("**" + kind + " · 기존 양식 검토용 문서**")
+                        for fmt, file in files.items():
+                            st.download_button(kind + " " + fmt.upper() + " DRAFT 다운로드",
+                                               data=file["content"], file_name=file["filename"],
+                                               mime=file["mime"], key="master_legacy_" + kind + "_" + fmt)
+            st.caption("기존 회사 직인 및 필수 정보 검증을 통과해야 생성됩니다. 생성물은 DRAFT이며 최종 발행·전송되지 않습니다.")
+        if "CONTRACT" in candidates[1]:
+            st.caption("계약서 PDF·DOCX는 아래 기존 계약서 DRAFT 엔진으로 생성합니다. FINAL 계약서의 법률·계좌·승인 검증은 우회하지 않습니다.")
         doc = candidates[1].get("CONTRACT")
         if doc and not doc.get("clauses"):
             st.divider()
