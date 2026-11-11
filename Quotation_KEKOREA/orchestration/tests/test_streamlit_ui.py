@@ -28,7 +28,7 @@ class StreamlitMockUiTests(unittest.TestCase):
 
     def test_dashboard_renders_without_mail_connection(self):
         app = self._app()
-        self.assertTrue(any("Trade operations" in x.value for x in app.title))
+        self.assertTrue(any("MASTER GRAPH" in str(x.value) and "ke-header" in str(x.value) for x in app.markdown))
         self.assertEqual(len([b for b in app.button if b.key and b.key.startswith("start-demo-")]), 3)
         self.assertEqual(len(app.exception), 0)
 
