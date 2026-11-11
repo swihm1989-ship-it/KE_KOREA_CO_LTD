@@ -1,6 +1,7 @@
 """UI smoke tests run against an isolated Streamlit AppTest session."""
 from __future__ import annotations
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 try:
@@ -13,6 +14,13 @@ UI_FILE = Path(__file__).resolve().parents[1] / "ui" / "streamlit_page.py"
 
 @unittest.skipUnless(AppTest is not None, "Streamlit AppTest unavailable")
 class StreamlitMockUiTests(unittest.TestCase):
+    def setUp(self):
+        # Only fake UI identity inside tests; never a production auth bypass.
+        gate = patch("Quotation_KEKOREA.orchestration.security.auth_gate.require_authentication",
+                     return_value="test@example.com")
+        gate.start()
+        self.addCleanup(gate.stop)
+
     def _app(self):
         app = AppTest.from_file(str(UI_FILE), default_timeout=15).run()
         self.assertEqual(len(app.exception), 0, [str(x.message) for x in app.exception])
@@ -21,7 +29,7 @@ class StreamlitMockUiTests(unittest.TestCase):
     def test_dashboard_renders_without_mail_connection(self):
         app = self._app()
         self.assertTrue(any("Trade operations" in x.value for x in app.title))
-        self.assertEqual(len(app.button), 3)  # one sample action per fake email
+        self.assertEqual(len([b for b in app.button if b.key and b.key.startswith("start-demo-")]), 3)
         self.assertEqual(len(app.exception), 0)
 
     def test_sample_mail_to_review_navigation(self):

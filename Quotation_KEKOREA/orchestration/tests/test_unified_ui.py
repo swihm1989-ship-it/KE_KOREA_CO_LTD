@@ -1,5 +1,6 @@
 """Connected review screen smoke checks (no external SMTP)."""
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 try:
     from streamlit.testing.v1 import AppTest
@@ -10,6 +11,13 @@ PAGE = Path(__file__).resolve().parents[1] / "ui" / "streamlit_page.py"
 
 @unittest.skipUnless(AppTest is not None, "Streamlit AppTest unavailable")
 class UnifiedUITests(unittest.TestCase):
+    def setUp(self):
+        # Only fake UI identity inside tests; never a production auth bypass.
+        gate = patch("Quotation_KEKOREA.orchestration.security.auth_gate.require_authentication",
+                     return_value="test@example.com")
+        gate.start()
+        self.addCleanup(gate.stop)
+
     def test_prepare_review_and_email_review_gates(self):
         app = AppTest.from_file(str(PAGE), default_timeout=25).run()
         app.radio[0].set_value("통합 업무 흐름").run()

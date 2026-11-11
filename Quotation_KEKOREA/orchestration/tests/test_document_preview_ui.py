@@ -1,5 +1,6 @@
 """New structured preview UI must render a guarded trade draft."""
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 try:
@@ -12,6 +13,13 @@ UI = Path(__file__).resolve().parents[1] / "ui" / "streamlit_page.py"
 
 @unittest.skipUnless(AppTest is not None, "Streamlit AppTest unavailable")
 class PreviewUITest(unittest.TestCase):
+    def setUp(self):
+        # Only fake UI identity inside tests; never a production auth bypass.
+        gate = patch("Quotation_KEKOREA.orchestration.security.auth_gate.require_authentication",
+                     return_value="test@example.com")
+        gate.start()
+        self.addCleanup(gate.stop)
+
     def test_trade_demo_preview_never_marks_final_or_sends(self):
         app = AppTest.from_file(str(UI), default_timeout=20).run()
         app.radio[0].set_value("문서 초안 미리보기").run()
