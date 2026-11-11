@@ -29,7 +29,7 @@ class StreamlitMockUiTests(unittest.TestCase):
     def test_dashboard_renders_without_mail_connection(self):
         app = self._app()
         self.assertTrue(any("Trade operations" in x.value for x in app.title))
-        self.assertEqual(len(app.button), 3)  # one sample action per fake email
+        self.assertEqual(len([b for b in app.button if b.key and b.key.startswith("start-demo-")]), 3)
         self.assertEqual(len(app.exception), 0)
 
     def test_sample_mail_to_review_navigation(self):
