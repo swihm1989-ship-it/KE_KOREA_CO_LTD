@@ -61,7 +61,7 @@ class FollowupTests(unittest.TestCase):
         self.assertNotIn("item.price_source", [x.key for x in missing_fields(changed)])
 
     def test_blank_answer_rejected_and_unknown_key_rejected(self):
-        for key, val in (("buyer.legal_name", " "), ("buyer.anything", "Buyer"), ("item.unit_price", "0.20")):
+        for key, val in (("buyer.legal_name", " "), ("buyer.anything", "Buyer"), ("item.quantity", "abc")):
             with self.assertRaises(ValueError):
                 apply_answer(candidates(), key, val)
 
