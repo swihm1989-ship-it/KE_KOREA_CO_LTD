@@ -43,6 +43,26 @@ class AiIntakeUiTests(unittest.TestCase):
             api.assert_not_called()
 
 
+    def test_advanced_json_draft_button_normalizes_existing_raw_price(self):
+        import hashlib
+        from Quotation_KEKOREA.orchestration.tests.test_draft_files import trade_fixture
+        instruction = "PI 작성"
+        digest = hashlib.sha256((instruction + "|한국어|solar_cell").encode()).hexdigest()
+        pi = trade_fixture()
+        pi['currency'] = ''
+        pi['items'][0].update(quantity='2325860', unit='', unit_price='$0.2/pc', price_basis='', price_source='')
+        app = AppTest.from_file(str(PAGE), default_timeout=25).run()
+        app.radio[0].set_value("AI 업무 요청").run()
+        app.text_area(key="ai_intake_instruction").set_value(instruction).run()
+        app.session_state['ai_intake_candidates'] = (digest, {'PI': pi})
+        app.session_state['ai_intake_result'] = (digest, {'parties': [], 'terms': []})
+        app.run()
+        app.button(key='ai_intake_prepare').click().run()
+        self.assertFalse(app.exception, [x.message for x in app.exception])
+        run = app.session_state['ai_intake_drafts'][1]
+        self.assertEqual(run.documents[0].blockers, ())
+        self.assertTrue(run.documents[0].files['docx']['content'].startswith(b'PK'))
+
     def test_bare_quantity_exposes_blank_unit_and_no_mandatory_price_source(self):
         import hashlib
         instruction = "PI와 영문 계약서 작성"

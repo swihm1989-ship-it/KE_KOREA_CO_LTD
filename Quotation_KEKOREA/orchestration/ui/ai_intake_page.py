@@ -402,6 +402,9 @@ def render_ai_intake(principal: str):
                 data = json.loads(raw)
                 if not isinstance(data, dict):
                     raise ValueError("최상위 값은 문서별 JSON 객체여야 합니다.")
+                data = {kind: normalize_trade_values(source)
+                        if kind in {"PI", "PO", "CI", "PL"} and isinstance(source, dict) else source
+                        for kind, source in data.items()}
                 run = prepare_documents(new_request(instruction, data))
                 st.session_state["ai_intake_drafts"] = (edited_key, run)
             except (ValueError, TypeError, KeyError) as exc:
