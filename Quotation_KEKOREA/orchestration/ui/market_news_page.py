@@ -17,13 +17,19 @@ def _cached_news(category: str):
         secrets = dict(st.secrets)
     except (FileNotFoundError, KeyError):
         secrets = {}
+    fallback = ([], None)
     store = NewsSupabase.from_config(secrets)
     if store is not None:
         try:
             stories = store.fetch_category(category)
+            if stories:
+                fallback = (stories, None)
             updated_times = [item.get("collected_at") for item in stories if item.get("collected_at")]
             updated = datetime.fromisoformat(max(updated_times)) if updated_times else None
-            return stories, updated
+            if stories:
+                fallback = (stories, updated)
+            if stories and (updated is None or (datetime.now(KST) - updated).total_seconds() < 5400):
+                return stories, updated
         except Exception as exc:
             if isinstance(exc, HTTPError):
                 reason = f"HTTP {exc.code}"
@@ -37,11 +43,24 @@ def _cached_news(category: str):
         try:
             payload = json.loads(snapshot.read_text(encoding="utf-8"))
             updated = datetime.fromisoformat(payload["updated_at"])
-            if (datetime.now(KST) - updated).total_seconds() < 5400:
-                return retain_last_24_hours(payload["categories"].get(category, []), datetime.now(KST)), updated
+            stories = retain_last_24_hours(payload["categories"].get(category, []), datetime.now(KST))
+            if stories:
+                if (datetime.now(KST) - updated).total_seconds() < 5400:
+                    return stories, updated
+                if not fallback[0]:
+                    fallback = (stories, updated)
         except (OSError, ValueError, KeyError, TypeError):
             pass
-    return retain_last_24_hours(fetch_category(category), datetime.now(KST)), None
+    try:
+        live = retain_last_24_hours(fetch_category(category), datetime.now(KST))
+        if live:
+            return live, None
+    except (OSError, ValueError):
+        if not fallback[0]:
+            raise
+    if fallback[0]:
+        st.warning("최신 뉴스 조회가 지연되어 최근 24시간 내 기존 수집본을 표시합니다.")
+    return fallback
 
 
 NEWS_STYLE = """
@@ -108,7 +127,7 @@ def news_list_html(stories: list[dict[str, str]]) -> str:
 def render_market_news() -> None:
     st.markdown(NEWS_STYLE, unsafe_allow_html=True)
     st.subheader("시장 뉴스")
-    st.caption("최근 24시간 · 30분마다 자동 수집 · 제목을 누르면 원문이 새 탭으로 열립니다.")
+    st.caption("최근 24시간 · 제목을 누르면 원문이 새 탭으로 열립니다.")
     categories = list(CATEGORIES)
     tabs = st.tabs(categories)
     for category, tab in zip(categories, tabs):

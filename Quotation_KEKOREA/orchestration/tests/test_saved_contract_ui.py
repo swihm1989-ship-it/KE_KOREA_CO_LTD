@@ -14,6 +14,12 @@ PAGE = Path(__file__).resolve().parents[1] / "ui" / "streamlit_page.py"
 
 @unittest.skipUnless(AppTest is not None, "Streamlit AppTest unavailable")
 class AuthenticatedLibraryUiTests(unittest.TestCase):
+    def setUp(self):
+        news = patch("Quotation_KEKOREA.orchestration.ui.market_news_page._cached_news",
+                     return_value=([], None))
+        news.start()
+        self.addCleanup(news.stop)
+
     @patch.dict(os.environ, {"ORCHESTRATION_ALLOWED_EMAILS": "owner@example.com"})
     def test_unauthenticated_user_cannot_see_any_workspace_page(self):
         app = AppTest.from_file(str(PAGE), default_timeout=20).run()
