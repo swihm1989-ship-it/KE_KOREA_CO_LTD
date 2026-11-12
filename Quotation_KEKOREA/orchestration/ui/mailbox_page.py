@@ -1,6 +1,7 @@
 """Authenticated mailbox UI; credentials come only from server configuration."""
 from datetime import datetime
 import os
+import time
 from zoneinfo import ZoneInfo
 import streamlit as st
 from Quotation_KEKOREA.orchestration.adapters.whois_mail import (
@@ -56,8 +57,8 @@ def _use_for_ai(message):
 def render_mailbox(principal):
     if not principal: raise PermissionError('로그인이 필요합니다.')
     st.subheader('후이즈 회사 메일함')
-    st.caption('메일 진단 버전: 2026-11-12-B · POP3 LIST/RETR 분리 · SMTP 단계별 진단')
-    st.caption('원본 메일은 서버에 보존합니다. 최신 30건을 직접 가져오며, 본문과 첨부는 현재 로그인 세션에서만 보관합니다.')
+    st.caption('메일 동기화 버전: 2026-11-12-LIVE · 화면 열림 중 60초마다 자동 갱신')
+    st.caption('화면이 열려 있는 동안 60초마다 새 메일을 확인합니다. 최근 메일은 현재 로그인 세션에서만 보관하며 원본은 서버에 보존합니다.')
     with st.expander('메일 연결 설정 안내'):
         st.write('후이즈 웹메일 환경설정에서 POP/SMTP 사용을 활성화하고 상품별 실제 서버·보안 설정을 확인하세요.')
         st.write('Master 앱 Settings → Secrets에서 [auth] 등 첫 섹션 위에 아래 최상위 항목을 추가하세요. 기존 인증·AI·DB 설정은 보존하세요. 메일 비밀번호를 채팅이나 GitHub에 넣지 마세요.')
@@ -92,25 +93,63 @@ def render_mailbox(principal):
             probe_smtp(config.smtp)
             st.success('발신 서버 TLS 인증 성공. 실제 메일은 발송하지 않았습니다.')
         except MailConnectionError as exc: st.error(str(exc))
-    st.caption('실제 메일 발송과 앱을 닫은 상태의 자동 동기화는 아직 활성화하지 않았습니다.')
-    limit = st.selectbox('조회할 최근 메일 수', [1, 5, 30], index=0, key='whois_fetch_limit', help='먼저 1건으로 서버 응답을 확인한 다음 5건, 30건으로 늘리세요.')
-    if st.button('최신 메일 가져오기',key='whois_refresh',disabled=config.pop is None,type='primary'):
+    st.caption('실제 메일 발송이나 앱을 닫은 상태의 24시간 수집은 별도 서버 작업자가 필요합니다.')
+    _live_mailbox(config.pop, account)
+
+
+def _merge_messages(previous, incoming, max_count=30):
+    """Stable server UIDL based deduplication; keep previous entries when a poll fails."""
+    merged = {}
+    for item in incoming:
+        merged[item.uid] = item
+    for item in previous:
+        merged.setdefault(item.uid, item)
+    return tuple(list(merged.values())[:max_count])
+
+
+@st.fragment(run_every="60s")
+def _live_mailbox(pop, account):
+    """Per-session near-real-time inbox, without a shared background reader."""
+    if st.session_state.get("whois_poll_account") != account:
+        st.session_state["whois_poll_account"] = account
+        st.session_state.pop("whois_mail_bundle", None)
+        st.session_state.pop("whois_last_poll", None)
+        st.session_state.pop("whois_refresh_failed", None)
+
+    now = time.monotonic()
+    due = (pop is not None and (
+        "whois_last_poll" not in st.session_state
+        or now - st.session_state["whois_last_poll"] >= 55
+    ))
+    if st.button("지금 동기화", key="whois_refresh", disabled=pop is None):
+        due = pop is not None
+    if due:
+        # An attempted poll is rate-limited even after failure.
+        st.session_state["whois_last_poll"] = now
         try:
-            with st.spinner('회사 메일을 가져옵니다…'):
-                messages=fetch_messages(config.pop, limit=limit)
-            stamp=datetime.now(ZoneInfo('Asia/Seoul')).strftime('%Y-%m-%d %H:%M:%S KST')
-            bundle=(account,messages,stamp)
-            st.session_state['whois_mail_bundle']=bundle
-            st.session_state.pop('whois_refresh_failed',None)
+            # Small POP3 batches avoid long-lived connections on hosted webmail.
+            # Each poll fetches the newest 5 and retains up to 30 known UIDs.
+            incoming = fetch_messages(pop, limit=5)
+            old = st.session_state.get("whois_mail_bundle")
+            previous = old[1] if old and old[0] == account else ()
+            result = _merge_messages(previous, incoming)
+            timestamp = datetime.now(ZoneInfo("Asia/Seoul")).strftime("%Y-%m-%d %H:%M:%S KST")
+            st.session_state["whois_mail_bundle"] = (account, result, timestamp)
+            st.session_state.pop("whois_refresh_failed", None)
         except MailConnectionError as exc:
-            st.session_state['whois_refresh_failed']=True
-            st.error(str(exc))
-    if not bundle:
-        st.info('서버 설정 후 연결 테스트와 메일 가져오기를 실행하세요. 샘플 메일은 업무 대시보드에서 확인할 수 있습니다.')
+            st.session_state["whois_refresh_failed"] = True
+            st.warning("자동 동기화 실패: " + str(exc))
+    bundle = st.session_state.get("whois_mail_bundle")
+    st.caption("자동 갱신 주기: 60초 · 한 번에 최신 5건 확인 · 세션 내 최대 30건 보관")
+    if not pop:
+        st.info("수신 서버 설정이 필요합니다.")
         return
-    st.caption('마지막 조회 성공: '+bundle[2])
-    if st.session_state.get('whois_refresh_failed'):
-        st.warning('최근 갱신에 실패해 이전 조회 내용을 표시합니다.')
+    if not bundle:
+        st.info("초기 동기화가 완료되지 않았습니다. 다음 자동 확인 또는 지금 동기화를 이용하세요.")
+        return
+    st.caption("마지막 조회 성공: " + bundle[2])
+    if st.session_state.get("whois_refresh_failed"):
+        st.warning("최근 동기화에 실패해 마지막 성공 메일을 유지합니다.")
     render_inbox(bundle[1], account)
 
 
