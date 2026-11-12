@@ -24,7 +24,7 @@ class AuthenticatedLibraryUiTests(unittest.TestCase):
     def test_unauthenticated_user_cannot_see_any_workspace_page(self):
         app = AppTest.from_file(str(PAGE), default_timeout=20).run()
         self.assertEqual(len(app.exception), 0, [x.message for x in app.exception])
-        self.assertTrue(any("Private Workspace" in x.value for x in app.title))
+        self.assertTrue(any("ke-login-hero" in x.value for x in app.markdown))
         self.assertFalse(app.radio)
         self.assertFalse(app.selectbox)
 

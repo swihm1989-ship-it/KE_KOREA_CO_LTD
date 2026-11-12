@@ -1,0 +1,53 @@
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+from streamlit.testing.v1 import AppTest
+from Quotation_KEKOREA.orchestration.tests.test_whois_mail import CONFIG, message
+from Quotation_KEKOREA.orchestration.adapters.whois_mail import parse_message
+
+PAGE=Path(__file__).resolve().parents[1]/'ui'/'streamlit_page.py'
+class MailboxUiTests(unittest.TestCase):
+    def setUp(self):
+        for target,value in [('Quotation_KEKOREA.orchestration.security.auth_gate.require_authentication','owner@example.com'),
+                             ('Quotation_KEKOREA.orchestration.ui.market_news_page._cached_news',([],None))]:
+            p=patch(target,return_value=value);p.start();self.addCleanup(p.stop)
+
+    def test_mail_page_without_settings_does_not_connect(self):
+        with patch('Quotation_KEKOREA.orchestration.ui.mailbox_page._settings',return_value={}),patch('Quotation_KEKOREA.orchestration.ui.mailbox_page.fetch_messages') as fetch:
+            app=AppTest.from_file(str(PAGE),default_timeout=20).run()
+            app.radio[0].set_value('메일함').run()
+        self.assertFalse(app.exception)
+        fetch.assert_not_called()
+        self.assertTrue(any('WHOIS_MAIL_OWNER_EMAILS' in x.value for x in app.code))
+        self.assertFalse(any(b.label=='업무 시작' for b in app.button))
+
+    def test_refresh_and_handoff_require_no_implicit_ai_consent(self):
+        with patch('Quotation_KEKOREA.orchestration.ui.mailbox_page._settings',return_value=CONFIG),patch('Quotation_KEKOREA.orchestration.ui.mailbox_page.fetch_messages',return_value=(parse_message('uid1',message()),)) as fetch:
+            app=AppTest.from_file(str(PAGE),default_timeout=20).run()
+            app.radio[0].set_value('메일함').run()
+            fetch.assert_not_called()
+            app.button(key='whois_refresh').click().run()
+            self.assertFalse(app.exception)
+            self.assertTrue(any('PI request' in x.value for x in app.text))
+            app.session_state['ai_intake_consent']=True
+            app.session_state['ai_intake_result']=('old',{})
+            app.session_state['master_pdf_quantity']='OLD QUANTITY'
+            app.session_state['ai_intake_contract_consent']=True
+            app.button(key='whois_ai_uid1').click().run()
+            self.assertFalse(app.exception,[x.message for x in app.exception])
+            self.assertEqual(app.radio(key='master_page').value,'AI 업무 요청')
+            self.assertIn('100 PCS',app.text_area(key='ai_intake_instruction').value)
+            self.assertFalse(app.checkbox(key='ai_intake_consent').value)
+            self.assertNotIn('ai_intake_result',app.session_state)
+            self.assertNotIn('master_pdf_quantity',app.session_state)
+            self.assertNotIn('ai_intake_contract_consent',app.session_state)
+
+    def test_non_owner_cannot_display_previous_mail_session(self):
+        config=CONFIG|{'WHOIS_MAIL_OWNER_EMAILS':'another@example.com'}
+        with patch('Quotation_KEKOREA.orchestration.ui.mailbox_page._settings',return_value=config):
+            app=AppTest.from_file(str(PAGE),default_timeout=20).run()
+            app.session_state['whois_mail_bundle']=('old',(parse_message('uid1',message()),),'today')
+            app.radio[0].set_value('메일함').run()
+            self.assertFalse(app.exception)
+            self.assertNotIn('whois_mail_bundle',app.session_state)
+            self.assertFalse(any('PI request' in x.value for x in app.text))
