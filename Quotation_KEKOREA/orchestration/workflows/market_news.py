@@ -17,8 +17,8 @@ KST = ZoneInfo("Asia/Seoul")
 CATEGORIES = {
     "태양광": '("solar power" OR "solar energy" OR "solar PV" OR photovoltaics OR polysilicon OR "solar wafer" OR "solar cell" OR "solar module" OR 태양광 OR BIPV OR Qcells OR 한화큐셀) when:2d',
     "데이터센터": '("data center" OR "data centre" OR datacenter OR 데이터센터 OR "AI infrastructure" OR "AI 인프라") when:2d',
-    "원자재": '("crude oil" OR "natural gas" OR copper OR LNG) (price OR supply OR OPEC) when:2d',
-    "증시·거시경제": '(stock market OR KOSPI OR Nasdaq OR Federal Reserve OR inflation) when:2d',
+    "원자재": '("crude oil" OR "natural gas" OR copper OR LNG OR 원유 OR 국제유가 OR 천연가스 OR 구리 OR 원자재) when:2d',
+    "증시·거시경제": '("stock market" OR KOSPI OR Nasdaq OR "Federal Reserve" OR inflation OR 코스피 OR 코스닥 OR 증시 OR 기준금리 OR 환율 OR 거시경제) when:2d',
 }
 # Google News indexes third-party publishers; this is not a direct Bloomberg
 # or Investing.com subscription/feed and their inclusion is not guaranteed.
@@ -78,8 +78,7 @@ def fetch_category(category: str, now: datetime | None = None) -> list[dict[str,
         return "https://news.google.com/rss/search?" + query, "Google News"
 
     sources = [google_feed("ko", "KR", "KR:ko")]
-    if category in {"태양광", "데이터센터"}:
-        sources.append(google_feed("en-US", "US", "US:en"))
+    sources.append(google_feed("en-US", "US", "US:en"))
     if category == "태양광":
         sources.append(("https://www.pv-tech.org/feed/", "PV Tech"))
     if category == "데이터센터":

@@ -11,7 +11,7 @@ from datetime import datetime
 from Quotation_KEKOREA.orchestration.workflows.news_supabase import NewsSupabase
 
 
-@st.cache_data(ttl=1800, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner=False)
 def _cached_news(category: str):
     try:
         secrets = dict(st.secrets)
