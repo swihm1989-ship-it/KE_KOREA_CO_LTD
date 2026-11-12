@@ -8,6 +8,7 @@ from pathlib import PurePosixPath
 from hashlib import sha256
 import poplib
 import re
+import socket
 import smtplib
 import ssl
 
@@ -122,31 +123,50 @@ def probe_pop(endpoint: Endpoint) -> int:
 
 
 def probe_smtp(endpoint: Endpoint) -> None:
+    """Verify SMTP over TLS without sending mail or exposing server responses."""
     client = None
-    stage = 'connection'
+    stage = "connect"
     try:
         context = ssl.create_default_context()
-        if endpoint.security == 'ssl':
+        if endpoint.security == "ssl":
             client = smtplib.SMTP_SSL(endpoint.host, endpoint.port, timeout=12, context=context)
+            stage = "login"
         else:
             client = smtplib.SMTP(endpoint.host, endpoint.port, timeout=12)
-            stage = 'tls'
+            stage = "ehlo"
             client.ehlo()
+            stage = "starttls"
             client.starttls(context=context)
+            stage = "ehlo_tls"
             client.ehlo()
-        stage = 'authentication'
+            stage = "login"
         client.login(endpoint.username, endpoint.password)
-    except smtplib.SMTPAuthenticationError:
-        raise MailConnectionError('SMTP 계정 인증 실패: 로그인 계정, 비밀번호 또는 SMTP 사용 허용 여부를 확인하세요.') from None
+    except smtplib.SMTPAuthenticationError as exc:
+        # SMTP code is numeric; never print exc.smtp_error (may include private data).
+        code = getattr(exc, "smtp_code", None)
+        suffix = f" (SMTP {code})" if isinstance(code, int) else ""
+        raise MailConnectionError("SMTP 계정 인증 거부" + suffix +
+                                  ": 아이디·비밀번호·SMTP 사용 권한을 확인하세요.") from None
+    except socket.gaierror:
+        raise MailConnectionError("SMTP DNS 조회 실패: 서버 호스트명을 확인하세요.") from None
+    except (TimeoutError, socket.timeout):
+        raise MailConnectionError("SMTP 접속 시간 초과 (" + stage +
+                                  " 단계): 클라우드에서 587 포트 접근이 차단됐거나 서버 응답이 지연될 수 있습니다.") from None
+    except ConnectionRefusedError:
+        raise MailConnectionError("SMTP TCP 연결 거부: 서버의 587 포트 허용 여부를 확인하세요.") from None
+    except ssl.SSLCertVerificationError:
+        raise MailConnectionError("SMTP TLS 인증서 검증 실패: 서버 인증서를 확인하세요.") from None
     except (ssl.SSLError, smtplib.SMTPNotSupportedError):
-        raise MailConnectionError('SMTP TLS 연결 실패: SSL/STARTTLS 방식과 포트를 확인하세요.') from None
-    except Exception:
-        messages = {
-            'connection': 'SMTP 서버 접속 실패: 서버 주소, 포트 및 연결 허용 여부를 확인하세요.',
-            'tls': 'SMTP TLS 협상 실패: SSL/STARTTLS 방식과 포트를 확인하세요.',
-            'authentication': 'SMTP 로그인 실패: 계정, 비밀번호 및 SMTP 사용 설정을 확인하세요.',
-        }
-        raise MailConnectionError(messages[stage]) from None
+        raise MailConnectionError("SMTP TLS 협상 실패 (" + stage +
+                                  " 단계): STARTTLS 지원 또는 서버 보안 정책을 확인하세요.") from None
+    except smtplib.SMTPResponseException as exc:
+        code = getattr(exc, "smtp_code", None)
+        suffix = f" (SMTP {code})" if isinstance(code, int) else ""
+        raise MailConnectionError("SMTP 서버 응답 거부 (" + stage + " 단계)" + suffix +
+                                  ": 서버 정책·접속 IP 제한을 확인하세요.") from None
+    except (OSError, smtplib.SMTPException):
+        raise MailConnectionError("SMTP 통신 실패 (" + stage +
+                                  " 단계): 네트워크 또는 SMTP 서버 설정을 확인하세요.") from None
     finally:
         if client is not None:
             _finish(client)
