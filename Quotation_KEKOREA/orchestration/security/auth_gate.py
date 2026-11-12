@@ -48,7 +48,10 @@ def authentication_issue(user: Mapping, allowed: str) -> str:
 
 def require_authentication(st) -> str:
     """Called before sidebar, session state, data loads, or main page render."""
-    whitelist = ",".join(filter(None, (\n        os.environ.get("ORCHESTRATION_ALLOWED_EMAILS", ""),\n        os.environ.get("ORCHESTRATION_EXTRA_ALLOWED_EMAILS", ""),\n    )))
+    whitelist = ",".join(filter(None, (
+        os.environ.get("ORCHESTRATION_ALLOWED_EMAILS", ""),
+        os.environ.get("ORCHESTRATION_EXTRA_ALLOWED_EMAILS", ""),
+    )))
     try:
         identity = dict(st.user.to_dict())
         identity["is_logged_in"] = bool(st.user.is_logged_in)
