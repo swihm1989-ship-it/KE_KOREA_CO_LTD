@@ -19,6 +19,10 @@ class AiIntakeUiTests(unittest.TestCase):
                      return_value="owner@example.com")
         gate.start()
         self.addCleanup(gate.stop)
+        news = patch("Quotation_KEKOREA.orchestration.ui.market_news_page._cached_news",
+                     return_value=([], None))
+        news.start()
+        self.addCleanup(news.stop)
 
     def test_no_key_shows_configuration_warning_and_no_automatic_request(self):
         with patch.dict(os.environ, {"OPENAI_API_KEY": "", "OPENAI_MODEL": ""}):
