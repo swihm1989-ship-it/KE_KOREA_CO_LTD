@@ -9,6 +9,7 @@ from __future__ import annotations
 from copy import deepcopy
 from decimal import Decimal, InvalidOperation
 from dataclasses import dataclass
+from Quotation_KEKOREA.orchestration.workflows.commercial_values import normalize_trade_values
 from typing import Any, Mapping
 
 
@@ -59,7 +60,7 @@ def missing_fields(candidates: Mapping[str, Any]) -> tuple[MissingField, ...]:
     """Only missing known fields; never invent or auto-confirm company identity."""
     if not isinstance(candidates, Mapping):
         raise ValueError("입력은 문서별 데이터여야 합니다.")
-    trade = [(kind, value) for kind, value in candidates.items()
+    trade = [(kind, normalize_trade_values(value)) for kind, value in candidates.items()
              if kind in {"PI", "PO", "CI", "PL"} and isinstance(value, Mapping)]
     contract = candidates.get("CONTRACT") or {}
     keys = []
@@ -77,12 +78,12 @@ def missing_fields(candidates: Mapping[str, Any]) -> tuple[MissingField, ...]:
                 keys.append(f"{role}.{field}")
     for key, field in (("item.product_name", "product_name"), ("item.quantity", "quantity"),
                        ("item.unit", "unit"), ("item.unit_price", "unit_price"),
-                       ("item.price_basis", "price_basis"), ("item.price_source", "price_source")):
+                       ("item.price_basis", "price_basis")):
         relevant = [(kind, (data.get("items") or [{}])[0]) for kind, data in trade]
         relevant = [(kind, row) for kind, row in relevant if kind != "PL" or key not in {
             "item.unit_price", "item.price_basis", "item.price_source"
         }]
-        if relevant and not any(str(row.get(field) or "").strip() for _, row in relevant):
+        if relevant and not any(str(row.get(field) if row.get(field) is not None else "").strip() for _, row in relevant):
             keys.append(key)
     for key in ("currency", "incoterms", "payment_terms", "shipment_reference", "country_of_origin"):
         relevant = [(kind, data) for kind, data in trade if (
@@ -92,6 +93,12 @@ def missing_fields(candidates: Mapping[str, Any]) -> tuple[MissingField, ...]:
             and (key != "currency" or kind != "PL")]
         if relevant and not any(str(data.get(key) or "").strip() for _, data in relevant):
             keys.append(key)
+    if contract and not trade and contract.get("contract_type") == "sale":
+        terms = {term.get("key"): term.get("value") for term in contract.get("terms", [])}
+        for key in ("item.product_name", "item.quantity", "item.unit", "item.unit_price", "currency"):
+            value = terms.get(TERM_MAP[key])
+            if value is None or not str(value).strip():
+                keys.append(key)
     # A required contract role can be missing even where no trade document exists.
     return tuple(MissingField(key=key, label=format_field_label(key)) for key in keys)
 
@@ -110,10 +117,10 @@ def apply_answer(candidates: Mapping[str, Any], key: str, value: str) -> dict[st
     if key in {"item.quantity", "item.unit_price"}:
         try:
             number = Decimal(text.replace(",", ""))
-            if not number.is_finite() or number <= 0:
+            if not number.is_finite() or number < 0 or (key == "item.unit_price" and number == 0):
                 raise InvalidOperation
         except (InvalidOperation, ValueError):
-            raise ValueError("수량·단가에는 0보다 큰 숫자를 입력해 주세요.") from None
+            raise ValueError("수량에는 0 이상의 숫자, 단가에는 0보다 큰 숫자를 입력해 주세요.") from None
         text = format(number, "f")
     if not isinstance(candidates, Mapping):
         raise ValueError("거래조건이 없습니다.")

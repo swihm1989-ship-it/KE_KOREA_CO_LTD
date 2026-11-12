@@ -178,8 +178,6 @@ def validate_and_calculate(data):
         if discount > 100:
             block(f"Discount for item {i} must be between 0 and 100 percent")
             discount = Decimal("0")
-        if doc_type != "PL" and not item.get("price_source"):
-            block(f"Price source for {name or f'item {i}'} must be recorded")
         if doc_type != "PL" and data.get("product_family") == "cosmetics" and item.get("master_price") is not True and not item.get("price_override_confirmed"):
             block(f"Cosmetics price for {name or f'item {i}'} must match the verified price master")
         basis = str(item.get("price_basis") or "").upper().replace("USD/", "").replace("KRW/", "").replace("PER ", "").strip()

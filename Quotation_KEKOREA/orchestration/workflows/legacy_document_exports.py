@@ -5,7 +5,6 @@ validation, seal resolver, PDF pagination and XLSX layout are reused unchanged.
 """
 from __future__ import annotations
 
-from copy import deepcopy
 from hashlib import sha256
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -15,6 +14,7 @@ from Quotation_KEKOREA.agent.branding import resolve_company_seal
 from Quotation_KEKOREA.agent.ci_import import ci_render_data
 from Quotation_KEKOREA.agent.renderers import render_files
 from Quotation_KEKOREA.agent.trade_documents import validate_and_calculate
+from Quotation_KEKOREA.orchestration.workflows.commercial_values import normalize_trade_values
 
 TRADE_KINDS = frozenset({"PI", "PO", "CI", "PL"})
 BANK_KEYS = ("BENEFICIARY", "BANK_NAME", "BRANCH", "SWIFT", "ACCOUNT_NUMBER", "BANK_ADDRESS")
@@ -34,7 +34,7 @@ def render_master_trade_draft(kind: str, source: Mapping, env: Mapping[str, str]
         raise ValueError("Only PI, PO, CI and PL are supported")
     if not isinstance(source, Mapping):
         raise ValueError("Trade candidate must be a mapping")
-    candidate = deepcopy(dict(source))
+    candidate = normalize_trade_values(source)
     if candidate.get("document_type") and str(candidate["document_type"]).upper() != kind:
         raise ValueError("Document type mismatch")
     candidate["document_type"] = kind

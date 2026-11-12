@@ -43,6 +43,25 @@ class AiIntakeUiTests(unittest.TestCase):
             api.assert_not_called()
 
 
+    def test_bare_quantity_exposes_blank_unit_and_no_mandatory_price_source(self):
+        import hashlib
+        instruction = "PI와 영문 계약서 작성"
+        digest = hashlib.sha256((instruction + "|한국어|solar_cell").encode()).hexdigest()
+        candidate = {"PI": {"document_type": "PI", "product_family": "solar_cell",
+                     "currency": "USD", "items": [{"product_name": "Hanwha Solar Cell",
+                     "quantity": "2325860", "unit_price": "0.2", "unit": "", "price_basis": ""}]}}
+        app = AppTest.from_file(str(PAGE), default_timeout=25).run()
+        app.radio[0].set_value("AI 업무 요청").run()
+        app.text_area(key="ai_intake_instruction").set_value(instruction).run()
+        app.session_state["ai_intake_candidates"] = (digest, candidate)
+        app.session_state["ai_intake_result"] = (digest, {"parties": [], "terms": []})
+        app.run()
+        self.assertFalse(app.exception, [x.message for x in app.exception])
+        self.assertEqual(app.text_input(key="master_pdf_unit").value, "")
+        self.assertTrue(app.text_input(key="ai_intake_answer_item_unit"))
+        self.assertFalse(any(x.key in {"master_pdf_price_source", "ai_intake_answer_item_price_source"}
+                             for x in app.text_input))
+
     def test_real_ai_request_shows_fillable_buyer_and_seller_and_syncs_both(self):
         analysis = {
             "contract_type": "sale", "parties": [], "questions": [],
