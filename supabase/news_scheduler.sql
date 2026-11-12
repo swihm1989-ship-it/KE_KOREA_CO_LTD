@@ -26,7 +26,7 @@ begin
   end if;
   for item in select x.* from xmltable('//item' passing xmlparse(document body)
       columns headline text path 'title', link text path 'link', source text path 'source', pubdate text path 'pubDate') x loop
-    if nullif(btrim(item.headline),'') is null or item.link not like 'https://%' or item.pubdate is null then continue; end if;
+    if nullif(btrim(item.headline),'') is null or coalesce(item.link,'') not like 'https://%' or item.pubdate is null then continue; end if;
     begin stamp := item.pubdate::timestamptz;
     exception when invalid_datetime_format or datetime_field_overflow then continue; end;
     if stamp < as_of - interval '24 hours' or stamp > as_of then continue; end if;
