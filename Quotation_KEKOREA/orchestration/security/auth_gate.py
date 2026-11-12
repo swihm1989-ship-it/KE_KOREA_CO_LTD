@@ -43,21 +43,14 @@ def require_authentication(st) -> str:
     if principal:
         return principal
 
-    st.title("KE KOREA · Private Workspace")
-    st.caption("MASTER GRAPH · Access controlled by your OIDC identity")
-    if not whitelist.strip():
-        st.error("접근 가능한 사용자 목록이 아직 설정되지 않았습니다. 관리자에게 문의하세요.")
-        st.stop()
-    if identity.get("is_logged_in"):
-        st.error("이 계정은 접근 권한이 없거나 이메일 인증이 완료되지 않았습니다.")
-        if st.button("로그아웃 후 다른 계정 사용", key="master_auth_logout"):
-            st.logout()
-    else:
-        st.info("회사에서 허가한 계정으로 로그인하세요. 로그인하지 않으면 계약서 조회 기능을 포함한 모든 메뉴에 접근할 수 없습니다.")
-        if st.button("계정으로 로그인", type="primary", key="master_auth_login"):
-            try:
-                st.login()
-            except (RuntimeError, ValueError, KeyError):
-                st.error("OIDC 인증 설정이 누락되었거나 잘못되었습니다. 관리자에게 문의하세요.")
+    from Quotation_KEKOREA.orchestration.ui.login_page import render_login
+    action = render_login(st, configured=bool(whitelist.strip()), logged_in=bool(identity.get("is_logged_in")))
+    if action == "logout":
+        st.logout()
+    elif action == "login":
+        try:
+            st.login()
+        except (RuntimeError, ValueError, KeyError):
+            st.error("Google 인증 설정이 누락되었거나 잘못되었습니다. 관리자에게 문의하세요.")
     st.stop()
     raise RuntimeError("Authorization gate must stop unauthenticated execution")

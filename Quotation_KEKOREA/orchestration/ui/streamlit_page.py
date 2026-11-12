@@ -2,7 +2,7 @@
 
     streamlit run Quotation_KEKOREA/orchestration/ui/streamlit_page.py
 
-All data is fake and all approvals are UI-only. NO external mailbox or sends.
+Mailbox supports explicit read-only Whois access. Sample workflows remain separate; no sends.
 """
 from __future__ import annotations
 import hashlib
@@ -45,12 +45,12 @@ with st.sidebar:
     st.markdown("### MASTER GRAPH")
     st.caption("KE KOREA CO. LTD · AI WORKSPACE")
     st.markdown("---")
-page = st.sidebar.radio("업무 메뉴", ["시장 뉴스", "업무 대시보드", "메일함", "AI 업무 요청", "통합 업무 흐름", "문서 검토", "발송 대기", "엔진 사전검증", "문서 초안 미리보기", "저장된 계약서", "실행 기록"], label_visibility="collapsed")
+page = st.sidebar.radio("업무 메뉴", ["시장 뉴스", "업무 대시보드", "메일함", "AI 업무 요청", "통합 업무 흐름", "문서 검토", "발송 대기", "엔진 사전검증", "문서 초안 미리보기", "저장된 계약서", "실행 기록"], label_visibility="collapsed", key="master_page")
 st.sidebar.divider()
 st.sidebar.caption("접속 계정: " + _authenticated_principal)
 if st.sidebar.button("로그아웃", key="master_logout"):
     st.logout()
-st.sidebar.warning("메일 및 신규 문서 작성은 검증용입니다. 저장된 계약서는 권한 확인 후 읽기 전용으로 조회합니다. 외부 발송 불가.", icon="⚠️")
+st.sidebar.caption("메일함은 별도 허용 계정만 읽을 수 있습니다. 실제 메일 발송은 비활성 상태입니다.")
 
 def _message() -> MockMessage:
     return next((m for m in SAMPLE_MESSAGES if m.id == st.session_state.mock_selected), SAMPLE_MESSAGES[0])
@@ -88,7 +88,11 @@ if page == "시장 뉴스":
     from Quotation_KEKOREA.orchestration.ui.market_news_page import render_market_news
     render_market_news()
 
-elif page in ("업무 대시보드", "메일함"):
+elif page == "메일함":
+    from Quotation_KEKOREA.orchestration.ui.mailbox_page import render_mailbox
+    render_mailbox(_authenticated_principal)
+
+elif page == "업무 대시보드":
     st.subheader("받은편지함 · Demo inbox")
     st.caption("실제 후이즈메일을 읽지 않습니다. 모든 주소는 example.test 테스트 주소입니다.")
     search = st.text_input("메일 검색", placeholder="제목 또는 발신자")
