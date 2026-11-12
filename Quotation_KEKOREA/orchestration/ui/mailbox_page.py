@@ -88,6 +88,8 @@ def render_mailbox(principal):
             count=probe_pop(config.pop)
             st.success(f'수신 서버 인증 성공 · UIDL {count}건 확인. 메일 본문을 가져오거나 삭제하지 않았습니다.')
         except MailConnectionError as exc: st.error(str(exc))
+    st.caption('후이즈 공식 SMTP: smtp.whoisworks.com · 587 · STARTTLS. '
+               '실패하면 DNS/TCP/TLS/인증 단계만 표시하고 비밀번호는 표시하지 않습니다.')
     if b.button('발신 연결 테스트 · 발송 없음',key='whois_probe_smtp',disabled=config.smtp is None):
         try:
             probe_smtp(config.smtp)

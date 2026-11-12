@@ -75,9 +75,36 @@ class WhoisMailTests(unittest.TestCase):
         with patch.object(mail.smtplib,'SMTP',return_value=client):
             with self.assertRaises(mail.MailConnectionError) as error:
                 mail.probe_smtp(mail.mail_config(CONFIG,'owner@example.com').smtp)
-        self.assertIn('인증 실패',str(error.exception))
+        self.assertIn('인증 거부',str(error.exception))
         self.assertNotIn('private-test-password',str(error.exception))
         client.sendmail.assert_not_called()
+
+    def test_smtp_timeout_identifies_connect_stage_without_exposing_secret(self):
+        client = Mock()
+        with patch.object(mail.smtplib, 'SMTP', side_effect=TimeoutError('private-test-password')):
+            with self.assertRaises(mail.MailConnectionError) as error:
+                mail.probe_smtp(mail.mail_config(CONFIG, 'owner@example.com').smtp)
+        self.assertIn('connect 단계', str(error.exception))
+        self.assertNotIn('private-test-password', str(error.exception))
+
+    def test_smtp_starttls_failure_is_specific_and_never_logs_response(self):
+        client = Mock()
+        client.starttls.side_effect = mail.smtplib.SMTPNotSupportedError('private-test-password')
+        with patch.object(mail.smtplib, 'SMTP', return_value=client):
+            with self.assertRaises(mail.MailConnectionError) as error:
+                mail.probe_smtp(mail.mail_config(CONFIG, 'owner@example.com').smtp)
+        self.assertIn('starttls 단계', str(error.exception))
+        self.assertNotIn('private-test-password', str(error.exception))
+        client.login.assert_not_called()
+
+    def test_smtp_server_policy_rejection_exposes_code_only(self):
+        client = Mock()
+        client.ehlo.side_effect = mail.smtplib.SMTPHeloError(554, b'private-test-password')
+        with patch.object(mail.smtplib, 'SMTP', return_value=client):
+            with self.assertRaises(mail.MailConnectionError) as error:
+                mail.probe_smtp(mail.mail_config(CONFIG, 'owner@example.com').smtp)
+        self.assertIn('SMTP 554', str(error.exception))
+        self.assertNotIn('private-test-password', str(error.exception))
 
     def test_oversized_messages_are_skipped_before_retrieval(self):
         client=Mock(); client.uidl.return_value=(b'+OK',[b'1 uid'],0)
