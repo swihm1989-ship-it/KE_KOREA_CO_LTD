@@ -93,7 +93,27 @@ class WhoisMailTests(unittest.TestCase):
         with patch.object(mail.smtplib, 'SMTP', return_value=client):
             with self.assertRaises(mail.MailConnectionError) as error:
                 mail.probe_smtp(mail.mail_config(CONFIG, 'owner@example.com').smtp)
-        self.assertIn('starttls 단계', str(error.exception))
+        self.assertIn('STARTTLS 기능을 광고하지 않았습니다', str(error.exception))
+        self.assertNotIn('private-test-password', str(error.exception))
+        client.login.assert_not_called()
+
+    def test_smtp_server_without_starttls_advertisement_is_distinguished(self):
+        client = Mock()
+        client.starttls.side_effect = mail.smtplib.SMTPNotSupportedError('private-test-password')
+        with patch.object(mail.smtplib, 'SMTP', return_value=client):
+            with self.assertRaises(mail.MailConnectionError) as error:
+                mail.probe_smtp(mail.mail_config(CONFIG, 'owner@example.com').smtp)
+        self.assertIn('STARTTLS 기능을 광고하지 않았습니다', str(error.exception))
+        self.assertNotIn('private-test-password', str(error.exception))
+        client.login.assert_not_called()
+
+    def test_smtp_tls_handshake_failure_is_distinguished(self):
+        client = Mock()
+        client.starttls.side_effect = mail.ssl.SSLError('private-test-password')
+        with patch.object(mail.smtplib, 'SMTP', return_value=client):
+            with self.assertRaises(mail.MailConnectionError) as error:
+                mail.probe_smtp(mail.mail_config(CONFIG, 'owner@example.com').smtp)
+        self.assertIn('TLS 핸드셰이크 오류', str(error.exception))
         self.assertNotIn('private-test-password', str(error.exception))
         client.login.assert_not_called()
 
