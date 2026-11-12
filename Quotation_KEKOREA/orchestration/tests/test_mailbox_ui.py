@@ -12,6 +12,19 @@ class MailboxUiTests(unittest.TestCase):
                              ('Quotation_KEKOREA.orchestration.ui.market_news_page._cached_news',([],None))]:
             p=patch(target,return_value=value);p.start();self.addCleanup(p.stop)
 
+    def test_whois_settings_inside_auth_table_are_read_without_bypassing_owner(self):
+        from Quotation_KEKOREA.orchestration.ui.mailbox_page import _settings
+        nested = {
+            'auth': {
+                'WHOIS_MAIL_OWNER_EMAILS': 'owner@example.com',
+                'WHOIS_POP_USERNAME': 'david.ihm@ke-korea.com',
+            },
+        }
+        with patch('Quotation_KEKOREA.orchestration.ui.mailbox_page.st.secrets', nested):
+            settings = _settings()
+        self.assertEqual(settings['WHOIS_MAIL_OWNER_EMAILS'], 'owner@example.com')
+        self.assertEqual(settings['WHOIS_POP_USERNAME'], 'david.ihm@ke-korea.com')
+
     def test_mail_page_without_settings_does_not_connect(self):
         with patch('Quotation_KEKOREA.orchestration.ui.mailbox_page._settings',return_value={}),patch('Quotation_KEKOREA.orchestration.ui.mailbox_page.fetch_messages') as fetch:
             app=AppTest.from_file(str(PAGE),default_timeout=20).run()

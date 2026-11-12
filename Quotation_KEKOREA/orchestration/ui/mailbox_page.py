@@ -22,9 +22,20 @@ WHOIS_SMTP_PASSWORD = "YOUR_MAIL_PASSWORD"
 '''
 
 def _settings():
-    values=dict(os.environ)
-    try: values.update(dict(st.secrets))
-    except (FileNotFoundError,KeyError): pass
+    values = dict(os.environ)
+    try:
+        secrets = dict(st.secrets)
+    except (FileNotFoundError, KeyError):
+        secrets = {}
+    # Streamlit TOML places keys after [auth] inside that table, not at
+    # top level. Only import WHOIS_* from that known section; never treat
+    # an arbitrary nested value as an access grant or override top-level keys.
+    auth = secrets.get("auth")
+    if hasattr(auth, "items"):
+        for key, value in auth.items():
+            if isinstance(key, str) and key.startswith("WHOIS_") and key not in secrets:
+                secrets[key] = value
+    values.update(secrets)
     values["WHOIS_MAIL_OWNER_EMAILS"] = ",".join(filter(None, (
         str(values.get("WHOIS_MAIL_OWNER_EMAILS", "")),
         str(values.get("WHOIS_MAIL_EXTRA_OWNER_EMAILS", "")),
@@ -56,7 +67,9 @@ def render_mailbox(principal):
         config=mail_config(_settings(),principal)
     except PermissionError:
         st.session_state.pop('whois_mail_bundle',None)
-        st.info('메일함 이용자 설정이 필요합니다. WHOIS_MAIL_OWNER_EMAILS에 이 메일함을 사용할 Master 로그인 계정을 명시하세요. 후이즈 메일 주소와 다를 수 있습니다.')
+        st.info('메일함 접근 권한을 확인할 수 없습니다. WHOIS_MAIL_OWNER_EMAILS에 현재 Master 로그인 계정을 지정하세요. 저장 후 앱을 재시작해야 할 수 있습니다.')
+        st.caption('현재 Master 로그인 계정: ' + principal)
+        st.caption('Secrets에서 메일함 소유자 설정 읽힘: ' + ('예' if _settings().get('WHOIS_MAIL_OWNER_EMAILS', '').strip() else '아니요'))
         return
     except ValueError as exc:
         st.session_state.pop('whois_mail_bundle',None)
