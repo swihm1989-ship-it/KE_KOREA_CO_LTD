@@ -56,6 +56,7 @@ def _use_for_ai(message):
 def render_mailbox(principal):
     if not principal: raise PermissionError('로그인이 필요합니다.')
     st.subheader('후이즈 회사 메일함')
+    st.caption('메일 진단 버전: 2026-11-12-B · POP3 LIST/RETR 분리 · SMTP 단계별 진단')
     st.caption('원본 메일은 서버에 보존합니다. 최신 30건을 직접 가져오며, 본문과 첨부는 현재 로그인 세션에서만 보관합니다.')
     with st.expander('메일 연결 설정 안내'):
         st.write('후이즈 웹메일 환경설정에서 POP/SMTP 사용을 활성화하고 상품별 실제 서버·보안 설정을 확인하세요.')
@@ -92,10 +93,11 @@ def render_mailbox(principal):
             st.success('발신 서버 TLS 인증 성공. 실제 메일은 발송하지 않았습니다.')
         except MailConnectionError as exc: st.error(str(exc))
     st.caption('실제 메일 발송과 앱을 닫은 상태의 자동 동기화는 아직 활성화하지 않았습니다.')
-    if st.button('최신 메일 30건 가져오기',key='whois_refresh',disabled=config.pop is None,type='primary'):
+    limit = st.selectbox('조회할 최근 메일 수', [1, 5, 30], index=0, key='whois_fetch_limit', help='먼저 1건으로 서버 응답을 확인한 다음 5건, 30건으로 늘리세요.')
+    if st.button('최신 메일 가져오기',key='whois_refresh',disabled=config.pop is None,type='primary'):
         try:
             with st.spinner('회사 메일을 가져옵니다…'):
-                messages=fetch_messages(config.pop)
+                messages=fetch_messages(config.pop, limit=limit)
             stamp=datetime.now(ZoneInfo('Asia/Seoul')).strftime('%Y-%m-%d %H:%M:%S KST')
             bundle=(account,messages,stamp)
             st.session_state['whois_mail_bundle']=bundle
