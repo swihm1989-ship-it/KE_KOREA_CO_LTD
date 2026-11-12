@@ -30,6 +30,22 @@ class AuthGateTests(unittest.TestCase):
         self.assertIsNone(authorized_email({**base, "exp": 1000}, "owner@example.com"))
         self.assertIsNone(authorized_email({**base, "exp": "not-a-timestamp"}, "owner@example.com"))
 
+    def test_additive_allowlist_merges_without_replacing_existing(self):
+        import os
+        from unittest.mock import patch
+        from Quotation_KEKOREA.orchestration.security.auth_gate import authorized_email
+        with patch.dict(os.environ, {
+            "ORCHESTRATION_ALLOWED_EMAILS": "original@example.com",
+            "ORCHESTRATION_EXTRA_ALLOWED_EMAILS": "new@example.com",
+        }):
+            whitelist = ",".join(filter(None, (
+                os.environ.get("ORCHESTRATION_ALLOWED_EMAILS", ""),
+                os.environ.get("ORCHESTRATION_EXTRA_ALLOWED_EMAILS", ""),
+            )))
+            user = {"is_logged_in": True, "email_verified": True, "exp": 4102444800}
+            self.assertEqual(authorized_email({**user, "email": "original@example.com"}, whitelist), "original@example.com")
+            self.assertEqual(authorized_email({**user, "email": "new@example.com"}, whitelist), "new@example.com")
+
     def test_multiple_explicit_allowed_addresses(self):
         self.assertEqual(authorized_email({"is_logged_in": True, "email": "B@example.com", "email_verified": True, "exp": 4102444800},
                                           "a@example.com, b@example.com"), "b@example.com")
