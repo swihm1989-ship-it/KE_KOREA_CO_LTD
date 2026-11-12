@@ -1,6 +1,9 @@
 """Authenticated mailbox UI; credentials come only from server configuration."""
 from datetime import datetime
+import hashlib
+import marshal
 import os
+import sys
 import time
 from zoneinfo import ZoneInfo
 import streamlit as st
@@ -54,6 +57,18 @@ def _use_for_ai(message):
     st.session_state['master_page']='AI 업무 요청'
 
 
+def _smtp_runtime_diagnostics():
+    """Identify the callable actually used by the button, never read secrets."""
+    module = sys.modules.get(probe_smtp.__module__)
+    revision = getattr(module, "SMTP_DIAGNOSTIC_REVISION", "미등록(이전 버전)")
+    current = getattr(module, "probe_smtp", None) is probe_smtp
+    try:
+        fingerprint = hashlib.sha256(marshal.dumps(probe_smtp.__code__)).hexdigest()[:12]
+    except (AttributeError, TypeError, ValueError):
+        fingerprint = "확인 불가"
+    return revision, fingerprint, current
+
+
 def render_mailbox(principal):
     if not principal: raise PermissionError('로그인이 필요합니다.')
     st.subheader('후이즈 회사 메일함')
@@ -90,6 +105,15 @@ def render_mailbox(principal):
         except MailConnectionError as exc: st.error(str(exc))
     st.caption('후이즈 공식 SMTP: smtp.whoisworks.com · 587 · STARTTLS. '
                '실패하면 DNS/TCP/TLS/인증 단계만 표시하고 비밀번호는 표시하지 않습니다.')
+    revision, fingerprint, current = _smtp_runtime_diagnostics()
+    with st.expander("실행 중 SMTP 모듈 진단", expanded=True):
+        st.text("실행 중 SMTP 모듈 버전: " + revision)
+        st.text("실제 사용 함수 SHA256(코드): " + fingerprint)
+        st.text("모듈 함수 연결: " + ("일치" if current else "불일치 (캐시 모듈 점검 필요)"))
+        st.text("SMTP 단계별 진단 코드: " +
+                ("적용됨" if revision == "smtp-stage-20261112-v2" else "이전/미확인"))
+        st.caption("진단값은 현재 실행 중인 Python 함수에서 계산합니다. "
+                   "SMTP 비밀번호, 서버 응답 원문, 메일 내용은 표시하지 않습니다.")
     if b.button('발신 연결 테스트 · 발송 없음',key='whois_probe_smtp',disabled=config.smtp is None):
         try:
             probe_smtp(config.smtp)
