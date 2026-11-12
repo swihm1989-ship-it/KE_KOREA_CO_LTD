@@ -77,7 +77,7 @@ def render_library_admin(repo, env):
                         except (ValueError, RuntimeError, ContractRepositoryError) as exc:
                             st.error(str(exc))
         with st.form('library_upload'):
-            uploaded = st.file_uploader('새 공통 샘플 (PDF/DOCX/HWP5)', type=['pdf', 'docx', 'hwp'])
+            uploaded = st.file_uploader('새 공통 샘플 여러 개 (PDF/DOCX/HWP5)', type=['pdf', 'docx', 'hwp'], accept_multiple_files=True)
             title = st.text_input('공개 참고 제목', help='기존 거래처나 개인 이름을 넣지 마세요.')
             kinds = st.multiselect('참고할 계약 유형', ['sale', 'trade_commission', 'investment_commission'])
             language = st.selectbox('샘플 언어', ['ko', 'en'])
@@ -86,10 +86,21 @@ def render_library_admin(repo, env):
             if register:
                 if not uploaded or not title.strip() or not kinds:
                     raise ValueError('파일·공개 제목·계약 유형을 입력해 주세요.')
-                register_sample(repo, uploaded.getvalue(), uploaded.name, title=title.strip(),
-                                contract_types=kinds, language=language)
-                st.success('원본을 검증해 저장했습니다. 참고 메모 승인 전에는 AI 검색에 사용되지 않습니다.')
-                st.rerun()
+                successes, failures = [], []
+                for file in uploaded:
+                    try:
+                        sample_title = title.strip() if len(uploaded) == 1 else file.name.rsplit('.', 1)[0][:160]
+                        record = register_sample(repo, file.getvalue(), file.name, title=sample_title,
+                                                 contract_types=kinds, language=language)
+                        successes.append(file.name)
+                    except (ValueError, RuntimeError, ContractRepositoryError) as exc:
+                        failures.append((file.name, str(exc)))
+                if successes:
+                    st.success(f'{len(successes)}개 원본 저장 및 해시 검증 완료. AI 검색에는 승인 후 반영됩니다.')
+                for name, reason in failures:
+                    st.error(f'{name}: {reason}')
+                if successes and not failures:
+                    st.rerun()
             records = repo.list_library_records()
             managed = []
             for record in records:
