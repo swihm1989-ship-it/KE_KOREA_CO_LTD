@@ -38,7 +38,7 @@ class MailboxUiTests(unittest.TestCase):
         with patch('Quotation_KEKOREA.orchestration.ui.mailbox_page._settings',return_value=CONFIG),patch('Quotation_KEKOREA.orchestration.ui.mailbox_page.fetch_messages',return_value=(parse_message('uid1',message()),)) as fetch:
             app=AppTest.from_file(str(PAGE),default_timeout=20).run()
             app.radio[0].set_value('메일함').run()
-            fetch.assert_not_called()
+            fetch.assert_called_once()  # Auto-sync immediately when mailbox opens.
             app.button(key='whois_refresh').click().run()
             self.assertFalse(app.exception)
             self.assertTrue(any('PI request' in x.value for x in app.text))
