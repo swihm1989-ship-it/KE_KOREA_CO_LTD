@@ -122,17 +122,31 @@ def probe_pop(endpoint: Endpoint) -> int:
 
 
 def probe_smtp(endpoint: Endpoint) -> None:
-    client=None
+    client = None
+    stage = 'connection'
     try:
-        context=ssl.create_default_context()
-        if endpoint.security=='ssl':
-            client=smtplib.SMTP_SSL(endpoint.host,endpoint.port,timeout=12,context=context)
+        context = ssl.create_default_context()
+        if endpoint.security == 'ssl':
+            client = smtplib.SMTP_SSL(endpoint.host, endpoint.port, timeout=12, context=context)
         else:
-            client=smtplib.SMTP(endpoint.host,endpoint.port,timeout=12)
-            client.ehlo();client.starttls(context=context);client.ehlo()
-        client.login(endpoint.username,endpoint.password)
+            client = smtplib.SMTP(endpoint.host, endpoint.port, timeout=12)
+            stage = 'tls'
+            client.ehlo()
+            client.starttls(context=context)
+            client.ehlo()
+        stage = 'authentication'
+        client.login(endpoint.username, endpoint.password)
+    except smtplib.SMTPAuthenticationError:
+        raise MailConnectionError('SMTP 계정 인증 실패: 로그인 계정, 비밀번호 또는 SMTP 사용 허용 여부를 확인하세요.') from None
+    except (ssl.SSLError, smtplib.SMTPNotSupportedError):
+        raise MailConnectionError('SMTP TLS 연결 실패: SSL/STARTTLS 방식과 포트를 확인하세요.') from None
     except Exception:
-        raise MailConnectionError('SMTP 연결·인증에 실패했습니다. 서버, TLS, 계정 및 SMTP 사용 설정을 확인하세요.') from None
+        messages = {
+            'connection': 'SMTP 서버 접속 실패: 서버 주소, 포트 및 연결 허용 여부를 확인하세요.',
+            'tls': 'SMTP TLS 협상 실패: SSL/STARTTLS 방식과 포트를 확인하세요.',
+            'authentication': 'SMTP 로그인 실패: 계정, 비밀번호 및 SMTP 사용 설정을 확인하세요.',
+        }
+        raise MailConnectionError(messages[stage]) from None
     finally:
         if client is not None:
             _finish(client)
@@ -177,22 +191,43 @@ def parse_message(uid: str, raw: bytes) -> MailMessage:
 
 
 def fetch_messages(endpoint: Endpoint, limit: int=30) -> tuple[MailMessage,...]:
-    if not 1<=limit<=30: raise ValueError('한 번에 1~30건을 가져올 수 있습니다.')
-    client=_pop(endpoint)
+    if not 1 <= limit <= 30:
+        raise ValueError('한 번에 1~30건을 가져올 수 있습니다.')
+    client = _pop(endpoint)
     try:
-        entries=_uidl(client)[:limit]
-        sizes={int(line.split()[0]):int(line.split()[1]) for line in client.list()[1]}
-        result=[];total=0
-        for number,uid in entries:
-            size=sizes.get(number)
-            if size is None or size<0 or size>MAX_MESSAGE_BYTES or total+size>MAX_BATCH_BYTES:
-                result.append(MailMessage(uid,notice='크기 제한으로 본문을 가져오지 않았습니다.'));continue
-            lines=client.retr(number)[1]
-            raw=b'\r\n'.join(lines);total+=len(raw)
-            if total>MAX_BATCH_BYTES: break
-            result.append(parse_message(uid,raw))
+        try:
+            entries = _uidl(client)[:limit]
+        except Exception:
+            raise MailConnectionError('메일 UIDL 목록 조회에 실패했습니다.') from None
+        try:
+            sizes = {}
+            for line in client.list()[1]:
+                parts = line.split()
+                if len(parts) >= 2:
+                    sizes[int(parts[0])] = int(parts[1])
+        except Exception:
+            raise MailConnectionError('메일 크기 목록(LIST) 조회에 실패했습니다.') from None
+        result = []
+        total = 0
+        for number, uid in entries:
+            size = sizes.get(number)
+            if size is None or size < 0 or size > MAX_MESSAGE_BYTES or total + size > MAX_BATCH_BYTES:
+                result.append(MailMessage(uid, notice='크기 제한 또는 목록 누락으로 본문을 가져오지 않았습니다.'))
+                continue
+            try:
+                lines = client.retr(number)[1]
+                raw = b'\r\n'.join(lines)
+            except Exception:
+                result.append(MailMessage(uid, notice='이 메일의 POP3 본문(RETR) 조회에 실패했습니다.'))
+                continue
+            total += len(raw)
+            if total > MAX_BATCH_BYTES:
+                result.append(MailMessage(uid, notice='이번 조회의 용량 제한을 초과했습니다.'))
+                break
+            try:
+                result.append(parse_message(uid, raw))
+            except Exception:
+                result.append(MailMessage(uid, notice='이 메일의 MIME 형식 해석에 실패했습니다.'))
         return tuple(result)
-    except Exception:
-        raise MailConnectionError('메일을 가져오지 못했습니다. 연결·UIDL·메시지 형식을 확인하세요. 기존 표시 내용은 유지됩니다.') from None
     finally:
         _finish(client)
