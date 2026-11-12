@@ -168,7 +168,7 @@ def render_inbox(messages, account):
             preview = _preview(mail.body) or (mail.notice or "본문 없음")
             with st.container(border=True):
                 st.button(
-                    f"{prefix}{sender[:62]}{attachment}\\n{subject[:92]}",
+                    f"{prefix}{sender[:62]}{attachment}\n{subject[:92]}",
                     key=f"whois_select_{idx}_{mail.uid}",
                     type="primary" if mail.uid == selected_uid else "secondary",
                     use_container_width=True,
