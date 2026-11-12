@@ -31,6 +31,21 @@ def authorized_email(user: Mapping, allowed: str) -> str | None:
     return email
 
 
+def authentication_issue(user: Mapping, allowed: str) -> str:
+    """Explain a denial using fixed codes; never disclose claims or the allowlist."""
+    if not isinstance(user, Mapping) or user.get("is_logged_in") is not True:
+        return "not_logged_in"
+    if user.get("email_verified") is not True:
+        return "unverified_email"
+    try:
+        expiration = int(user.get("exp"))
+    except (ValueError, TypeError):
+        return "missing_expiration"
+    if expiration <= int(time.time()):
+        return "expired"
+    return "" if authorized_email(user, allowed) else "not_allowlisted"
+
+
 def require_authentication(st) -> str:
     """Called before sidebar, session state, data loads, or main page render."""
     whitelist = os.environ.get("ORCHESTRATION_ALLOWED_EMAILS", "")
@@ -45,6 +60,15 @@ def require_authentication(st) -> str:
 
     from Quotation_KEKOREA.orchestration.ui.login_page import render_login
     action = render_login(st, configured=bool(whitelist.strip()), logged_in=bool(identity.get("is_logged_in")))
+    if identity.get("is_logged_in"):
+        explanation = {
+            "not_allowlisted": "현재 Google 계정이 Master 앱의 허용 계정 목록과 일치하지 않습니다.",
+            "expired": "Google 인증 유효시간이 지났습니다. 다시 로그인해 주세요.",
+            "missing_expiration": "Google 인증 정보에 만료 시각이 없어 접근을 허용할 수 없습니다. 관리자 확인이 필요합니다.",
+            "unverified_email": "Google 계정의 이메일 인증이 확인되지 않았습니다.",
+        }.get(authentication_issue(identity, whitelist))
+        if explanation:
+            st.caption(explanation)
     if action == "logout":
         st.logout()
     elif action == "login":
