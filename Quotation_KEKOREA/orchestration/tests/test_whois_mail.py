@@ -51,6 +51,34 @@ class WhoisMailTests(unittest.TestCase):
         client.dele.assert_not_called()
         client.quit.assert_called_once()
 
+    def test_one_failed_retrieval_does_not_hide_other_messages(self):
+        client=Mock()
+        raw=message()
+        client.uidl.return_value=(b'+OK',[b'1 old',b'2 new'],0)
+        client.list.return_value=(b'+OK',[b'1 300',b'2 600'],0)
+        def retrieve(index):
+            if index == 2:
+                raise RuntimeError('private-test-password')
+            return (b'+OK',raw.splitlines(),len(raw))
+        client.retr.side_effect=retrieve
+        with patch.object(mail.poplib,'POP3_SSL',return_value=client):
+            messages=mail.fetch_messages(mail.mail_config(CONFIG,'owner@example.com').pop)
+        self.assertEqual(len(messages),2)
+        self.assertIn('RETR',messages[0].notice)
+        self.assertIn('100 PCS',messages[1].body)
+        self.assertNotIn('private-test-password',repr(messages))
+        client.dele.assert_not_called()
+
+    def test_smtp_authentication_error_is_classified_without_secret(self):
+        client=Mock()
+        client.login.side_effect=mail.smtplib.SMTPAuthenticationError(535,b'private-test-password')
+        with patch.object(mail.smtplib,'SMTP',return_value=client):
+            with self.assertRaises(mail.MailConnectionError) as error:
+                mail.probe_smtp(mail.mail_config(CONFIG,'owner@example.com').smtp)
+        self.assertIn('인증 실패',str(error.exception))
+        self.assertNotIn('private-test-password',str(error.exception))
+        client.sendmail.assert_not_called()
+
     def test_oversized_messages_are_skipped_before_retrieval(self):
         client=Mock(); client.uidl.return_value=(b'+OK',[b'1 uid'],0)
         client.list.return_value=(b'+OK',[b'1 999999999'],0)
