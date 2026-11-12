@@ -38,7 +38,7 @@ class MailboxUiTests(unittest.TestCase):
         with patch('Quotation_KEKOREA.orchestration.ui.mailbox_page._settings',return_value=CONFIG),patch('Quotation_KEKOREA.orchestration.ui.mailbox_page.fetch_messages',return_value=(parse_message('uid1',message()),)) as fetch:
             app=AppTest.from_file(str(PAGE),default_timeout=20).run()
             app.radio[0].set_value('메일함').run()
-            fetch.assert_not_called()
+            fetch.assert_called_once()  # Auto-sync immediately when mailbox opens.
             app.button(key='whois_refresh').click().run()
             self.assertFalse(app.exception)
             self.assertTrue(any('PI request' in x.value for x in app.text))
@@ -84,6 +84,24 @@ class MailboxUiTests(unittest.TestCase):
             self.assertFalse(app.exception,[x.message for x in app.exception])
             self.assertIn('500 PCS',app.text_area(key='ai_intake_instruction').value)
             self.assertFalse(app.checkbox(key='ai_intake_consent').value)
+
+    def test_auto_poll_fetches_without_click_and_preserves_uidl_unique_messages(self):
+        from Quotation_KEKOREA.orchestration.ui.mailbox_page import _merge_messages
+        first = parse_message('uid1',message())
+        second = parse_message('uid2',message())
+        self.assertEqual([m.uid for m in _merge_messages((first,), (second, first))],
+                         ['uid2', 'uid1'])
+        with patch('Quotation_KEKOREA.orchestration.ui.mailbox_page._settings',return_value=CONFIG), \
+             patch('Quotation_KEKOREA.orchestration.ui.mailbox_page.fetch_messages',return_value=(first,)) as fetch:
+            app=AppTest.from_file(str(PAGE),default_timeout=25).run()
+            fetch.assert_not_called()
+            app.radio[0].set_value('메일함').run()
+            self.assertFalse(app.exception,[x.message for x in app.exception])
+            fetch.assert_called_once()
+            self.assertEqual(fetch.call_args.kwargs['limit'],5)
+            self.assertTrue(any('PI request' in x.value for x in app.text))
+            app.run()
+            fetch.assert_called_once()
 
     def test_non_owner_cannot_display_previous_mail_session(self):
         config=CONFIG|{'WHOIS_MAIL_OWNER_EMAILS':'another@example.com'}
