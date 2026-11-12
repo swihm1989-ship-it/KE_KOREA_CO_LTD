@@ -12,7 +12,7 @@ import socket
 import smtplib
 import ssl
 
-SMTP_DIAGNOSTIC_REVISION = "smtp-stage-20261112-v2"
+SMTP_DIAGNOSTIC_REVISION = "smtp-starttls-20261112-v3"
 
 MAX_MESSAGE_BYTES = 5_000_000
 MAX_ATTACHMENT_BYTES = 2_000_000
@@ -158,9 +158,25 @@ def probe_smtp(endpoint: Endpoint) -> None:
         raise MailConnectionError("SMTP TCP 연결 거부: 서버의 587 포트 허용 여부를 확인하세요.") from None
     except ssl.SSLCertVerificationError:
         raise MailConnectionError("SMTP TLS 인증서 검증 실패: 서버 인증서를 확인하세요.") from None
-    except (ssl.SSLError, smtplib.SMTPNotSupportedError):
-        raise MailConnectionError("SMTP TLS 협상 실패 (" + stage +
-                                  " 단계): STARTTLS 지원 또는 서버 보안 정책을 확인하세요.") from None
+    except smtplib.SMTPNotSupportedError:
+        raise MailConnectionError(
+            "SMTP 서버가 STARTTLS 기능을 광고하지 않았습니다 (EHLO). "
+            "서버 설정 또는 클라우드 네트워크 중간장비의 SMTP 응답 변경 여부를 확인하세요."
+        ) from None
+    except ssl.SSLError as exc:
+        reason = getattr(exc, "reason", "")
+        known_reasons = {
+            "WRONG_VERSION_NUMBER": "TLS 프로토콜 버전 불일치",
+            "TLSV1_ALERT_PROTOCOL_VERSION": "서버 TLS 버전 거부",
+            "CERTIFICATE_VERIFY_FAILED": "서버 인증서 검증 오류",
+            "UNEXPECTED_EOF_WHILE_READING": "TLS 연결이 협상 중 종료됨",
+            "SSLV3_ALERT_HANDSHAKE_FAILURE": "TLS 핸드셰이크 거부",
+        }
+        kind = known_reasons.get(reason, "TLS 핸드셰이크 오류")
+        raise MailConnectionError(
+            "SMTP STARTTLS 명령 이후 " + kind +
+            ": 서버 TLS 정책 또는 네트워크 중간장비를 확인하세요."
+        ) from None
     except smtplib.SMTPResponseException as exc:
         code = getattr(exc, "smtp_code", None)
         suffix = f" (SMTP {code})" if isinstance(code, int) else ""
