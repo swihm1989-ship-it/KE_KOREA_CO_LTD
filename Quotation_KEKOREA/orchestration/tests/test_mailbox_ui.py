@@ -55,6 +55,36 @@ class MailboxUiTests(unittest.TestCase):
             self.assertNotIn('master_pdf_quantity',app.session_state)
             self.assertNotIn('ai_intake_contract_consent',app.session_state)
 
+    def test_inbox_list_selection_search_and_selected_mail_ai_handoff(self):
+        from email.message import EmailMessage
+        second = EmailMessage()
+        second['From'] = 'Supplier <supplier@example.test>'
+        second['Subject'] = 'Solar cell pricing'
+        second['Date'] = 'Thu, 12 Nov 2026 16:00:00 +0900'
+        second.set_content('Need 500 PCS with USD 0.20 per piece')
+        mails = (parse_message('uid1',message()),
+                 parse_message('uid2',second.as_bytes()))
+        with (patch('Quotation_KEKOREA.orchestration.ui.mailbox_page._settings',return_value=CONFIG),
+              patch('Quotation_KEKOREA.orchestration.ui.mailbox_page.fetch_messages',return_value=mails)):
+            app=AppTest.from_file(str(PAGE),default_timeout=25).run()
+            app.radio[0].set_value('메일함').run()
+            app.button(key='whois_refresh').click().run()
+            self.assertFalse(app.exception,[x.message for x in app.exception])
+            self.assertTrue(any('2건' in x.value for x in app.caption))
+            self.assertTrue(any('PI request' in x.value for x in app.text))
+            app.button(key='whois_select_1_uid2').click().run()
+            self.assertFalse(app.exception,[x.message for x in app.exception])
+            self.assertEqual(app.session_state['whois_selected_uid'],'uid2')
+            self.assertIn('uid2',app.session_state['whois_opened_uids'])
+            self.assertTrue(any('Solar cell pricing' in x.value for x in app.text))
+            app.text_input(key='whois_mail_search').set_value('Supplier').run()
+            self.assertFalse(app.exception,[x.message for x in app.exception])
+            self.assertTrue(any('1건' in x.value for x in app.caption))
+            app.button(key='whois_ai_uid2').click().run()
+            self.assertFalse(app.exception,[x.message for x in app.exception])
+            self.assertIn('500 PCS',app.text_area(key='ai_intake_instruction').value)
+            self.assertFalse(app.checkbox(key='ai_intake_consent').value)
+
     def test_non_owner_cannot_display_previous_mail_session(self):
         config=CONFIG|{'WHOIS_MAIL_OWNER_EMAILS':'another@example.com'}
         with patch('Quotation_KEKOREA.orchestration.ui.mailbox_page._settings',return_value=config):

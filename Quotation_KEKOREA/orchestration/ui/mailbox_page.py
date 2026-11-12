@@ -111,18 +111,102 @@ def render_mailbox(principal):
     st.caption('마지막 조회 성공: '+bundle[2])
     if st.session_state.get('whois_refresh_failed'):
         st.warning('최근 갱신에 실패해 이전 조회 내용을 표시합니다.')
-    search=st.text_input('실제 메일 검색',key='whois_mail_search')
-    matched=[m for m in bundle[1] if search.casefold() in (m.sender+' '+m.subject+' '+m.body).casefold()]
-    if not matched: st.info('표시할 메일이 없습니다.')
-    for message in matched:
+    render_inbox(bundle[1], account)
+
+
+def _preview(body):
+    """Short, plain-text list preview; no HTML from external messages."""
+    return " ".join((body or "").split())[:88]
+
+
+def _open_message(uid):
+    st.session_state["whois_selected_uid"] = uid
+    st.session_state.setdefault("whois_opened_uids", set()).add(uid)
+
+
+def render_inbox(messages, account):
+    """Two-pane read-only inbox. Server read/unread flags are never modified."""
+    if st.session_state.get("whois_inbox_account") != account:
+        st.session_state["whois_inbox_account"] = account
+        st.session_state["whois_selected_uid"] = None
+        st.session_state["whois_opened_uids"] = set()
+
+    toolbar, order_col = st.columns([4, 1])
+    with toolbar:
+        query = st.text_input("메일 검색", placeholder="발신자, 제목, 본문 검색",
+                              key="whois_mail_search")
+    with order_col:
+        order = st.selectbox("정렬", ["최신순", "오래된순"], key="whois_inbox_order")
+
+    filtered = [m for m in messages if query.casefold().strip() in (
+        m.sender + " " + m.subject + " " + m.body
+    ).casefold()]
+    if order == "오래된순":
+        filtered.reverse()
+
+    st.caption(f"받은메일함 · 이번 조회 {len(messages)}건 / 검색 결과 {len(filtered)}건"
+               " · 열람 표시는 현재 세션 기준")
+    if not filtered:
+        st.info("검색 결과가 없습니다.")
+        return
+
+    valid_uids = {m.uid for m in filtered}
+    selected_uid = st.session_state.get("whois_selected_uid")
+    if selected_uid not in valid_uids:
+        selected_uid = filtered[0].uid
+    selected = next(m for m in filtered if m.uid == selected_uid)
+
+    left, right = st.columns([2, 3], gap="medium")
+    with left:
+        st.markdown("**메일 목록**")
+        for idx, mail in enumerate(filtered):
+            attachment = " 📎" if mail.attachments else ""
+            opened = mail.uid in st.session_state.get("whois_opened_uids", set())
+            prefix = "● " if not opened else ""
+            sender = mail.sender or "(발신자 없음)"
+            subject = mail.subject or "(제목 없음)"
+            preview = _preview(mail.body) or (mail.notice or "본문 없음")
+            with st.container(border=True):
+                st.button(
+                    f"{prefix}{sender[:62]}{attachment}\n{subject[:92]}",
+                    key=f"whois_select_{idx}_{mail.uid}",
+                    type="primary" if mail.uid == selected_uid else "secondary",
+                    use_container_width=True,
+                    on_click=_open_message,
+                    args=(mail.uid,),
+                )
+                st.caption(preview)
+                st.caption(mail.received_at or "날짜 없음")
+
+    with right:
+        st.markdown("**선택한 메일**")
         with st.container(border=True):
-            st.text(message.subject or '(본문 미조회)')
-            st.text(message.sender+' · '+message.received_at)
-            if message.notice: st.warning(message.notice)
-            st.text(message.body)
-            for i,attachment in enumerate(message.attachments):
-                st.download_button(attachment.filename,attachment.content,file_name=attachment.filename,
-                    mime=attachment.mime,key=f'whois_attachment_{message.uid}_{i}')
-            st.button('이 메일로 AI 업무 요청 작성',key='whois_ai_'+message.uid,
-                      disabled=not bool(message.body),on_click=_use_for_ai,args=(message,))
-    st.caption('메일을 선택해도 AI는 자동 호출되지 않습니다. 요청 내용을 검토하고 전송 동의를 다시 선택하세요. 첨부파일은 자동으로 AI에 전달하지 않습니다.')
+            st.text(selected.subject or "(제목 없음)")
+            st.caption("보낸사람: " + (selected.sender or "(발신자 없음)"))
+            st.caption("날짜: " + (selected.received_at or "날짜 없음"))
+            if selected.notice:
+                st.warning(selected.notice)
+            st.divider()
+            with st.container(height=390, border=False):
+                st.text(selected.body or "(본문 없음)")
+            if selected.attachments:
+                st.markdown("**첨부파일**")
+                for i, attachment in enumerate(selected.attachments):
+                    st.download_button(
+                        "📎 " + attachment.filename, attachment.content,
+                        file_name=attachment.filename, mime=attachment.mime,
+                        key=f"whois_attachment_{selected.uid}_{i}"
+                    )
+            st.divider()
+            st.button(
+                "이 메일로 AI 업무 요청 작성",
+                key="whois_ai_" + selected.uid,
+                disabled=not bool(selected.body),
+                type="primary",
+                use_container_width=True,
+                on_click=_use_for_ai,
+                args=(selected,),
+            )
+            st.caption("메일을 선택해도 AI가 자동 실행되지 않습니다. "
+                       "요청을 검토하고 별도로 전송 동의해야 합니다. "
+                       "첨부파일은 AI에 자동 전송하지 않습니다.")
