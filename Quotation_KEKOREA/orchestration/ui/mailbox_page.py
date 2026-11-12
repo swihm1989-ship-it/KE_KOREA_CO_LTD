@@ -1,6 +1,7 @@
 """Authenticated mailbox UI; credentials come only from server configuration."""
 from datetime import datetime
 import hashlib
+import importlib
 import marshal
 import os
 import sys
@@ -57,6 +58,37 @@ def _use_for_ai(message):
     st.session_state['master_page']='AI 업무 요청'
 
 
+def _ensure_smtp_adapter_current():
+    """Reload a stale imported module after a Streamlit hot deployment.
+
+    Streamlit may rerun the UI source while keeping imported modules cached.
+    Only reload when the adapter declares a different revision; never reload
+    on every fragment poll or touch secrets.
+    """
+    global mail_config, probe_pop, probe_smtp, fetch_messages, MailConnectionError
+    module = sys.modules.get(probe_smtp.__module__)
+    expected = "smtp-stage-20261112-v2"
+    if module is None or getattr(module, "SMTP_DIAGNOSTIC_REVISION", None) == expected:
+        return False
+    try:
+        importlib.invalidate_caches()
+        refreshed = importlib.reload(module)
+    except (ImportError, OSError, SyntaxError):
+        return False
+    if getattr(refreshed, "SMTP_DIAGNOSTIC_REVISION", None) != expected:
+        return False
+    mail_config = refreshed.mail_config
+    probe_pop = refreshed.probe_pop
+    probe_smtp = refreshed.probe_smtp
+    fetch_messages = refreshed.fetch_messages
+    MailConnectionError = refreshed.MailConnectionError
+    # Old session data could refer to prior dataclass implementations.
+    for key in ("whois_mail_bundle", "whois_poll_account",
+                "whois_last_poll", "whois_refresh_failed"):
+        st.session_state.pop(key, None)
+    return True
+
+
 def _smtp_runtime_diagnostics():
     """Identify the callable actually used by the button, never read secrets."""
     module = sys.modules.get(probe_smtp.__module__)
@@ -71,7 +103,10 @@ def _smtp_runtime_diagnostics():
 
 def render_mailbox(principal):
     if not principal: raise PermissionError('로그인이 필요합니다.')
+    refreshed_smtp_module = _ensure_smtp_adapter_current()
     st.subheader('후이즈 회사 메일함')
+    if refreshed_smtp_module:
+        st.success("이전 SMTP 모듈을 감지하여 최신 코드로 다시 로딩했습니다.")
     st.caption('메일 동기화 버전: 2026-11-12-LIVE · 화면 열림 중 60초마다 자동 갱신')
     st.caption('화면이 열려 있는 동안 60초마다 새 메일을 확인합니다. 최근 메일은 현재 로그인 세션에서만 보관하며 원본은 서버에 보존합니다.')
     with st.expander('메일 연결 설정 안내'):
@@ -112,6 +147,8 @@ def render_mailbox(principal):
         st.text("모듈 함수 연결: " + ("일치" if current else "불일치 (캐시 모듈 점검 필요)"))
         st.text("SMTP 단계별 진단 코드: " +
                 ("적용됨" if revision == "smtp-stage-20261112-v2" else "이전/미확인"))
+        if revision != "smtp-stage-20261112-v2":
+            st.warning("재로딩 후에도 이전 모듈입니다. Streamlit Cloud의 배포 커밋과 Python 프로세스를 점검하세요.")
         st.caption("진단값은 현재 실행 중인 Python 함수에서 계산합니다. "
                    "SMTP 비밀번호, 서버 응답 원문, 메일 내용은 표시하지 않습니다.")
     if b.button('발신 연결 테스트 · 발송 없음',key='whois_probe_smtp',disabled=config.smtp is None):
