@@ -1,7 +1,12 @@
 name: Refresh market headlines
 on:
+  push:
+    branches: [main]
+    paths:
+      - "Quotation_KEKOREA/orchestration/workflows/market_news.py"
+      - ".github/workflows/refresh-market-news.yml"
   schedule:
-    - cron: '*/30 * * * *'
+    - cron: '7,37 * * * *'
   workflow_dispatch:
 permissions:
   contents: read

@@ -28,6 +28,12 @@ def main() -> None:
             result[category] = retain_last_24_hours(previous.get(category, []), now)
     if len(failures) == len(CATEGORIES):
         raise RuntimeError("All feeds failed: " + ", ".join(failures))
+    for category, rows in result.items():
+        print("Collected", category, "headlines:", len(rows))
+        if not rows:
+            print("::warning::No recent headlines for " + category)
+    for failure in failures:
+        print("::warning::Feed collection failed: " + failure)
     store = NewsSupabase.from_config()
     if store is not None:
         count = store.upsert_categories(result, now=now)

@@ -83,13 +83,25 @@ class NewsSupabase:
             raise ValueError("Unknown news category")
         now = (now or datetime.now(KST)).astimezone(KST)
         since = (now - timedelta(hours=24)).astimezone(timezone.utc).isoformat()
-        result = self._request("GET", {
+        query = {
             "select": "category,title,url,publisher,published_at,collected_at",
             "category": "eq." + category,
             "published_at": "gte." + since,
             "order": "published_at.desc",
-            "limit": "25",
-        })
+            "limit": "100" if category in {"태양광", "데이터센터"} else "25",
+        }
+        result = self._request("GET", query)
+        if category == "데이터센터" and isinstance(result, list):
+            core_query = {**query, "limit": "50", "or":
+                "(title.ilike.*data center*,title.ilike.*data centre*,title.ilike.*datacenter*,"
+                "title.ilike.*데이터센터*,title.ilike.*AI infrastructure*,title.ilike.*AI 인프라*)"}
+            core = self._request("GET", core_query)
+            if not isinstance(core, list):
+                raise ValueError("Invalid Supabase infrastructure response")
+            selected = retain_last_24_hours(core, now)[:50]
+            seen = {row.get("url") for row in selected}
+            selected += [row for row in result if row.get("url") not in seen][:100-len(selected)]
+            result = selected
         if not isinstance(result, list):
             raise ValueError("Invalid Supabase response")
         output = []
@@ -106,4 +118,4 @@ class NewsSupabase:
                 "published_at": published.isoformat(),
                 "collected_at": str(record.get("collected_at") or ""),
             })
-        return retain_last_24_hours(output, now)
+        return sorted(retain_last_24_hours(output, now), key=lambda row: row["published_at"], reverse=True)

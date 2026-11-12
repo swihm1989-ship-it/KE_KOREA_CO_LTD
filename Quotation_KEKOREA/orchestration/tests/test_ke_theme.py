@@ -37,6 +37,12 @@ class ThemeParityTests(unittest.TestCase):
 
 @unittest.skipUnless(AppTest is not None, "Streamlit AppTest unavailable")
 class ThemeUiTests(unittest.TestCase):
+    def setUp(self):
+        news = patch("Quotation_KEKOREA.orchestration.ui.market_news_page._cached_news",
+                     return_value=([], None))
+        news.start()
+        self.addCleanup(news.stop)
+
     def test_authenticated_layout_keeps_navigation_and_renders_matching_header(self):
         with patch(
             "Quotation_KEKOREA.orchestration.security.auth_gate.require_authentication",
