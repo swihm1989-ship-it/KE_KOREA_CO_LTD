@@ -12,6 +12,32 @@ from Quotation_KEKOREA.agent.branding import resolve_company_seal
 EXPECTED_PROJECT = "jusozufdsnpdxezxptfp"
 
 
+DOCUMENT_SETTING_KEYS = (
+    "SUPABASE_URL", "SUPABASE_SECRET_KEY", "KEKOREA_COMPANY_SEAL_BASE64",
+    "KEKOREA_USD_BENEFICIARY", "KEKOREA_USD_BANK_NAME", "KEKOREA_USD_BRANCH",
+    "KEKOREA_USD_SWIFT", "KEKOREA_USD_ACCOUNT_NUMBER", "KEKOREA_USD_BANK_ADDRESS",
+)
+
+
+def document_export_env(secrets, environ):
+    """Use Streamlit Secrets first, matching the legacy app."""
+    try:
+        root_secrets = dict(secrets)
+    except (FileNotFoundError, KeyError):
+        root_secrets = {}
+    auth = root_secrets.get("auth", {})
+    auth = dict(auth) if hasattr(auth, "items") else {}
+    values = {}
+    for key in DOCUMENT_SETTING_KEYS:
+        value = root_secrets.get(key)
+        if not value:
+            value = auth.get(key)
+        if not value:
+            value = environ.get(key)
+        values[key] = str(value) if value else ""
+    return values
+
+
 def seal_health(env, *, root=None, resolver=resolve_company_seal):
     root = Path(root) if root is not None else Path(__file__).resolve().parents[2]
     has_local = (root / "assets" / "image.png").is_file()
@@ -32,7 +58,7 @@ def seal_health(env, *, root=None, resolver=resolve_company_seal):
     # Report only known categories: never display raw service responses.
     if not key_present and not has_base64:
         return "missing_key", "SUPABASE_SECRET_KEY 설정을 찾지 못했습니다. Streamlit Secrets의 최상위 설정을 확인하세요."
-    if error and "HTTP 401" in error or error and "HTTP 403" in error:
+    if error and ("HTTP 401" in error or "HTTP 403" in error):
         return "access_denied", "Supabase Storage 접근 권한 오류입니다. 서버용 키 또는 정책을 확인하세요."
     if error and ("not been uploaded" in error or "not been created" in error):
         return "missing_object", "설정된 프로젝트에서 기존 직인 경로를 찾지 못했습니다."
