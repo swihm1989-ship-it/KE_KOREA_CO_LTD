@@ -25,6 +25,18 @@ class MailboxUiTests(unittest.TestCase):
         self.assertEqual(settings['WHOIS_MAIL_OWNER_EMAILS'], 'owner@example.com')
         self.assertEqual(settings['WHOIS_POP_USERNAME'], 'david.ihm@ke-korea.com')
 
+    def test_stale_smtp_module_is_reloaded_and_ui_callable_rebound(self):
+        from Quotation_KEKOREA.orchestration.ui import mailbox_page
+        from Quotation_KEKOREA.orchestration.adapters import whois_mail
+        with (patch.object(whois_mail, "SMTP_DIAGNOSTIC_REVISION", "old-version"),
+              patch.object(mailbox_page.st, "session_state", {})):
+            self.assertTrue(mailbox_page._ensure_smtp_adapter_current())
+            revision, fingerprint, current = mailbox_page._smtp_runtime_diagnostics()
+            self.assertEqual(revision, "smtp-stage-20261112-v2")
+            self.assertTrue(current)
+            self.assertEqual(len(fingerprint), 12)
+            self.assertFalse(mailbox_page._ensure_smtp_adapter_current())
+
     def test_smtp_runtime_diagnostic_reports_loaded_callable_without_secrets(self):
         from Quotation_KEKOREA.orchestration.ui.mailbox_page import _smtp_runtime_diagnostics
         revision, fingerprint, current = _smtp_runtime_diagnostics()
