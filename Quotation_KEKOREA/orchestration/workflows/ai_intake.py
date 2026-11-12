@@ -8,6 +8,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any, Mapping
 from uuid import uuid4
+from Quotation_KEKOREA.orchestration.workflows.commercial_values import normalize_analysis_values
 
 from Quotation_KEKOREA.orchestration.router import DOC_TYPES
 from Quotation_KEKOREA.orchestration.workflows.label_typos import canonical_label
@@ -76,7 +77,7 @@ def make_contract_candidate(analysis: Mapping[str, Any], language: str,
     No previous contract terms/parties/clauses are copied to current agreement.
     """
     from Quotation_KEKOREA.contracts.models import new_snapshot, validate_snapshot
-    data = _validated_analysis(analysis)
+    data = normalize_analysis_values(_validated_analysis(analysis))
     if language not in {"ko", "en"}:
         raise ValueError("계약서 언어는 한국어 또는 영어여야 합니다.")
     snap = new_snapshot("orchestration-" + uuid4().hex, data["contract_type"], language)
@@ -101,13 +102,13 @@ def make_contract_candidate(analysis: Mapping[str, Any], language: str,
 def make_trade_candidate(kind: str, analysis: Mapping[str, Any],
                          *, product_family: str = "solar_cell") -> dict[str, Any]:
     """Conservative prefill; all exact commercial data needs user's confirmation."""
-    data = _validated_analysis(analysis)
+    data = normalize_analysis_values(_validated_analysis(analysis))
     kind = str(kind or "").upper()
     if kind not in DOC_TYPES or kind == "CONTRACT":
         raise ValueError("무역 문서 유형은 PI/PO/CI/PL 중 하나여야 합니다.")
     if product_family not in _FAMILIES:
         raise ValueError("상품군을 확인해 주세요.")
-    terms = {term["key"]: str(term.get("value") or "")
+    terms = {term["key"]: str(term.get("value") if term.get("value") is not None else "")
              for term in data["terms"] if term.get("key") in _TERM_KEYS}
     parties = {}
     for role in ("seller", "buyer"):
@@ -131,7 +132,7 @@ def make_trade_candidate(kind: str, analysis: Mapping[str, Any],
             "unit": terms.get("unit", ""),
             "unit_price": terms.get("unit_price", ""),
             "price_basis": terms.get("unit", ""),
-            "price_source": "",  # must be entered by the user; extraction is not verified provenance
+            "price_source": "",  # optional metadata; extraction is not verified provenance
         }],
     }
     return result

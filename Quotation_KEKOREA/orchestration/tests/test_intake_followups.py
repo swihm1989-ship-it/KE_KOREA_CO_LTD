@@ -42,13 +42,13 @@ class FollowupTests(unittest.TestCase):
         sample["CONTRACT"]["parties"] = [{"roles": ["buyr"], "legal_name": None}]
         self.assertIn("buyer.legal_name", [x.key for x in missing_fields(sample)])
 
-    def test_find_missing_buyer_and_seller_and_price_source(self):
+    def test_find_missing_buyer_and_seller_with_optional_price_source(self):
         keys = [x.key for x in missing_fields(candidates())]
         self.assertIn("buyer.legal_name", keys)
         self.assertIn("seller.legal_name", keys)
         self.assertIn("buyer.address", keys)
         self.assertIn("seller.address", keys)
-        self.assertIn("item.price_source", keys)
+        self.assertNotIn("item.price_source", keys)
         self.assertNotIn("item.quantity", keys)
 
     def test_answer_buyer_updates_pi_and_contract_without_mutating_input(self):
@@ -69,7 +69,7 @@ class FollowupTests(unittest.TestCase):
         self.assertEqual(seller["country"], "Korea")
         self.assertEqual(seller["status"], "suggested")
 
-    def test_answer_required_trade_price_source(self):
+    def test_answer_optional_trade_price_source(self):
         changed = apply_answer(candidates(), "item.price_source", "Buyer written email dated 2026-11-11")
         self.assertEqual(changed["PI"]["items"][0]["price_source"], "Buyer written email dated 2026-11-11")
         self.assertNotIn("item.price_source", [x.key for x in missing_fields(changed)])
@@ -94,7 +94,7 @@ class FollowupTests(unittest.TestCase):
 
     def test_missing_fields_excludes_irrelevant_ci_pl_requirements(self):
         self.assertFalse(any(field.key == "shipment_reference" for field in missing_fields(candidates())))
-        self.assertIn("item.price_source", [x.key for x in missing_fields(candidates())])
+        self.assertNotIn("item.price_source", [x.key for x in missing_fields(candidates())])
         self.assertTrue(format_field_label("buyer.legal_name"))
 
 

@@ -9,6 +9,7 @@ import os
 import streamlit as st
 
 from Quotation_KEKOREA.orchestration.router import classify
+from Quotation_KEKOREA.orchestration.workflows.commercial_values import normalize_trade_values
 from Quotation_KEKOREA.orchestration.workflows.label_typos import canonical_label
 from Quotation_KEKOREA.orchestration.workflows.ai_intake import (
     extract_candidate, make_contract_candidate, make_trade_candidate,
@@ -33,6 +34,8 @@ def _model_config():
 
 def _remember_candidate_bundle(digest: str, candidate_map: dict) -> None:
     """Synchronize answer widgets and advanced editor in memory."""
+    candidate_map = {kind: normalize_trade_values(data) if kind in {"PI", "PO", "CI", "PL"} else data
+                     for kind, data in candidate_map.items()}
     st.session_state["ai_intake_candidates"] = (digest, candidate_map)
     st.session_state.pop("ai_intake_drafts", None)
 
@@ -68,7 +71,7 @@ def _apply_pdf_required_fields(digest: str) -> None:
               for name in ("doc_no", "buyer_name", "buyer_addr", "seller_name",
                            "seller_addr", "currency", "incoterms", "payment",
                            "product", "quantity", "unit", "price", "basis",
-                           "price_source", "shipment", "origin")}
+                           "shipment", "origin")}
     for kind, trade in changed.items():
         if kind not in ("PI", "PO", "CI", "PL") or not isinstance(trade, dict):
             continue
@@ -84,8 +87,7 @@ def _apply_pdf_required_fields(digest: str) -> None:
         items = deepcopy(trade.get("items") or [{}])
         items[0] = {**items[0], "product_name": fields["product"],
                     "quantity": fields["quantity"], "unit": fields["unit"].upper(),
-                    "unit_price": fields["price"], "price_basis": fields["basis"].upper(),
-                    "price_source": fields["price_source"]}
+                    "unit_price": fields["price"], "price_basis": fields["basis"].upper()}
         trade["items"] = items
     _remember_candidate_bundle(digest, changed)
     st.session_state.pop("master_legacy_files", None)
@@ -383,7 +385,8 @@ def render_ai_intake(principal: str):
                     st.markdown("**" + kind + " · 현재 거래정보**")
                     st.write("Buyer:", (data.get("buyer") or {}).get("legal_name") or "미입력")
                     st.write("Seller:", (data.get("seller") or {}).get("legal_name") or "미입력")
-                    st.write("가격 확인 출처:", (data.get("items") or [{}])[0].get("price_source") or "미입력")
+                    if (data.get("items") or [{}])[0].get("price_source"):
+                        st.write("가격 출처 (참고):", data["items"][0]["price_source"])
             elif kind == "CONTRACT":
                 st.caption("계약서 당사자와 조건에도 답변을 함께 반영합니다. 생성된 조항은 조건이 바뀌면 무효화됩니다.")
         # A new editor key for each candidate revision prevents stale widget state.
@@ -399,6 +402,9 @@ def render_ai_intake(principal: str):
                 data = json.loads(raw)
                 if not isinstance(data, dict):
                     raise ValueError("최상위 값은 문서별 JSON 객체여야 합니다.")
+                data = {kind: normalize_trade_values(source)
+                        if kind in {"PI", "PO", "CI", "PL"} and isinstance(source, dict) else source
+                        for kind, source in data.items()}
                 run = prepare_documents(new_request(instruction, data))
                 st.session_state["ai_intake_drafts"] = (edited_key, run)
             except (ValueError, TypeError, KeyError) as exc:
@@ -441,11 +447,10 @@ def render_ai_intake(principal: str):
                 incoterms = st.text_input("인도조건 및 장소", value=str(sample.get("incoterms") or ""), key="master_pdf_incoterms")
                 payment = st.text_input("결제조건", value=str(sample.get("payment_terms") or ""), key="master_pdf_payment")
                 product = st.text_input("영문 제품명", value=str(first_item.get("product_name") or ""), key="master_pdf_product")
-                quantity = st.text_input("수량", value=str(first_item.get("quantity") or ""), key="master_pdf_quantity")
-                unit = st.text_input("수량 단위", value=str(first_item.get("unit") or "PCS"), key="master_pdf_unit")
+                quantity = st.text_input("수량", value=str(first_item.get("quantity") if first_item.get("quantity") is not None else ""), key="master_pdf_quantity")
+                unit = st.text_input("수량 단위", value=str(first_item.get("unit") or ""), key="master_pdf_unit")
                 price = st.text_input("단가", value=str(first_item.get("unit_price") or ""), key="master_pdf_price")
                 basis = st.text_input("단가 기준 (PCS, KG 등)", value=str(first_item.get("price_basis") or first_item.get("unit") or ""), key="master_pdf_basis")
-                price_source = st.text_input("가격 출처 (실제 견적/사용자 확인)", value=str(first_item.get("price_source") or ""), key="master_pdf_price_source")
                 shipment = st.text_input("선적 참조번호 (CI/PL 필수)", value=str(sample.get("shipment_reference") or ""), key="master_pdf_shipment")
                 origin = st.text_input("원산지 (CI 필수)", value=str(sample.get("country_of_origin") or ""), key="master_pdf_origin")
                 st.form_submit_button("필수정보 적용 · PDF 생성 준비", type="primary",
