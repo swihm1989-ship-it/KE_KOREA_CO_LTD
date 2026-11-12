@@ -29,6 +29,42 @@ class LegacyExportsTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "직인"):
             render_master_trade_draft("PO", {}, {})
 
+    def test_master_all_four_documents_use_identical_legacy_renderer_and_assets(self):
+        from Quotation_KEKOREA.orchestration.workflows import legacy_document_exports as module
+        original_renderer = module.render_files
+        from Quotation_KEKOREA.agent.renderers import render_files
+        self.assertIs(original_renderer, render_files)
+        expected = []
+        def fake_render(doc, output_dir, **kwargs):
+            self.assertTrue(kwargs["logo_path"].name == "company_logo.png")
+            self.assertTrue(kwargs["logo_path"].is_file())
+            self.assertTrue(kwargs["seal_path"].is_file())
+            expected.append((doc["document_type"], set(kwargs)))
+            output_dir.mkdir(parents=True, exist_ok=True)
+            result = {}
+            for fmt in ("pdf", "xlsx", "html"):
+                p = output_dir / ("sample." + fmt)
+                p.write_bytes(b"same-legacy-engine")
+                result[fmt] = p
+            return result
+
+        env = {("KEKOREA_USD_" + key): "safe-test-value" for key in module.BANK_KEYS}
+        with (patch.object(module, "validate_and_calculate") as validate,
+              patch.object(module, "ci_render_data", side_effect=lambda x: x),
+              patch.object(module, "resolve_company_seal",
+                           return_value=(Path("/not-present/image.png"), b"png-test-bytes", None)),
+              patch.object(module, "render_files", side_effect=fake_render)):
+            for kind in ("PI", "PO", "CI", "PL"):
+                validate.return_value = {"blocking_issues": [], "ready_for_issue": True,
+                                         "document_type": kind}
+                files = render_master_trade_draft(kind, {"document_type": kind}, env)
+                self.assertEqual(set(files), {"pdf", "xlsx", "html"})
+                self.assertTrue(all(not file["final"] and not file["sendable"]
+                                    for file in files.values()))
+        self.assertEqual([kind for kind, _ in expected], ["PI", "PO", "CI", "PL"])
+        self.assertTrue(all(keys == {"bank_details", "seal_path", "logo_path"}
+                            for _, keys in expected))
+
     @patch("Quotation_KEKOREA.orchestration.workflows.legacy_document_exports.validate_and_calculate")
     def test_pi_requires_complete_bank_profile(self, validate):
         validate.return_value = {"blocking_issues": [], "ready_for_issue": True}

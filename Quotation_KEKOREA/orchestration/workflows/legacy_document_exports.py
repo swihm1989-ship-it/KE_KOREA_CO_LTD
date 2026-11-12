@@ -57,8 +57,12 @@ def render_master_trade_draft(kind: str, source: Mapping, env: Mapping[str, str]
         if seal_bytes is not None:
             actual_seal = Path(directory) / "company_seal.png"
             actual_seal.write_bytes(seal_bytes)
+        # Match the original KE KOREA app: pass the very same logo and seal
+        # locations to the unmodified shared PI/PO/CI/PL PDF/XLSX renderer.
+        logo_path = root / "assets" / "company_logo.png"
         paths = render_files(checked, Path(directory) / "outputs",
-                             bank_details=bank, seal_path=actual_seal)
+                             bank_details=bank, logo_path=logo_path,
+                             seal_path=actual_seal)
         result = {}
         for extension in ("pdf", "xlsx", "html"):
             path = paths[extension]

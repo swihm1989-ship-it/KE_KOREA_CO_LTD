@@ -19,6 +19,9 @@ from Quotation_KEKOREA.orchestration.workflows.unified_review import (
     new_request, prepare_documents,
 )
 from Quotation_KEKOREA.orchestration.ui.saved_contracts import _server_value
+from Quotation_KEKOREA.orchestration.workflows.document_assets import (
+    document_export_env, seal_health,
+)
 from Quotation_KEKOREA.orchestration.workflows.intake_followups import missing_fields, apply_answer
 
 
@@ -474,6 +477,13 @@ def render_ai_intake(principal: str):
         st.caption("현재 MASTER 앱에서 기존 업무 에이전트의 검증·직인·페이지 분할·PDF/XLSX 엔진을 직접 호출합니다. 기존 앱으로 이동하지 않습니다.")
         trade_kinds = [kind for kind in candidates[1] if kind in ("PI", "PO", "CI", "PL")]
         if trade_kinds:
+            if st.button("회사 직인 · 기존 서식 연결 확인", key="master_seal_diagnostic"):
+                document_env = document_export_env(st.secrets, os.environ)
+                state, explanation = seal_health(document_env)
+                if state == "ready":
+                    st.success(explanation)
+                else:
+                    st.warning(explanation)
             if st.button("기존 양식으로 무역서류 PDF·Excel 생성", key="master_legacy_export"):
                 st.session_state.pop("master_legacy_files", None)
                 try:
@@ -481,10 +491,7 @@ def render_ai_intake(principal: str):
                     updated = json.loads(raw)
                     if not isinstance(updated, dict):
                         raise ValueError("문서 데이터는 JSON 객체여야 합니다.")
-                    env_keys = ("SUPABASE_URL", "SUPABASE_SECRET_KEY", "KEKOREA_COMPANY_SEAL_BASE64",
-                                "KEKOREA_USD_BENEFICIARY", "KEKOREA_USD_BANK_NAME", "KEKOREA_USD_BRANCH",
-                                "KEKOREA_USD_SWIFT", "KEKOREA_USD_ACCOUNT_NUMBER", "KEKOREA_USD_BANK_ADDRESS")
-                    env = {name: _server_value(name) for name in env_keys}
+                    env = document_export_env(st.secrets, os.environ)
                     results = {}
                     errors = {}
                     for kind in trade_kinds:
