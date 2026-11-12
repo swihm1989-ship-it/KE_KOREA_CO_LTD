@@ -64,8 +64,8 @@ class MailboxUiTests(unittest.TestCase):
         second.set_content('Need 500 PCS with USD 0.20 per piece')
         mails = (parse_message('uid1',message()),
                  parse_message('uid2',second.as_bytes()))
-        with patch('Quotation_KEKOREA.orchestration.ui.mailbox_page._settings',return_value=CONFIG), \\
-             patch('Quotation_KEKOREA.orchestration.ui.mailbox_page.fetch_messages',return_value=mails):
+        with (patch('Quotation_KEKOREA.orchestration.ui.mailbox_page._settings',return_value=CONFIG),
+              patch('Quotation_KEKOREA.orchestration.ui.mailbox_page.fetch_messages',return_value=mails)):
             app=AppTest.from_file(str(PAGE),default_timeout=25).run()
             app.radio[0].set_value('메일함').run()
             app.button(key='whois_refresh').click().run()
