@@ -12,6 +12,8 @@ import socket
 import smtplib
 import ssl
 
+SMTP_DIAGNOSTIC_REVISION = "smtp-stage-20261112-v2"
+
 MAX_MESSAGE_BYTES = 5_000_000
 MAX_ATTACHMENT_BYTES = 2_000_000
 MAX_BATCH_BYTES = 20_000_000

@@ -25,6 +25,19 @@ class MailboxUiTests(unittest.TestCase):
         self.assertEqual(settings['WHOIS_MAIL_OWNER_EMAILS'], 'owner@example.com')
         self.assertEqual(settings['WHOIS_POP_USERNAME'], 'david.ihm@ke-korea.com')
 
+    def test_smtp_runtime_diagnostic_reports_loaded_callable_without_secrets(self):
+        from Quotation_KEKOREA.orchestration.ui.mailbox_page import _smtp_runtime_diagnostics
+        revision, fingerprint, current = _smtp_runtime_diagnostics()
+        self.assertEqual(revision, "smtp-stage-20261112-v2")
+        self.assertEqual(len(fingerprint), 12)
+        self.assertTrue(current)
+        self.assertNotIn("private-test-password", fingerprint)
+        with patch('Quotation_KEKOREA.orchestration.ui.mailbox_page._settings',return_value=CONFIG):
+            app=AppTest.from_file(str(PAGE),default_timeout=25).run()
+            app.radio[0].set_value('메일함').run()
+        self.assertFalse(app.exception,[x.message for x in app.exception])
+        self.assertTrue(any('smtp-stage-20261112-v2' in x.value for x in app.text))
+
     def test_mail_page_without_settings_does_not_connect(self):
         with patch('Quotation_KEKOREA.orchestration.ui.mailbox_page._settings',return_value={}),patch('Quotation_KEKOREA.orchestration.ui.mailbox_page.fetch_messages') as fetch:
             app=AppTest.from_file(str(PAGE),default_timeout=20).run()
