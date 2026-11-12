@@ -34,7 +34,11 @@ def probe():
                 reason = getattr(exc, "reason", None)
                 allowed = {"WRONG_VERSION_NUMBER", "TLSV1_ALERT_PROTOCOL_VERSION",
                            "UNEXPECTED_EOF_WHILE_READING", "SSLV3_ALERT_HANDSHAKE_FAILURE"}
-                return "TLS_HANDSHAKE_FAILURE " + (reason if reason in allowed else "OTHER")
+                known_classes = {"SSLEOFError", "SSLCertVerificationError", "SSLZeroReturnError", "SSLError"}
+                category = type(exc).__name__ if type(exc).__name__ in known_classes else "SSLError"
+                return "TLS_HANDSHAKE_FAILURE " + category + " " + (
+                    reason if reason in allowed else "OTHER"
+                )
     except (TimeoutError, socket.timeout):
         return "NETWORK_TIMEOUT"
     except (ConnectionRefusedError, ConnectionResetError):
