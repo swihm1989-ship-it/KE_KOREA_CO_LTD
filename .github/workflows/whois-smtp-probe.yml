@@ -1,0 +1,22 @@
+name: Whois SMTP network-only comparison
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/whois-smtp-probe.yml'
+      - 'Quotation_KEKOREA/orchestration/tools/smtp_network_probe.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  independent-network-probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: DNS, SMTP EHLO and STARTTLS without authentication or sending
+        run: python Quotation_KEKOREA/orchestration/tools/smtp_network_probe.py
