@@ -20,6 +20,10 @@ class StreamlitMockUiTests(unittest.TestCase):
                      return_value="test@example.com")
         gate.start()
         self.addCleanup(gate.stop)
+        news = patch("Quotation_KEKOREA.orchestration.ui.market_news_page._cached_news",
+                     return_value=([], None))
+        news.start()
+        self.addCleanup(news.stop)
 
     def _app(self):
         app = AppTest.from_file(str(UI_FILE), default_timeout=15).run()

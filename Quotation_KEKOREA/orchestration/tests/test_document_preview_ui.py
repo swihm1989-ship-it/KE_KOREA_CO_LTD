@@ -19,6 +19,10 @@ class PreviewUITest(unittest.TestCase):
                      return_value="test@example.com")
         gate.start()
         self.addCleanup(gate.stop)
+        news = patch("Quotation_KEKOREA.orchestration.ui.market_news_page._cached_news",
+                     return_value=([], None))
+        news.start()
+        self.addCleanup(news.stop)
 
     def test_trade_demo_preview_never_marks_final_or_sends(self):
         app = AppTest.from_file(str(UI), default_timeout=20).run()

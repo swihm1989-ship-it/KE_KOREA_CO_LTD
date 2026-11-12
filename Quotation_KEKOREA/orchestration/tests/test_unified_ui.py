@@ -17,6 +17,10 @@ class UnifiedUITests(unittest.TestCase):
                      return_value="test@example.com")
         gate.start()
         self.addCleanup(gate.stop)
+        news = patch("Quotation_KEKOREA.orchestration.ui.market_news_page._cached_news",
+                     return_value=([], None))
+        news.start()
+        self.addCleanup(news.stop)
 
     def test_prepare_review_and_email_review_gates(self):
         app = AppTest.from_file(str(PAGE), default_timeout=25).run()
