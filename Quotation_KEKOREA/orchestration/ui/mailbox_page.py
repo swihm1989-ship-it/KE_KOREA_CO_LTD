@@ -25,6 +25,7 @@ def _settings():
     values=dict(os.environ)
     try: values.update(dict(st.secrets))
     except (FileNotFoundError,KeyError): pass
+    values["WHOIS_MAIL_OWNER_EMAILS"] = ",".join(filter(None, (\n        str(values.get("WHOIS_MAIL_OWNER_EMAILS", "")),\n        str(values.get("WHOIS_MAIL_EXTRA_OWNER_EMAILS", "")),\n    )))
     return values
 
 
