@@ -1,6 +1,5 @@
 -- Fetch public RSS metadata within Supabase, independent of GitHub/Streamlit.
 create extension if not exists pg_net;
-revoke execute on all functions in schema net from public,anon,authenticated;
 create schema if not exists news_scheduler;
 revoke all on schema news_scheduler from public, anon, authenticated;
 create table if not exists news_scheduler.sources (
