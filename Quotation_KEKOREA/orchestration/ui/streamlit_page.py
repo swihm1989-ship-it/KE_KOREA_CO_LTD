@@ -51,10 +51,12 @@ with st.sidebar:
     st.markdown("### MASTER GRAPH")
     st.caption("KE KOREA CO. LTD · AI WORKSPACE")
     st.markdown("---")
-# A mailbox fragment can request navigation, but cannot update an already
-# instantiated sidebar widget. Consume its one-shot intent before radio render.
-from Quotation_KEKOREA.orchestration.workflows.mail_intake import consume_mail_navigation
-consume_mail_navigation(st.session_state)
+# A mailbox fragment requests a full rerun using a session-state flag.
+# Consume this before the sidebar radio exists. Do NOT import a newly added
+# workflow symbol here: Streamlit hot deployments may cache an older module and
+# a top-level ImportError would otherwise prevent the entire Master from loading.
+if st.session_state.pop("master_mail_navigation_pending", False):
+    st.session_state["master_page"] = "AI 업무 요청"
 page = st.sidebar.radio("업무 메뉴", ["시장 뉴스", "업무 대시보드", "메일함", "AI 업무 요청", "통합 업무 흐름", "문서 검토", "발송 대기", "엔진 사전검증", "문서 초안 미리보기", "저장된 계약서", "실행 기록", "관리자 모니터링"], label_visibility="collapsed", key="master_page")
 st.sidebar.divider()
 st.sidebar.caption("접속 계정: " + _authenticated_principal)
