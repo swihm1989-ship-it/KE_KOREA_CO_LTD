@@ -218,7 +218,7 @@ def approve_source_excerpts(repo, reference_id, approved_rows, *, explicit_appro
     if not unique:
         return {'chunks_added': 0, 'embedded': 0, 'total': len(current)}
     vectors = []
-    if env and (embedder or env.get('OPENAI_API_KEY')):
+    if embedder is not None or (env and env.get('OPENAI_API_KEY')):
         try:
             vectors = (embedder or embed_texts)(
                 [x.topic + '\n' + x.text for x in unique], env=env,
