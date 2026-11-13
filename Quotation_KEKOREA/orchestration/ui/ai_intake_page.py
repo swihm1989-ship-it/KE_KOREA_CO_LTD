@@ -736,10 +736,13 @@ def render_ai_intake(principal: str):
                 st.warning("거래조건이 변경되어 이전 PDF·Excel 파일을 무효화했습니다. 다시 생성하세요.")
             if export_bundle and export_bundle[0] == edited_key:
                 for kind, reason in export_bundle[2].items():
-                    st.warning(kind + " 출력 보류: " + reason)
+                    st.warning(kind + " 정식 양식 발행 보류: " + reason)
                 for kind, files in export_bundle[1].items():
                     with st.container(border=True):
-                        st.markdown("**" + kind + " · 기존 양식 검토용 문서**")
+                        title = ("미확정 내부 검토용 PDF (정식 발행 아님)"
+                                 if any(asset.get("review_only") for asset in files.values())
+                                 else "기존 KE KOREA 양식 검토용 문서")
+                        st.markdown("**" + kind + " · " + title + "**")
                         for fmt, file in files.items():
                             st.download_button(kind + " " + fmt.upper() + " DRAFT 다운로드",
                                                data=file["content"], file_name=file["filename"],
