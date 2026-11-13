@@ -585,9 +585,9 @@ def render_ai_intake(principal: str):
                 for question in analysis["questions"][:2]:
                     st.warning("필수 확인: " + str(question))
             if analysis.get("issues"):
-                with st.expander("추가 AI 검토 사항"):
-                    for issue in analysis["issues"]:
-                        st.write(str(issue.get("message") or issue))
+                st.markdown("**추가 AI 검토 사항**")
+                for issue in analysis["issues"]:
+                    st.write(str(issue.get("message") or issue))
         st.caption("모든 금액·수량·법인명은 원문과 대조해야 합니다. AI 제안만으로 최종 문서 승인은 할 수 없습니다.")
         if st.button("기존 엔진용 초안 입력 만들기", key="ai_intake_build_candidates"):
             try:
