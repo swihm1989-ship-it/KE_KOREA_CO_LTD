@@ -63,6 +63,24 @@ class MailIntakePolicyTests(unittest.TestCase):
         queue_handoff(state,mail,extract=True)
         self.assertFalse(consume_pending(state,text+'CHANGED'))
 
+    def test_unified_mail_handoff_does_not_start_ai_or_grant_consent(self):
+        from Quotation_KEKOREA.orchestration.workflows.mail_intake import queue_handoff
+        from Quotation_KEKOREA.orchestration.adapters.whois_mail import MailMessage
+        message = MailMessage('synthetic-uid', subject='BIPV MoU',
+                              body='양해각서 수정 요청 및 협의')
+        files = [{'name': 'test.pdf', 'mime_type': 'application/pdf',
+                  'data': b'FAKE_SYNTHETIC_PDF'}]
+        state = {'master_page': '메일함', 'ai_intake_consent': True,
+                 'ai_intake_mail_pending': {'token': 'old'}}
+        queue_handoff(state, message, extract=False, requested=['CONTRACT'],
+                      attachments=files, navigate=False)
+        self.assertEqual(state['master_page'], '메일함')
+        self.assertEqual(state['ai_intake_mail_source']['kinds'], ['CONTRACT'])
+        self.assertFalse(state['ai_intake_consent'])
+        self.assertNotIn('ai_intake_mail_pending', state)
+        self.assertEqual(state['ai_intake_mail_attachments'], files)
+        self.assertIn('양해각서', state['ai_intake_instruction'])
+
     def test_fragment_handoff_defers_sidebar_navigation_until_full_app_rerun(self):
         from Quotation_KEKOREA.orchestration.workflows.mail_intake import (
             queue_handoff, consume_mail_navigation, consume_pending,
