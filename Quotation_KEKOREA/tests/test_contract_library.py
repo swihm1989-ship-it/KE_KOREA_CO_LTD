@@ -127,6 +127,82 @@ class ContractLibraryTests(unittest.TestCase):
         set_sample_active(self.repo, row['id'], False)
         self.assertEqual(search_library(self.repo, {'contract_type': 'sale'}, 'quality', env={}, embedder=embed)['references'], [])
 
+    def test_batch_backfill_only_missing_vectors_keeps_approved_content(self):
+        from Quotation_KEKOREA.contracts.library import (
+            publish_sample, backfill_library_embeddings, library_embedding_status,
+            read_manifest, search_library,
+        )
+        row = self.stage()
+        self.publish(row)
+        original = read_manifest(self.repo.rows[row['id']])
+        self.assertEqual(library_embedding_status(
+            self.repo.list_library_records(approved_only=True))['missing'], 1)
+
+        def embed(texts, **kwargs):
+            return [[1.0] + [0.0] * 511 for _ in texts]
+
+        result = backfill_library_embeddings(self.repo, env={}, embedder=embed)
+        self.assertEqual(result['chunks_updated'], 1)
+        self.assertEqual(result['remaining'], 0)
+        indexed = read_manifest(self.repo.rows[row['id']])
+        self.assertEqual(indexed.chunks[0].text, original.chunks[0].text)
+        self.assertEqual(indexed.chunks[0].topic, original.chunks[0].topic)
+        self.assertEqual(len(indexed.chunks[0].embedding), 512)
+        self.assertEqual(backfill_library_embeddings(
+            self.repo, env={}, embedder=embed)['chunks_updated'], 0)
+        found = search_library(self.repo, {'contract_type': 'sale'},
+                               'quality acceptance', env={}, embedder=embed)
+        self.assertEqual(found['mode'], 'hybrid')
+        self.assertEqual(len(found['references']), 1)
+
+    def test_backfill_invalid_vectors_preserves_all_document_revisions(self):
+        from Quotation_KEKOREA.contracts.library import (
+            backfill_library_embeddings, read_manifest,
+        )
+        first = self.stage()
+        self.publish(first)
+        before = deepcopy(self.repo.rows[first['id']])
+        with self.assertRaisesRegex(ValueError, 'verification'):
+            backfill_library_embeddings(self.repo, env={},
+                                        embedder=lambda texts, **kwargs: [[0.0] * 512 for _ in texts])
+        self.assertEqual(self.repo.rows[first['id']], before)
+        self.assertFalse(read_manifest(self.repo.rows[first['id']]).chunks[0].embedding)
+
+    def test_topic_search_uses_one_batched_embedding_request_and_keyword_fallback(self):
+        from Quotation_KEKOREA.contracts.library import (
+            publish_sample, search_library_topics,
+        )
+        row = self.stage()
+        embed = lambda texts, **kwargs: [[1.0] + [0.0] * 511 for _ in texts]
+        publish_sample(
+            self.repo, row['id'],
+            [{'locator': 'paragraph 1', 'topic': 'inspection',
+              'text': 'Confirm inspection and acceptance before transfer of goods.'}],
+            env={}, embedder=embed,
+        )
+        requests = []
+
+        def counted(texts, **kwargs):
+            requests.append(list(texts))
+            return embed(texts, **kwargs)
+
+        result = search_library_topics(
+            self.repo, {'contract_type': 'sale'},
+            [{'query': 'inspection acceptance'}, {'query': 'acceptance process'}],
+            env={}, embedder=counted,
+        )
+        self.assertEqual(len(requests), 1)
+        self.assertEqual(len(requests[0]), 2)
+        self.assertEqual(result['mode'], 'hybrid')
+        self.assertTrue(result['references'])
+        fallback = search_library_topics(
+            self.repo, {'contract_type': 'sale'},
+            [{'query': 'inspection'}], env={},
+            embedder=lambda texts, **kwargs: (_ for _ in ()).throw(RuntimeError('offline')),
+        )
+        self.assertEqual(fallback['mode'], 'keyword')
+        self.assertTrue(fallback['references'])
+
     def test_repository_queries_cannot_mix_contract_and_library_references(self):
         calls = []
         def opener(request, timeout):
