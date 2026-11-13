@@ -356,6 +356,7 @@ def generate_reviewed_draft(snapshot, preferred_clauses, *, env, reference_conte
     plan = build_drafting_plan(original)
     references = deepcopy(reference_context or [])
     library_sources = deepcopy(initial_library_sources or []) if use_library else []
+    context_review = {'status': 'not_requested', 'decisions': [], 'issues': []}
     # Previously retrieved guidance is not implicit consent to send it again.
     original.pop('library_sources', None)
     if repo is not None and use_library:
@@ -364,6 +365,62 @@ def generate_reviewed_draft(snapshot, preferred_clauses, *, env, reference_conte
         library = search_library_topics(repo, original, plan['topics'], env=env)
         references.extend(library['references'])
         library_sources.extend(library['sources'])
+        from Quotation_KEKOREA.contracts.contextual_rag import (
+            build_comparison_candidates, compare_approved_clauses,
+        )
+        # The search may return generic review notes. Never pass raw originals;
+        # only explicitly approved and source-hash-verified excerpts qualify.
+        records = repo.list_library_records(approved_only=True)
+        candidate_groups = build_comparison_candidates(
+            records, library['sources'], plan,
+        )
+        if any(len(group['candidates']) >= 2 for group in candidate_groups):
+            report('유사 계약서 조항·앞뒤 문맥 교차 비교')
+            context_review = compare_approved_clauses(
+                original, candidate_groups, env=env, client=client,
+                timeout=remaining(),
+            )
+            if context_review['status'] == 'compared':
+                decisions = context_review['decisions']
+                accepted = {d['selected_id'] for d in decisions}
+                rejected = {alt for d in decisions for alt in d['alternatives']}
+                rejected -= accepted
+                if rejected:
+                    references = [r for r in references if r.get('id') not in rejected]
+                    library_sources = [src for src in library_sources
+                                       if src.get('id') not in rejected]
+                by_source = {
+                    c['reference_id']: c
+                    for group in candidate_groups for c in group['candidates']
+                }
+                for reference in references:
+                    candidate = by_source.get(reference.get('id'))
+                    if candidate and candidate['reference_id'] in accepted:
+                        extras = []
+                        for neighbor in candidate.get('neighbors') or []:
+                            extras.append(
+                                '[검토·승인된 인접 조항: ' + neighbor['relation']
+                                + ' / ' + neighbor['locator'] + ']\n'
+                                + neighbor['text'][:700]
+                            )
+                        if extras:
+                            reference['extracted_text'] = (
+                                reference['extracted_text']
+                                + '\n\n' + '\n\n'.join(extras)
+                            )[:4500]
+                for source in library_sources:
+                    choice = next(
+                        (d for d in decisions if d['selected_id'] == source.get('id')),
+                        None,
+                    )
+                    if choice:
+                        source['selected_reason'] = choice['reason']
+                        source['comparison_topic'] = choice['topic_key']
+                plan['source_comparison'] = deepcopy(decisions)
+        elif candidate_groups:
+            context_review = {
+                'status': 'single_source', 'decisions': [], 'issues': [],
+            }
     references = select_topic_references(references, plan)
     report('AI 계약서 초안 작성 (API 응답 대기)')
     draft = generate_draft(original, preferred_clauses, env=env, reference_context=references,
@@ -420,7 +477,22 @@ def generate_reviewed_draft(snapshot, preferred_clauses, *, env, reference_conte
             'message': 'AI 품질검사 인용을 검증하지 못했습니다. 초안은 검토용으로 보존하며, 재검토 전에는 최종 계약서로 확정할 수 없습니다.',
             'confirmed': False,
         })
-    draft['draft_quality'] = {'version': 1, 'checks': checks, 'legal_certification': False}
+    # Comparison findings are advisory, never an automatic contract approval.
+    for decision in context_review.get('decisions') or []:
+        for index, conflict in enumerate(decision.get('conflicts') or []):
+            draft['issues'].append({
+                'id': 'rag_cross_document_' + decision['topic_key'] + '_' + str(index),
+                'code': 'rag_cross_document_review', 'severity': 'confirm',
+                'message': conflict, 'confirmed': False,
+            })
+    draft['draft_quality'] = {
+        'version': 1, 'checks': checks, 'legal_certification': False,
+        'source_comparison': {
+            'status': context_review['status'],
+            'decisions': context_review.get('decisions') or [],
+            'issues': context_review.get('issues') or [],
+        },
+    }
     # Only report sources actually sent to generation; do not disclose unselected originals.
     used = {r['id'] for r in references}
     draft['library_sources'] = list({s['id']: s for s in library_sources if s['id'] in used}.values())
