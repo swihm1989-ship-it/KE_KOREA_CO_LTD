@@ -15,6 +15,53 @@ def analysis(quantity='2325860', price='$0.2/pc', unit='', currency=''):
 
 
 class CommercialIntakeTests(unittest.TestCase):
+    def test_scalar_seller_and_buyer_do_not_crash_existing_trade_validation(self):
+        from Quotation_KEKOREA.orchestration.workflows.commercial_values import normalize_trade_values
+        source = {"document_type": "PI", "product_family": "solar_cell",
+                  "seller": "KE KOREA CO. LTD", "buyer": "Smart Solar Systems Co. Ltd",
+                  "currency": "USD", "items": [{"product_name": "Synthetic solar cell",
+                  "quantity": "10", "unit": "PCS", "unit_price": "0.2",
+                  "price_basis": "PCS"}]}
+        original = copy.deepcopy(source)
+        normalized = normalize_trade_values(source)
+        self.assertEqual(source, original)
+        self.assertEqual(normalized["seller"]["legal_name"], "KE KOREA CO. LTD")
+        self.assertEqual(normalized["buyer"]["legal_name"], "Smart Solar Systems Co. Ltd")
+        self.assertEqual(normalized["seller"]["address"], "")
+        self.assertIn("Buyer address is required",
+                      validate_and_calculate(normalized)["blocking_issues"])
+        self.assertIn("Seller address is required",
+                      validate_and_calculate(normalized)["blocking_issues"])
+        self.assertNotIn("address", normalized["seller"]["legal_name"])
+
+    def test_live_answer_repairs_scalar_parties_across_all_document_types(self):
+        source = {"PI": {"seller": "KE KOREA CO. LTD",
+                         "buyer": "Smart Solar Systems Co. Ltd",
+                         "currency": "USD", "items": [{"product_name": "Cell", "quantity": "2"}]},
+                  "PO": {"seller": None, "buyer": "KE KOREA CO. LTD",
+                         "items": [{"product_name": "Cell"}]}}
+        original = copy.deepcopy(source)
+        updated = apply_answer(source, "seller.address",
+                               "Synthetic seller address")
+        self.assertEqual(source, original)
+        for kind in ("PI", "PO"):
+            self.assertEqual(updated[kind]["seller"]["address"],
+                             "Synthetic seller address")
+        self.assertEqual(updated["PI"]["seller"]["legal_name"],
+                         "KE KOREA CO. LTD")
+        self.assertEqual(updated["PO"]["seller"]["legal_name"], "")
+        gaps = [field.key for field in missing_fields(updated)]
+        self.assertNotIn("seller.address", gaps)
+
+    def test_nontext_party_values_are_not_treated_as_approved_identity(self):
+        from Quotation_KEKOREA.orchestration.workflows.commercial_values import normalize_trade_values
+        normalized = normalize_trade_values({
+            "buyer": ["unverified-name"], "seller": {"legal_name": 12345,
+            "address": {"not": "a string"}}, "items": []})
+        self.assertEqual(normalized["buyer"]["legal_name"], "")
+        self.assertEqual(normalized["seller"]["legal_name"], "")
+        self.assertEqual(normalized["seller"]["address"], "")
+
     def test_explicit_price_denominator_supplies_unit_currency_and_numeric_price(self):
         for denominator in ('pc', 'piece', 'PCS', '장'):
             with self.subTest(denominator=denominator):

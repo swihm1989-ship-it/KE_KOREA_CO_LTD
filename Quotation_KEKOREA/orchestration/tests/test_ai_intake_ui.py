@@ -81,6 +81,53 @@ class AiIntakeUiTests(unittest.TestCase):
         self.assertEqual(len([x for x in app.text_input if x.label == "수량 단위"]), 1)
         self.assertFalse(any(x.key and x.key.startswith("master_pdf_") for x in app.text_input))
 
+    def test_historical_session_with_string_seller_renders_and_exports_review_pdf(self):
+        import hashlib
+        instruction = "Synthetic PI request"
+        digest = hashlib.sha256((instruction + "|한국어|solar_cell").encode()).hexdigest()
+        app = AppTest.from_file(str(PAGE), default_timeout=25).run()
+        app.radio[0].set_value("AI 업무 요청").run()
+        app.text_area(key="ai_intake_instruction").set_value(instruction).run()
+        app.session_state["ai_intake_candidates"] = (digest, {
+            "PI": {"document_type": "PI", "product_family": "solar_cell",
+                   "buyer": "Smart Solar Systems Co. Ltd",
+                   "seller": "KE KOREA CO. LTD", "currency": "USD",
+                   "items": [{"product_name": "Synthetic Solar Cell",
+                              "quantity": "100", "unit": "PCS",
+                              "unit_price": "0.2", "price_basis": "PCS"}]},
+            "PO": {"document_type": "PO", "product_family": "solar_cell",
+                   "buyer": {"legal_name": "KE KOREA CO. LTD",
+                             "address": "Test Seoul"},
+                   "seller": None, "currency": "USD", "items": []},
+        })
+        app.session_state["ai_intake_result"] = (digest, {
+            "parties": [], "terms": [], "issues": [], "questions": []})
+        app.run()
+        self.assertFalse(app.exception, [e.message for e in app.exception])
+        candidates = app.session_state["ai_intake_candidates"][1]
+        self.assertEqual(candidates["PI"]["seller"]["legal_name"],
+                         "KE KOREA CO. LTD")
+        self.assertEqual(candidates["PI"]["buyer"]["legal_name"],
+                         "Smart Solar Systems Co. Ltd")
+        self.assertEqual(candidates["PO"]["seller"]["legal_name"], "")
+        self.assertEqual(next(i for i in app.text_input
+                              if i.label == "Seller · 판매자 법인명").value,
+                         "KE KOREA CO. LTD")
+        next(i for i in app.text_input
+             if i.label == "Seller · 판매자 법인 주소").set_value(
+                 "Synthetic corrected company address").run()
+        self.assertFalse(app.exception, [e.message for e in app.exception])
+        self.assertEqual(app.session_state["ai_intake_candidates"][1]
+                         ["PI"]["seller"]["address"],
+                         "Synthetic corrected company address")
+        app.button(key="master_legacy_export").click().run()
+        self.assertFalse(app.exception, [e.message for e in app.exception])
+        pdf = app.session_state["master_legacy_files"][1]["PI"]["pdf"]
+        self.assertTrue(pdf["content"].startswith(b"%PDF"))
+        self.assertTrue(pdf["review_only"])
+        self.assertFalse(pdf["final"])
+        self.assertFalse(pdf["sendable"])
+
     def test_real_ai_request_shows_fillable_buyer_and_seller_and_syncs_both(self):
         analysis = {
             "contract_type": "sale", "parties": [], "questions": [],

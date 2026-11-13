@@ -129,6 +129,9 @@ def apply_answer(candidates: Mapping[str, Any], key: str, value: str, *, allow_b
     for kind, doc in revised.items():
         if kind not in {"PI", "PO", "CI", "PL"} or not isinstance(doc, dict):
             continue
+        # Keep legacy scalar party shapes from breaking the one-field editor.
+        doc = normalize_trade_values(doc)
+        revised[kind] = doc
         if "." in key:
             group, field = key.split(".", 1)
             if group in {"buyer", "seller"}:
