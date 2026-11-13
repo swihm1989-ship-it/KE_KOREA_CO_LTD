@@ -37,6 +37,25 @@ class MailboxUiTests(unittest.TestCase):
             self.assertEqual(len(fingerprint), 12)
             self.assertFalse(mailbox_page._ensure_smtp_adapter_current())
 
+    def test_stale_pop_diagnostic_revision_triggers_reload(self):
+        from Quotation_KEKOREA.orchestration.ui import mailbox_page
+        from Quotation_KEKOREA.orchestration.adapters import whois_mail
+        with (patch.object(whois_mail, "POP_DIAGNOSTIC_REVISION", "stale-pop-version"),
+              patch.object(mailbox_page.st, "session_state", {})):
+            self.assertTrue(mailbox_page._ensure_smtp_adapter_current())
+            self.assertEqual(whois_mail.POP_DIAGNOSTIC_REVISION,
+                             "pop-health-20261113-v2")
+            self.assertTrue(callable(whois_mail.probe_pop_diagnostics))
+            self.assertFalse(mailbox_page._ensure_smtp_adapter_current())
+
+    def test_missing_pop_diagnostic_symbol_triggers_reload(self):
+        from Quotation_KEKOREA.orchestration.ui import mailbox_page
+        from Quotation_KEKOREA.orchestration.adapters import whois_mail
+        with (patch.object(whois_mail, "probe_pop_diagnostics", None),
+              patch.object(mailbox_page.st, "session_state", {})):
+            self.assertTrue(mailbox_page._ensure_smtp_adapter_current())
+            self.assertTrue(callable(whois_mail.probe_pop_diagnostics))
+
     def test_smtp_runtime_diagnostic_reports_loaded_callable_without_secrets(self):
         from Quotation_KEKOREA.orchestration.ui.mailbox_page import _smtp_runtime_diagnostics
         revision, fingerprint, current = _smtp_runtime_diagnostics()
