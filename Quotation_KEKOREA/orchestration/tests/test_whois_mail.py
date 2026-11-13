@@ -146,6 +146,47 @@ class WhoisMailTests(unittest.TestCase):
         self.assertNotIn('private-test-password',repr(report))
         rejected.dele.assert_not_called()
 
+    def test_pop_cross_diagnostic_isolated_samples_and_no_message_disclosure(self):
+        endpoint = mail.mail_config(CONFIG, 'owner@example.com').pop
+        clients = [Mock() for _ in range(4)]
+        uidl = (b'+OK', [b'1 secret-old', b'2 secret-middle', b'3 secret-new'], 0)
+        listing = (b'+OK', [b'1 100', b'2 100', b'3 100'], 0)
+        for client in clients:
+            client.uidl.return_value = uidl
+            client.list.return_value = listing
+            client.top.return_value = (b'+OK', [b'PRIVATE MESSAGE HEADER'], 0)
+            client.retr.return_value = (b'+OK', [b'PRIVATE MESSAGE BODY'], 20)
+        clients[1].retr.side_effect = mail.poplib.error_proto('-ERR private-test-password')
+        clients[1].top.side_effect = mail.poplib.error_proto('-ERR unsupported private')
+        with patch.object(mail.poplib, 'POP3_SSL', side_effect=clients):
+            result = mail.probe_pop_cross_diagnostics(endpoint)
+        self.assertEqual(result['message_count'], 3)
+        self.assertEqual([row['position'] for row in result['samples']],
+                         ['newest', 'middle', 'oldest'])
+        self.assertEqual([row['retr'] for row in result['samples']],
+                         ['server_rejected', 'success', 'success'])
+        self.assertEqual(result['samples'][0]['top'],
+                         'server_rejected_or_unsupported')
+        self.assertNotIn('PRIVATE MESSAGE', repr(result))
+        self.assertNotIn('private-test-password', repr(result))
+        self.assertNotIn('secret-new', repr(result))
+        for client in clients:
+            client.dele.assert_not_called()
+            client.quit.assert_called_once()
+        self.assertEqual([clients[i].retr.call_args.args[0] for i in range(1, 4)],
+                         [3, 2, 1])
+
+    def test_pop_cross_diagnostic_empty_mailbox_does_not_read_messages(self):
+        endpoint = mail.mail_config(CONFIG, 'owner@example.com').pop
+        client = Mock()
+        client.uidl.return_value = (b'+OK', [], 0)
+        with patch.object(mail.poplib, 'POP3_SSL', return_value=client):
+            result = mail.probe_pop_cross_diagnostics(endpoint)
+        self.assertEqual(result, {'message_count': 0, 'samples': []})
+        client.retr.assert_not_called()
+        client.top.assert_not_called()
+        client.dele.assert_not_called()
+
     def test_smtp_authentication_error_is_classified_without_secret(self):
         client=Mock()
         client.login.side_effect=mail.smtplib.SMTPAuthenticationError(535,b'private-test-password')
