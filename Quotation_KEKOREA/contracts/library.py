@@ -207,7 +207,7 @@ def _tokens(text):
 
 
 def search_library(repo, snapshot, query, *, env, embedder=None, limit=6,
-                   records=None, keyword_only=False):
+                   records=None, keyword_only=False, query_vector=None):
     records = repo.list_library_records(approved_only=True) if records is None else records
     candidates, notices = [], []
     if len(records) >= 500:
@@ -227,12 +227,18 @@ def search_library(repo, snapshot, query, *, env, embedder=None, limit=6,
     vector = None
     model = env.get('CONTRACT_LIBRARY_EMBEDDING_MODEL') or DEFAULT_MODEL
     try:
-        if keyword_only or (not embedder and not env.get('OPENAI_API_KEY')):
-            raise ValueError('Not configured')
-        vector = (embedder or embed_texts)([query], env=env)[0]
+        if keyword_only:
+            raise ValueError('Keyword search requested')
+        if query_vector is not None:
+            vector = query_vector
+        else:
+            if not embedder and not env.get('OPENAI_API_KEY'):
+                raise ValueError('Embedding API unavailable')
+            vector = (embedder or embed_texts)([query], env=env)[0]
         if not vector or any(not math.isfinite(v) for v in vector) or not any(vector):
             raise ValueError('Invalid query vector')
     except (RuntimeError, ValueError, IndexError):
+        vector = None
         if not keyword_only:
             notices.append('의미 검색을 사용할 수 없어 키워드로 참고 조항을 검색했습니다.')
     query_tokens = _tokens(query)
@@ -269,15 +275,153 @@ def search_library(repo, snapshot, query, *, env, embedder=None, limit=6,
             'notices': list(dict.fromkeys(notices))}
 
 
-def search_library_topics(repo, snapshot, topics, *, env):
-    """One approved-record read; local per-topic search adds no embedding API calls."""
+def search_library_topics(repo, snapshot, topics, *, env, embedder=None):
+    """One approved-record read and at most one batched query-embedding request.
+
+    Do not embed every topic independently: this is the cost-bounded retrieval
+    path used by new contract drafts. Keep keyword fallback for outages and
+    records not yet indexed. No raw original contract is sent to embeddings.
+    """
     records = repo.list_library_records(approved_only=True)
-    references, sources = {}, {}
+    references, sources, notices = {}, {}, []
+    model = env.get('CONTRACT_LIBRARY_EMBEDDING_MODEL') or DEFAULT_MODEL
+    matching_index = False
+    for record in records[:500]:
+        try:
+            manifest = read_manifest(record)
+        except ValueError:
+            continue
+        if (record.get('extraction_status') == 'library_approved'
+                and manifest.approved and manifest.active
+                and snapshot.get('contract_type') in manifest.contract_types
+                and manifest.embedding_model == model
+                and any(len(c.embedding) == DIMENSIONS for c in manifest.chunks)):
+            matching_index = True
+            break
+    queries = list(dict.fromkeys(str(t['query'])[:6000] for t in topics if t.get('query')))
+    vectors = {}
+    if matching_index and queries and (embedder is not None or env.get('OPENAI_API_KEY')):
+        try:
+            for start in range(0, len(queries), 64):
+                batch = queries[start:start + 64]
+                computed = (embedder or embed_texts)(batch, env=env)
+                if len(computed) != len(batch) or any(
+                        len(v) != DIMENSIONS or not any(v) or
+                        any(not math.isfinite(n) for n in v) for v in computed):
+                    raise ValueError('Invalid topic embedding vectors')
+                vectors.update(zip(batch, computed))
+        except (RuntimeError, ValueError, IndexError, TypeError):
+            vectors = {}
+            notices.append('주제별 의미 검색이 실패해 키워드 검색을 사용했습니다.')
     for topic in topics:
-        result = search_library(repo, snapshot, topic['query'], env=env, records=records,
-                                keyword_only=True, limit=3)
+        query = str(topic['query'])[:6000]
+        vector = vectors.get(query)
+        result = search_library(repo, snapshot, query, env=env, records=records,
+                                keyword_only=vector is None, query_vector=vector, limit=3)
         for reference in result['references']:
             references[reference['id']] = reference
         for source in result['sources']:
             sources[source['id']] = source
-    return {'references': list(references.values()), 'sources': list(sources.values())}
+    return {'references': list(references.values()), 'sources': list(sources.values()),
+            'mode': 'hybrid' if vectors else 'keyword', 'notices': notices}
+
+
+def library_embedding_status(records, *, model=DEFAULT_MODEL):
+    """Counts only approved, active searchable guidance; never exposes source text."""
+    result = {'documents': 0, 'chunks': 0, 'embedded': 0, 'missing': 0,
+              'documents_missing': 0, 'documents_without_source_text': 0}
+    for record in records[:500]:
+        try:
+            manifest = read_manifest(record)
+        except ValueError:
+            continue
+        if (record.get('extraction_status') != 'library_approved'
+                or not manifest.approved or not manifest.active):
+            continue
+        result['documents'] += 1
+        result['chunks'] += len(manifest.chunks)
+        if not str(record.get('extracted_text') or '').strip():
+            result['documents_without_source_text'] += 1
+        missing = 0
+        for chunk in manifest.chunks:
+            if manifest.embedding_model == model and len(chunk.embedding) == DIMENSIONS:
+                result['embedded'] += 1
+            else:
+                missing += 1
+        result['missing'] += missing
+        result['documents_missing'] += int(missing > 0)
+    return result
+
+
+def backfill_library_embeddings(repo, *, env, embedder=None,
+                                document_limit=50, chunk_limit=256):
+    """Fill missing vectors for approved notes, without altering their text.
+
+    All model requests complete and vectors are validated before any DB write.
+    Storage and source text are never touched; updates use the manifest revision
+    as an optimistic concurrency guard. A retry is safe and idempotent.
+    """
+    model = env.get('CONTRACT_LIBRARY_EMBEDDING_MODEL') or DEFAULT_MODEL
+    if model not in {'text-embedding-3-small', 'text-embedding-3-large'}:
+        raise ValueError('Configure a supported library embedding model.')
+    if embedder is None and not env.get('OPENAI_API_KEY'):
+        raise ValueError('OPENAI_API_KEY 서버 설정이 필요합니다.')
+    if not 1 <= document_limit <= 500 or not 1 <= chunk_limit <= 512:
+        raise ValueError('Invalid embedding batch limits.')
+    records = repo.list_library_records(approved_only=True)
+    before = library_embedding_status(records, model=model)
+    selected, texts = [], []
+    for record in records[:500]:
+        try:
+            manifest = read_manifest(record)
+        except ValueError:
+            continue
+        if (record.get('extraction_status') != 'library_approved'
+                or not manifest.approved or not manifest.active):
+            continue
+        stale = manifest.embedding_model != model
+        indexes = [index for index, chunk in enumerate(manifest.chunks)
+                   if stale or len(chunk.embedding) != DIMENSIONS]
+        if not indexes:
+            continue
+        if len(selected) >= document_limit or len(texts) + len(indexes) > chunk_limit:
+            continue
+        selected.append((record, manifest, indexes))
+        texts.extend(manifest.chunks[i].topic + '\n' + manifest.chunks[i].text for i in indexes)
+    if not selected:
+        return {'documents_updated': 0, 'chunks_updated': 0, 'failed_documents': 0,
+                'remaining': before['missing'], 'without_source_text': before['documents_without_source_text']}
+    vectors = []
+    for start in range(0, len(texts), 64):
+        batch = texts[start:start + 64]
+        computed = (embedder or embed_texts)(batch, env=env)
+        if (len(computed) != len(batch) or any(
+                not isinstance(v, (list, tuple)) or len(v) != DIMENSIONS or
+                not any(v) or any(not isinstance(n, (float, int)) or not math.isfinite(n) for n in v)
+                for v in computed)):
+            raise ValueError('Embedding vector verification failed; database was not changed.')
+        vectors.extend(computed)
+    offset, updated, chunks_updated, failed = 0, 0, 0, 0
+    for record, manifest, indexes in selected:
+        prepared = manifest.model_copy(deep=True)
+        for i in indexes:
+            prepared.chunks[i].embedding = list(vectors[offset])
+            offset += 1
+        prepared.embedding_model = model
+        prepared.revision += 1
+        try:
+            repo.update_library_record(
+                record['id'],
+                {'source_locations': _locations(record, prepared)},
+                expected_revision=manifest.revision,
+            )
+        except ContractRepositoryError:
+            failed += 1
+            continue
+        updated += 1
+        chunks_updated += len(indexes)
+    after = library_embedding_status(repo.list_library_records(approved_only=True), model=model)
+    return {'documents_updated': updated, 'chunks_updated': chunks_updated,
+            'failed_documents': failed, 'remaining': after['missing'],
+            'without_source_text': after['documents_without_source_text']}
+
