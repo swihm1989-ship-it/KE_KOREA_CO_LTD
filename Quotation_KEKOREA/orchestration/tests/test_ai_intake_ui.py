@@ -81,6 +81,66 @@ class AiIntakeUiTests(unittest.TestCase):
         self.assertEqual(len([x for x in app.text_input if x.label == "수량 단위"]), 1)
         self.assertFalse(any(x.key and x.key.startswith("master_pdf_") for x in app.text_input))
 
+    def test_formal_pdf_error_explains_bank_seal_and_legacy_ai_notices(self):
+        from Quotation_KEKOREA.orchestration.ui.ai_intake_page import (
+            _formal_pdf_hold_reason,
+        )
+        self.assertIn("6/6", _formal_pdf_hold_reason(
+            "PI", ValueError("기존 업무 에이전트와 동일하게 PI 은행정보 6개 항목이 모두 필요합니다."), {}))
+        complete_bank = {("KEKOREA_USD_" + field): "set-in-test-only"
+                         for field in ("BENEFICIARY", "BANK_NAME", "BRANCH",
+                                       "SWIFT", "ACCOUNT_NUMBER", "BANK_ADDRESS")}
+        self.assertIn("0/6", _formal_pdf_hold_reason(
+            "PI", ValueError("PI 은행정보 6개 항목이 필요합니다"), complete_bank))
+        self.assertIn("회사 직인", _formal_pdf_hold_reason(
+            "PI", ValueError("검증된 KE KOREA 회사 직인이 필요합니다"), complete_bank))
+        self.assertIn("이전 AI", _formal_pdf_hold_reason(
+            "PI", ValueError("거래조건을 먼저 보완하세요: Resolve conflicting information"), complete_bank))
+        unknown = _formal_pdf_hold_reason(
+            "PI", ValueError("SECRET INTERNAL SERVER RESPONSE"), complete_bank)
+        self.assertNotIn("SECRET", unknown)
+        self.assertIn("렌더러", unknown)
+
+    def test_one_editor_resolves_only_user_acknowledged_historical_ai_notes(self):
+        import hashlib
+        instruction = "Synthetic PI request with confirmed details"
+        digest = hashlib.sha256((instruction + "|한국어|solar_cell").encode()).hexdigest()
+        candidate = {"document_type": "PI", "product_family": "solar_cell",
+                     "document_number": "DRAFT",
+                     "buyer": {"legal_name": "SYNTHETIC BUYER LTD",
+                               "address": "Seoul, South Korea"},
+                     "seller": {"legal_name": "KE KOREA CO. LTD",
+                                "address": "Seoul, South Korea"},
+                     "currency": "USD", "incoterms": "EXW Seoul",
+                     "payment_terms": "T/T in advance",
+                     "items": [{"product_name": "M10 test cell", "quantity": "100",
+                                "unit": "PCS", "unit_price": "0.20",
+                                "price_basis": "PCS"}],
+                     "missing_fields": ["Confirm buyer and seller official names"],
+                     "conflicts": ["Confirm payment date from original email"]}
+        app = AppTest.from_file(str(PAGE), default_timeout=25).run()
+        app.radio[0].set_value("AI 업무 요청").run()
+        app.text_area(key="ai_intake_instruction").set_value(instruction).run()
+        app.session_state["ai_intake_candidates"] = (digest, {"PI": candidate})
+        app.session_state["ai_intake_result"] = (
+            digest, {"parties": [], "terms": [], "issues": [], "questions": []}
+        )
+        app.run()
+        self.assertFalse(app.exception, [e.message for e in app.exception])
+        self.assertTrue(any("이전 AI 확인 기록" in x.message for x in app.warning))
+        self.assertEqual(len([x for x in app.button if x.label == "해소 확인"]), 2)
+        next(x for x in app.button if x.label == "해소 확인").click().run()
+        self.assertFalse(app.exception, [e.message for e in app.exception])
+        data = app.session_state["ai_intake_candidates"][1]["PI"]
+        self.assertEqual(len(data["missing_fields"]) + len(data["conflicts"]), 1)
+        next(x for x in app.button if x.label == "해소 확인").click().run()
+        self.assertFalse(app.exception, [e.message for e in app.exception])
+        data = app.session_state["ai_intake_candidates"][1]["PI"]
+        self.assertEqual(data["missing_fields"], [])
+        self.assertEqual(data["conflicts"], [])
+        self.assertEqual(data["buyer"]["legal_name"], "SYNTHETIC BUYER LTD")
+        self.assertEqual(data["seller"]["legal_name"], "KE KOREA CO. LTD")
+
     def test_historical_session_with_string_seller_renders_and_exports_review_pdf(self):
         import hashlib
         instruction = "Synthetic PI request"
