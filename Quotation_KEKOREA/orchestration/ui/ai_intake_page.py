@@ -32,6 +32,7 @@ from Quotation_KEKOREA.orchestration.workflows.document_assets import (
 FOLLOWUP_MODULE = "Quotation_KEKOREA.orchestration.workflows.intake_followups"
 PDF_EXPORT_MODULE = "Quotation_KEKOREA.orchestration.workflows.legacy_document_exports"
 PDF_EXPORT_REVISION = "review-pdf-safe-loader-20261113-v1"
+AI_INTAKE_REVISION = "ai-intake-hot-reload-20261113-v1"
 
 
 def _current_intake_followups():
