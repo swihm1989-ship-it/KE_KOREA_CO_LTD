@@ -64,6 +64,36 @@ class ContextualRagTests(unittest.TestCase):
             index_private_original(self.repo, self.source['id'])
         self.assertEqual(self.repo.rows[self.source['id']], before)
 
+    def test_sha_attested_previous_pdf_text_can_be_reused_without_ocr_reprocessing(self):
+        from Quotation_KEKOREA.contracts.contextual_rag import (
+            _restored_private_extraction,
+        )
+        sha = self.source['content_hash']
+        row = self.repo.get_library_record(self.source['id'])
+        row['extracted_text'] = (
+            '[page 1]\nArticle 1 Payment. The commission payment trigger '
+            'shall be evidenced by receipts.\n\n'
+            '[page 2]\nArticle 2 Dispute. The dispute process shall be '
+            'mutually determined by the parties.'
+        )
+        row['source_locations'].append({
+            'kind': 'private_text_extraction_v1', 'sha256': sha,
+            'pages': 2, 'extracted_pages': 2, 'unread_pages': [],
+            'review_required': True,
+        })
+        self.repo.save_reference(row)
+        with patch('Quotation_KEKOREA.contracts.contextual_rag.extract_reference') as extractor:
+            indexed = index_private_original(self.repo, self.source['id'])
+            extractor.assert_not_called()
+        self.assertEqual(indexed['status'], 'indexed')
+        self.assertEqual(indexed['extraction_status'], 'restored_requires_review')
+        self.assertEqual(indexed['sections'], 2)
+        current = self.repo.get_library_record(self.source['id'])
+        self.assertIn('Article 1 Payment', current['extracted_text'])
+        self.assertFalse(read_manifest(current).approved)
+        row['source_locations'][-1]['sha256'] = 'mismatch'
+        self.assertIsNone(_restored_private_extraction(row, sha))
+
     def test_explicit_approval_and_deidentification_required(self):
         index_private_original(self.repo, self.source['id'])
         before = deepcopy(self.repo.rows[self.source['id']])
