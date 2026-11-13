@@ -4,6 +4,7 @@ from __future__ import annotations
 from copy import deepcopy
 from hashlib import sha256
 from inspect import signature
+import hmac
 import importlib
 import json
 import os
@@ -32,7 +33,7 @@ from Quotation_KEKOREA.orchestration.workflows.document_assets import (
 FOLLOWUP_MODULE = "Quotation_KEKOREA.orchestration.workflows.intake_followups"
 PDF_EXPORT_MODULE = "Quotation_KEKOREA.orchestration.workflows.legacy_document_exports"
 PDF_EXPORT_REVISION = "review-pdf-safe-loader-20261113-v1"
-AI_INTAKE_REVISION = "ai-intake-hot-reload-20261113-v2"
+AI_INTAKE_REVISION = "ai-intake-hot-reload-20261113-v3"
 
 
 def _current_intake_followups():
@@ -280,6 +281,7 @@ def _apply_shared_input(digest: str, field: str, widget: str) -> None:
         return
     _remember_candidate_bundle(digest, updated)
     st.session_state.pop("master_legacy_files", None)
+    st.session_state.pop("master_contract_final_files", None)
     st.session_state["ai_intake_last_answer"] = field
     st.session_state.pop("ai_intake_followup_error", None)
 
@@ -340,6 +342,148 @@ def _apply_extra_item(digest: str, index: int, field: str, widget: str) -> None:
     st.session_state.pop("ai_intake_followup_error", None)
 
 
+def _edit_contract_fact(digest: str, section: str, identity: str,
+                        field: str, widget: str) -> None:
+    """Edit contract-specific facts in the same input card; revoke AI clauses."""
+    saved = st.session_state.get("ai_intake_candidates")
+    if not saved or saved[0] != digest or not isinstance(saved[1].get("CONTRACT"), dict):
+        return
+    value = str(st.session_state.get(widget) or "").strip()
+    if len(value) > 1500 or section not in {"party", "term"}:
+        st.session_state["ai_intake_followup_error"] = "계약조건 입력을 확인하세요."
+        return
+    updated = deepcopy(saved[1])
+    snapshot = updated["CONTRACT"]
+    if section == "term":
+        if field != "value":
+            return
+        term = next((t for t in snapshot.get("terms", [])
+                     if t.get("key") == identity), None)
+        if term is None:
+            term = {"key": identity, "value": "", "status": "missing",
+                    "source_refs": []}
+            snapshot.setdefault("terms", []).append(term)
+        term["value"] = value
+        term["status"] = "suggested" if value else "missing"
+    else:
+        if field not in {"legal_name", "address", "country"}:
+            return
+        party = next((p for p in snapshot.get("parties", [])
+                      if identity in p.get("roles", [])), None)
+        if party is None:
+            party = {"roles": [identity], "legal_name": "", "country": "",
+                     "address": "", "status": "missing", "source_refs": []}
+            snapshot.setdefault("parties", []).append(party)
+        party[field] = value
+        party["status"] = "suggested"
+    snapshot["clauses"] = []
+    _remember_candidate_bundle(digest, updated)
+    st.session_state.pop("master_legacy_files", None)
+    st.session_state.pop("master_contract_final_files", None)
+    st.session_state.pop("ai_intake_followup_error", None)
+
+
+def _confirm_contract_item(digest: str, section: str, index: int,
+                           expected: str) -> None:
+    saved = st.session_state.get("ai_intake_candidates")
+    if not saved or saved[0] != digest or not isinstance(saved[1].get("CONTRACT"), dict):
+        return
+    try:
+        from Quotation_KEKOREA.orchestration.workflows.master_contract_final import (
+            confirm_contract_record,
+        )
+        updated = deepcopy(saved[1])
+        updated["CONTRACT"] = confirm_contract_record(
+            updated["CONTRACT"], section, index, expected)
+    except (ImportError, ValueError, TypeError) as exc:
+        st.session_state["ai_intake_followup_error"] = (
+            "조건 확인 실패: " + str(exc)[:180] if not isinstance(exc, ImportError)
+            else "계약서 확인 모듈을 찾지 못했습니다. 앱을 재시작하세요.")
+        return
+    _remember_candidate_bundle(digest, updated)
+    st.session_state.pop("master_contract_final_files", None)
+    st.session_state.pop("ai_intake_followup_error", None)
+
+
+def _render_contract_confirmations(digest: str, snapshot: dict) -> None:
+    """Use the existing ONE editor for contract facts and explicit approvals."""
+    from Quotation_KEKOREA.contracts.rules import COMMON_REQUIRED, TYPE_REQUIRED, LABELS
+    from Quotation_KEKOREA.orchestration.workflows.intake_followups import TERM_MAP
+    roles = {"sale": ("buyer", "seller"),
+             "trade_commission": ("client", "intermediary", "commission_payer"),
+             "investment_commission": ("client", "fundraiser", "commission_payer")}
+    required_roles = roles.get(snapshot.get("contract_type"), ())
+    with st.expander("계약서 전용 조건 입력 · 개별 확정 (FINAL 발행 전)", expanded=False):
+        st.caption("입력값은 AI 제안 상태이며 자동으로 확정되지 않습니다. "
+                   "각 조건을 원문과 확인한 뒤 '확정'을 누르세요. "
+                   "계약조건을 수정하면 AI 작성 조항은 다시 생성해야 합니다.")
+        parties = snapshot.get("parties") or []
+        for role in required_roles:
+            match = next(((i, p) for i, p in enumerate(parties)
+                          if role in p.get("roles", [])), None)
+            idx, party = match if match else (None, {})
+            st.markdown("**" + LABELS.get(role, role) + "**")
+            if role not in {"buyer", "seller"}:
+                for field, label in (("legal_name", "법인명"), ("address", "주소"),
+                                     ("country", "설립국")):
+                    widget = f"ai_intake_shared_{digest[:12]}_contract_{role}_{field}"
+                    kwargs = {} if widget in st.session_state else {
+                        "value": str(party.get(field) or "")}
+                    st.text_input(role + " · " + label, key=widget,
+                                  on_change=_edit_contract_fact,
+                                  args=(digest, "party", role, field, widget), **kwargs)
+            else:
+                st.caption("회사명·주소·설립국은 위 공통 입력란에서 수정할 수 있습니다.")
+            present = bool(party) and all(str(party.get(field) or "").strip()
+                                           for field in ("legal_name", "address", "country"))
+            if idx is not None:
+                expected = json.dumps(
+                    {"roles": party.get("roles"), "legal_name": party.get("legal_name"),
+                     "address": party.get("address"), "country": party.get("country")},
+                    ensure_ascii=False, sort_keys=True)
+                if party.get("status") == "confirmed":
+                    st.caption("확정됨")
+                else:
+                    st.button(role + " · 당사자 확정", disabled=not present,
+                              key=f"ai_contract_confirm_party_{digest[:12]}_{idx}",
+                              on_click=_confirm_contract_item,
+                              args=(digest, "parties", idx, expected))
+            else:
+                st.warning(role + " 당사자 정보를 먼저 입력하세요.")
+
+        existing = snapshot.get("terms") or []
+        required = tuple(COMMON_REQUIRED) + tuple(TYPE_REQUIRED.get(
+            snapshot.get("contract_type"), ()))
+        keys = list(dict.fromkeys(
+            [k for k in required if k not in required_roles] +
+            [str(term.get("key")) for term in existing if term.get("key")]))
+        shared_keys = set(TERM_MAP.values())
+        for key in keys:
+            match = next(((i, term) for i, term in enumerate(existing)
+                          if term.get("key") == key), None)
+            idx, term = match if match else (None, {})
+            value = str(term.get("value") or "")
+            if key not in shared_keys:
+                widget = f"ai_intake_shared_{digest[:12]}_contract_term_{key}"
+                kwargs = {} if widget in st.session_state else {"value": value}
+                st.text_input(LABELS.get(key, key), key=widget,
+                              on_change=_edit_contract_fact,
+                              args=(digest, "term", key, "value", widget), **kwargs)
+            else:
+                st.caption(LABELS.get(key, key) + ": " + (value or "미입력") +
+                           " (위 공통 입력란에서 변경)")
+            if idx is not None and value.strip():
+                if term.get("status") == "confirmed":
+                    st.caption("확정됨")
+                else:
+                    st.button(key + " · 조건 확정",
+                              key=f"ai_contract_confirm_term_{digest[:12]}_{idx}",
+                              on_click=_confirm_contract_item,
+                              args=(digest, "terms", idx, value))
+            elif idx is None:
+                st.caption("미입력 · 위 칸에서 내용을 입력하세요.")
+
+
 def _render_single_editor(digest: str, candidates: dict) -> None:
     """One editor is the source of truth for trade/contract and PDF output."""
     trade = next((doc for kind, doc in candidates.items()
@@ -357,6 +501,11 @@ def _render_single_editor(digest: str, candidates: dict) -> None:
             fields = [(k, label) for k, label in fields if k != "shipment_reference"]
         if "CI" not in requested_kinds:
             fields = [(k, label) for k, label in fields if k != "country_of_origin"]
+    if isinstance(candidates.get("CONTRACT"), dict):
+        for country_field, country_label in (("buyer.country", "Buyer · 설립국"),
+                                             ("seller.country", "Seller · 설립국")):
+            if not any(key == country_field for key, _ in fields):
+                fields.append((country_field, country_label))
     with st.container(border=True):
         st.markdown("#### ✏️ 거래정보 입력 · 수정 (한 번만)")
         st.caption("한 곳에서 입력한 값이 PI/PO/CI/PL·계약서 후보와 PDF 입력에 함께 반영됩니다. Enter 또는 칸 이동 시 자동 저장됩니다.")
@@ -383,6 +532,8 @@ def _render_single_editor(digest: str, candidates: dict) -> None:
                     "value": str(row.get(field) or "")}
                 st.text_input(label, key=widget, on_change=_apply_extra_item,
                               args=(digest, index, field, widget), **kwargs)
+        if isinstance(candidates.get("CONTRACT"), dict):
+            _render_contract_confirmations(digest, candidates["CONTRACT"])
         # AI may leave free-text conflicts/missing notes that do NOT disappear
         # when required input widgets are filled. Never silently discard them.
         unresolved = [
