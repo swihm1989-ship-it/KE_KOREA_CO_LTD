@@ -85,7 +85,7 @@ class WhoisMailTests(unittest.TestCase):
             messages=mail.fetch_messages(endpoint,limit=2)
         self.assertEqual([m.uid for m in messages],['uid-b','uid-a'])
         self.assertTrue(all('100 PCS' in m.body for m in messages))
-        self.assertEqual([call.args[0] for call in retry.retr.call_args_list],[7,8])
+        self.assertEqual([call.args[0] for call in retry.retr.call_args_list],[8,7])
         self.assertEqual(initial.quit.call_count,1)
         self.assertEqual(retry.quit.call_count,1)
         initial.dele.assert_not_called()
@@ -108,6 +108,63 @@ class WhoisMailTests(unittest.TestCase):
         self.assertEqual(retry.retr.call_count,1)
         initial.dele.assert_not_called()
         retry.dele.assert_not_called()
+
+    def test_poisoned_newest_does_not_block_recovered_recent_messages(self):
+        endpoint = mail.mail_config(CONFIG, 'owner@example.com').pop
+        initial, retry = Mock(), Mock()
+        raw = message()
+        uidl = (b'+OK', [str(n).encode()+b' uid-'+str(n).encode()
+                            for n in range(1, 6)], 0)
+        sizes = (b'+OK', [str(n).encode()+b' 200'
+                             for n in range(1, 6)], 0)
+        for client in (initial, retry):
+            client.uidl.return_value = uidl
+            client.list.return_value = sizes
+        # A bad newest mail causes the POP3 server to reject all later
+        # requests in that first connection.
+        initial.retr.side_effect = mail.poplib.error_proto('-ERR PRIVATE')
+        def later_retr(number):
+            if number == 5:
+                raise mail.poplib.error_proto('-ERR PRIVATE')
+            return (b'+OK', raw.splitlines(), len(raw))
+        retry.retr.side_effect = later_retr
+        with patch.object(mail.poplib, 'POP3_SSL', side_effect=[initial, retry]):
+            result = mail.fetch_messages(endpoint, limit=5)
+        self.assertEqual([m.uid for m in result],
+                         ['uid-4', 'uid-3', 'uid-2', 'uid-1'])
+        self.assertTrue(all('100 PCS' in m.body for m in result))
+        self.assertEqual([c.args[0] for c in retry.retr.call_args_list],
+                         [1, 2, 3, 4, 5])
+        initial.dele.assert_not_called()
+        retry.dele.assert_not_called()
+        initial.quit.assert_called_once()
+        retry.quit.assert_called_once()
+
+    def test_older_lookback_recovers_when_first_five_are_unreadable(self):
+        endpoint = mail.mail_config(CONFIG, 'owner@example.com').pop
+        clients = [Mock() for _ in range(5)]
+        raw = message()
+        uidl = (b'+OK', [str(n).encode()+b' uid-'+str(n).encode()
+                            for n in range(1, 19)], 0)
+        sizes = (b'+OK', [str(n).encode()+b' 200'
+                             for n in range(1, 19)], 0)
+        for client in clients:
+            client.uidl.return_value = uidl
+            client.list.return_value = sizes
+            client.retr.return_value = (b'+OK', raw.splitlines(), len(raw))
+        for client in clients[:3]:
+            client.retr.side_effect = mail.poplib.error_proto('-ERR PRIVATE')
+        with patch.object(mail.poplib, 'POP3_SSL', side_effect=clients) as connection:
+            result = mail.fetch_messages(endpoint, limit=5)
+        self.assertEqual([m.uid for m in result], ['uid-9', 'uid-1'])
+        self.assertEqual(connection.call_count, 5)
+        self.assertEqual(clients[2].retr.call_args.args[0], 13)
+        self.assertEqual(clients[3].retr.call_args.args[0], 9)
+        self.assertEqual(clients[4].retr.call_args.args[0], 1)
+        self.assertNotIn('PRIVATE', repr(result))
+        for client in clients:
+            client.quit.assert_called_once()
+            client.dele.assert_not_called()
 
     def test_pop_diagnostics_displays_only_safe_metadata(self):
         endpoint=mail.mail_config(CONFIG,'owner@example.com').pop
