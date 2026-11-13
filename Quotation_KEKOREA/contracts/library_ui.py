@@ -16,7 +16,7 @@ from Quotation_KEKOREA.contracts.contextual_rag import (
 )
 
 
-def show_library_sources(sources):
+def show_library_sources(sources, source_comparison=None):
     if not sources:
         return
     with st.expander('이번 계약에 참고한 공통 샘플', expanded=False):
@@ -29,6 +29,18 @@ def show_library_sources(sources):
                 st.caption('여러 계약서 비교 후 선택한 이유: ' + source['selected_reason'])
             if source.get('source_section_id'):
                 st.caption('원본 조항과 SHA-256을 검증한 승인 참고 문구')
+        decisions = (source_comparison or {}).get('decisions') or []
+        if decisions:
+            st.markdown('##### 여러 계약서 조항 비교 및 선택 근거')
+            st.dataframe([
+                {
+                    '검토 주제': d['topic_key'],
+                    '선택한 근거 ID': d['selected_id'],
+                    '선택 이유': d['reason'],
+                    '제외한 후보': len(d.get('alternatives') or []),
+                    '재검토할 충돌': ' / '.join(d.get('conflicts') or []) or '없음',
+                } for d in decisions
+            ], hide_index=True)
 
 
 def render_library_admin(repo, env):
