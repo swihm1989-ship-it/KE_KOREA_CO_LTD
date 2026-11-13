@@ -444,20 +444,15 @@ def render_inbox(messages, account):
                 chosen = [{'name':selected.attachments[i].filename,
                            'mime_type':selected.attachments[i].mime,
                            'data':selected.attachments[i].content} for i in indexes]
-            st.caption("아래 추출 버튼을 누르면 선택한 메일 제목·본문과 직접 선택한 첨부만 외부 AI에 전송합니다. "
-                       "CIPL은 CI·PL을 각각 준비하며 CI 출력에는 원본 PI가 필요합니다.")
-            if st.button("AI로 거래조건 추출·문서 준비", key='whois_ai_extract_'+selected.uid,
-                         disabled=not bool(chosen_kinds) or not bool(selected.body and selected.body.strip()),
-                         type='primary', width='stretch'):
-                if _use_for_ai(selected, extract=True, attachments=chosen, requested=chosen_kinds):
+            st.caption("선택한 메일 제목·본문과 직접 선택한 첨부파일을 AI 업무 요청 화면으로 가져옵니다. "
+                       "이동만으로는 외부 AI에 전송되지 않습니다. CIPL은 CI·PL을 각각 준비하며 CI 출력에는 원본 PI가 필요합니다.")
+            if st.button("AI 업무 요청으로 이동",
+                         key="whois_ai_" + selected.uid,
+                         disabled=not bool(selected.body and selected.body.strip()),
+                         type="primary", use_container_width=True):
+                # Preserve selected document types and attachments, but do NOT
+                # auto-grant consent or start a model request on navigation.
+                if _use_for_ai(selected, extract=False, attachments=chosen,
+                               requested=chosen_kinds):
                     st.rerun(scope="app")
-            if st.button(
-                "이 메일로 AI 업무 요청 작성",
-                key="whois_ai_" + selected.uid,
-                disabled=not bool(selected.body),
-                type="primary",
-                use_container_width=True,
-            ):
-                if _use_for_ai(selected):
-                    st.rerun(scope="app")
-            st.caption("위 ‘요청 작성’ 버튼은 입력창으로만 이동합니다. 메일 열람·동기화만으로는 AI를 실행하지 않습니다.")
+            st.caption("이동 후 'AI 자동 분석' 또는 '직접 수정 후 분석'을 선택하고 동의·실행할 수 있습니다.")
