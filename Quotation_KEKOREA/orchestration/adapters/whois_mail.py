@@ -125,6 +125,59 @@ def probe_pop(endpoint: Endpoint) -> int:
         _finish(client)
 
 
+
+def probe_pop_diagnostics(endpoint: Endpoint) -> dict:
+    """Owner-invoked, read-only POP3 health probe; never returns message data.
+
+    Each status is based on POP3 protocol results, not guessed from the UI
+    cache. Server error text and message IDs remain private.
+    """
+    client = _pop(endpoint)
+    try:
+        try:
+            entries = _uidl(client)
+        except Exception:
+            return {'stage': 'uidl_failed', 'message_count': None, 'list_count': None,
+                    'retr': 'not_attempted', 'size': None}
+        try:
+            sizes = {}
+            for line in client.list()[1]:
+                fields = line.split()
+                if len(fields) >= 2:
+                    sizes[int(fields[0])] = int(fields[1])
+        except Exception:
+            return {'stage': 'list_failed', 'message_count': len(entries), 'list_count': None,
+                    'retr': 'not_attempted', 'size': None}
+        if not entries:
+            return {'stage': 'empty', 'message_count': 0, 'list_count': len(sizes),
+                    'retr': 'not_attempted', 'size': None}
+        number, _uid = entries[0]
+        size = sizes.get(number)
+        size_group = ('missing' if size is None else
+                      'too_large' if size > MAX_MESSAGE_BYTES else
+                      'valid' if size >= 0 else 'invalid')
+        if size_group != 'valid':
+            return {'stage': 'size_blocked', 'message_count': len(entries),
+                    'list_count': len(sizes), 'retr': 'not_attempted', 'size': size_group}
+        try:
+            # Deliberate read-only RETR: discard bytes without parsing, storing,
+            # displaying or logging any message content.
+            _status, _lines, _octets = client.retr(number)
+            retr = 'success'
+        except poplib.error_proto:
+            retr = 'server_rejected'
+        except (TimeoutError, socket.timeout):
+            retr = 'timeout'
+        except (OSError, EOFError, ssl.SSLError):
+            retr = 'connection_error'
+        except Exception:
+            retr = 'failed'
+        return {'stage': 'completed', 'message_count': len(entries),
+                'list_count': len(sizes), 'retr': retr, 'size': size_group}
+    finally:
+        _finish(client)
+
+
 def probe_smtp(endpoint: Endpoint) -> None:
     """Verify SMTP over TLS without sending mail or exposing server responses."""
     client = None
