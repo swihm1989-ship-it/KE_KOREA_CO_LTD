@@ -109,6 +109,170 @@ def _apply_pdf_required_fields(digest: str) -> None:
     st.session_state["master_pdf_applied"] = True
 
 
+
+SHARED_FIELDS = (
+    ("document_number", "문서번호 (미확정은 DRAFT)"),
+    ("buyer.legal_name", "Buyer · 구매자 법인명"),
+    ("buyer.address", "Buyer · 구매자 법인 주소"),
+    ("seller.legal_name", "Seller · 판매자 법인명"),
+    ("seller.address", "Seller · 판매자 법인 주소"),
+    ("currency", "통화 (USD / KRW / EUR / CNY)"),
+    ("incoterms", "인도조건 및 장소"),
+    ("payment_terms", "결제조건"),
+    ("item.product_name", "상품명 및 규격"),
+    ("item.quantity", "수량"),
+    ("item.unit", "수량 단위"),
+    ("item.unit_price", "단가"),
+    ("item.price_basis", "단가 기준"),
+    ("shipment_reference", "선적 참조번호 (CI / PL)"),
+    ("country_of_origin", "제품 원산지 (CI)"),
+)
+
+
+def _shared_current(candidates: dict, field: str) -> str:
+    """Read the same document candidates used by preview and PDF export."""
+    trade = next((doc for kind, doc in candidates.items()
+                  if kind in {"PI", "PO", "CI", "PL"} and isinstance(doc, dict)), {})
+    contract = candidates.get("CONTRACT") or {}
+    if field.startswith(("buyer.", "seller.")):
+        role, prop = field.split(".", 1)
+        value = str((trade.get(role) or {}).get(prop) or "").strip()
+        if value:
+            return value
+        return next((str(p.get(prop) or "") for p in contract.get("parties", [])
+                     if isinstance(p, dict) and role in [
+                         canonical_label(str(r)) or str(r)
+                         for r in p.get("roles", [])]), "")
+    if field.startswith("item."):
+        prop = field.split(".", 1)[1]
+        value = (trade.get("items") or [{}])[0].get(prop)
+        if value is not None and str(value).strip():
+            return str(value)
+        term = {"product_name": "products", "quantity": "quantity",
+                "unit": "unit", "unit_price": "unit_price"}.get(prop)
+        if term:
+            return next((str(t.get("value") or "") for t in contract.get("terms", [])
+                         if t.get("key") == term), "")
+        return ""
+    value = trade.get(field)
+    if value is not None and str(value).strip():
+        return str(value)
+    term = {"currency": "currency", "incoterms": "delivery",
+            "payment_terms": "payment_trigger"}.get(field)
+    if term:
+        return next((str(t.get("value") or "") for t in contract.get("terms", [])
+                     if t.get("key") == term), "")
+    return ""
+
+
+def _apply_shared_input(digest: str, field: str, widget: str) -> None:
+    saved = st.session_state.get("ai_intake_candidates")
+    if not saved or saved[0] != digest:
+        return
+    raw = str(st.session_state.get(widget) or "").strip()
+    if field in {"currency", "item.unit", "item.price_basis"}:
+        raw = raw.upper()
+        if field == "currency":
+            raw = {"$": "USD", "US$": "USD", "USD$": "USD", "₩": "KRW"}.get(raw, raw)
+    try:
+        updated = apply_answer(saved[1], field, raw, allow_blank=True)
+    except (ValueError, TypeError) as exc:
+        st.session_state["ai_intake_followup_error"] = str(exc)
+        return
+    _remember_candidate_bundle(digest, updated)
+    st.session_state.pop("master_legacy_files", None)
+    st.session_state["ai_intake_last_answer"] = field
+    st.session_state.pop("ai_intake_followup_error", None)
+
+
+def _apply_extra_item(digest: str, index: int, field: str, widget: str) -> None:
+    saved = st.session_state.get("ai_intake_candidates")
+    if not saved or saved[0] != digest:
+        return
+    raw = str(st.session_state.get(widget) or "").strip()
+    # Edit all matching item positions without losing any additional item rows.
+    from decimal import Decimal, InvalidOperation
+    if raw and field in {"quantity", "unit_price"}:
+        try:
+            number = Decimal(raw.replace(",", ""))
+            if not number.is_finite() or number < 0 or (field == "unit_price" and number == 0):
+                raise InvalidOperation
+        except (ValueError, InvalidOperation):
+            st.session_state["ai_intake_followup_error"] = "수량과 단가는 올바른 0 이상 숫자로 입력하세요."
+            return
+    updated = deepcopy(saved[1])
+    for kind, source in updated.items():
+        if kind not in {"PI", "PO", "CI", "PL"} or not isinstance(source, dict):
+            continue
+        rows = source.get("items") or []
+        if index >= len(rows):
+            continue
+        rows[index][field] = raw
+        if field == "quantity":
+            if raw:
+                from Quotation_KEKOREA.orchestration.workflows.mail_trade_normalization import apply_quantity_edit
+                apply_quantity_edit(rows[index], raw)
+            else:
+                for derived in ("paid_quantity", "shipped_quantity", "display_quantity"):
+                    rows[index].pop(derived, None)
+    if isinstance(updated.get("CONTRACT"), dict):
+        updated["CONTRACT"]["clauses"] = []
+    _remember_candidate_bundle(digest, updated)
+    st.session_state.pop("master_legacy_files", None)
+    st.session_state["ai_intake_last_answer"] = "item " + str(index + 1)
+    st.session_state.pop("ai_intake_followup_error", None)
+
+
+def _render_single_editor(digest: str, candidates: dict) -> None:
+    """One editor is the source of truth for trade/contract and PDF output."""
+    trade = next((doc for kind, doc in candidates.items()
+                  if kind in {"PI", "PO", "CI", "PL"} and isinstance(doc, dict)), {})
+    fields = list(SHARED_FIELDS)
+    if not trade:
+        fields = [(key, label) for key, label in fields
+                  if key not in {"document_number", "incoterms", "payment_terms",
+                                 "item.price_basis", "shipment_reference", "country_of_origin"}]
+        fields.extend((("buyer.country", "Buyer · 설립국"),
+                       ("seller.country", "Seller · 설립국")))
+    else:
+        requested_kinds = {key for key in candidates if key in {"PI", "PO", "CI", "PL"}}
+        if not requested_kinds.intersection({"CI", "PL"}):
+            fields = [(k, label) for k, label in fields if k != "shipment_reference"]
+        if "CI" not in requested_kinds:
+            fields = [(k, label) for k, label in fields if k != "country_of_origin"]
+    with st.container(border=True):
+        st.markdown("#### ✏️ 거래정보 입력 · 수정 (한 번만)")
+        st.caption("한 곳에서 입력한 값이 PI/PO/CI/PL·계약서 후보와 PDF 입력에 함께 반영됩니다. Enter 또는 칸 이동 시 자동 저장됩니다.")
+        error = st.session_state.get("ai_intake_followup_error")
+        if error:
+            st.error(error)
+        last = st.session_state.get("ai_intake_last_answer")
+        if last:
+            st.caption("최근 반영: " + str(last) + " · 이전 PDF 및 검토 상태 무효화")
+        for field, label in fields:
+            widget = "ai_intake_shared_" + digest[:12] + "_" + field.replace(".", "_")
+            kwargs = {} if widget in st.session_state else {
+                "value": _shared_current(candidates, field)}
+            st.text_input(label, key=widget, on_change=_apply_shared_input,
+                          args=(digest, field, widget), **kwargs)
+        extra = (trade.get("items") or [])[1:]
+        for index, row in enumerate(extra, 1):
+            st.markdown("**상품 " + str(index + 1) + "**")
+            for field, label in (("product_name", "상품명"), ("quantity", "수량"),
+                                 ("unit", "단위"), ("unit_price", "단가"),
+                                 ("price_basis", "단가 기준")):
+                widget = "ai_intake_shared_" + digest[:12] + "_item_" + str(index) + "_" + field
+                kwargs = {} if widget in st.session_state else {
+                    "value": str(row.get(field) or "")}
+                st.text_input(label, key=widget, on_change=_apply_extra_item,
+                              args=(digest, index, field, widget), **kwargs)
+        gaps = missing_fields(candidates)
+        if gaps:
+            st.warning("미확정 항목 " + str(len(gaps)) + "개 · 비어 있어도 검토용 PDF 생성 가능")
+        else:
+            st.success("기본 거래정보 입력 완료 · 발행 전에 거래조건을 확인하세요.")
+
+
 def _reference_panel():
     st.markdown("#### 기존 계약서 참고 (서버 내 조회 전용)")
     st.caption("기존 계약서는 모델에 전송하거나 새 계약서에 자동 복사하지 않습니다. 사용자가 직접 비교하기 위한 별도 읽기 전용 화면입니다.")
@@ -380,6 +544,10 @@ def render_ai_intake(principal: str):
     if consume_pending(st.session_state, instruction):
         st.info("기존 메일 요청을 가져왔습니다. 처리 방식과 거래조건을 확인하고 AI 분석을 실행해 주세요.")
     if manual_extract and consent and ready and requested and attachments is not None:
+        # A new extraction must not inherit prior editable widget values.
+        for key in list(st.session_state):
+            if str(key).startswith("ai_intake_shared_"):
+                st.session_state.pop(key, None)
         st.session_state.pop("ai_intake_result", None)
         st.session_state.pop("ai_intake_candidates", None)
         st.session_state.pop("ai_intake_drafts", None)
@@ -409,30 +577,22 @@ def render_ai_intake(principal: str):
         st.warning("원래 업무 요청이 변경되었습니다. 기존 AI 추출 결과 및 검토 승인은 사용하지 마세요.")
     if result and result[0] == digest:
         analysis = result[1]
-        _render_recovery_inputs(digest, analysis, requested)
-        if st.session_state.get("ai_intake_recovery_error"):
-            st.warning("문서 후보 재생성 오류: " + st.session_state["ai_intake_recovery_error"])
-        st.markdown("#### AI가 추출한 조건 · 모두 미확정")
-        current = st.session_state.get("ai_intake_candidates")
-        if current and current[0] == digest:
-            _render_missing_inputs(digest, current[1])
-        current = st.session_state.get("ai_intake_candidates")
-        if current and current[0] == digest:
-            _render_quick_corrections(digest, current[1])
-        if analysis.get("parties"):
-            st.dataframe([{"역할": ", ".join(canonical_label(str(role)) or str(role) for role in p.get("roles", [])),
-                           "회사명": p.get("legal_name") or "미입력",
-                           "주소": p.get("address") or "미입력"}
-                          for p in analysis["parties"]], width="stretch", hide_index=True)
-        if analysis.get("terms"):
-            st.dataframe([{"항목": x.get("key"), "값": x.get("value"),
-                           "검토 상태": "AI 제안"} for x in analysis["terms"]],
-                         width="stretch", hide_index=True)
-        if analysis.get("questions"):
-            for question in analysis["questions"][:2]:
-                st.warning("필수 확인: " + str(question))
-        if analysis.get("issues"):
-            with st.expander("추가 AI 검토 사항"):
+        st.caption("AI 원본 추출은 아래 접힌 참고란에 남기고, 모든 실제 문서정보 수정은 하나의 입력창에서 처리합니다.")
+        with st.expander("AI 추출 원본 (수정 전 · 참고용)", expanded=False):
+            if analysis.get("parties"):
+                st.dataframe([{"역할": ", ".join(canonical_label(str(role)) or str(role) for role in p.get("roles", [])),
+                               "회사명": p.get("legal_name") or "미입력",
+                               "주소": p.get("address") or "미입력"}
+                              for p in analysis["parties"]], width="stretch", hide_index=True)
+            if analysis.get("terms"):
+                st.dataframe([{"항목": x.get("key"), "값": x.get("value"),
+                               "검토 상태": "AI 제안"} for x in analysis["terms"]],
+                             width="stretch", hide_index=True)
+            if analysis.get("questions"):
+                for question in analysis["questions"][:2]:
+                    st.warning("필수 확인: " + str(question))
+            if analysis.get("issues"):
+                st.markdown("**추가 AI 검토 사항**")
                 for issue in analysis["issues"]:
                     st.write(str(issue.get("message") or issue))
         st.caption("모든 금액·수량·법인명은 원문과 대조해야 합니다. AI 제안만으로 최종 문서 승인은 할 수 없습니다.")
@@ -456,6 +616,7 @@ def render_ai_intake(principal: str):
                 st.error("초안 입력 구성 실패: " + str(exc))
     candidates = st.session_state.get("ai_intake_candidates")
     if candidates and candidates[0] == digest:
+        _render_single_editor(digest, candidates[1])
         candidates = st.session_state.get("ai_intake_candidates")
         st.markdown("#### 실시간 반영 결과")
         for kind, data in candidates[1].items():
@@ -509,48 +670,25 @@ def render_ai_intake(principal: str):
                             data=file["content"], file_name=file["filename"],
                             mime=file["mime"], key=f"ai_intake_download_{doc.kind}_{fmt}")
             st.caption("생성된 파일은 최종 발행·계약 체결·메일 발송에 사용할 수 없습니다.")
-        # The original renderer requires fields that the AI deliberately cannot confirm.
-        # Expose those fields on mobile instead of forcing users to edit JSON.
+        # One shared editor above owns all commercial facts. The strict
+        # validator remains informative, not an additional input window.
         trade_data = {k: v for k, v in candidates[1].items()
                       if k in ("PI", "PO", "CI", "PL") and isinstance(v, dict)}
         if trade_data:
             from Quotation_KEKOREA.agent.trade_documents import validate_and_calculate
-            st.markdown("#### PDF 생성 전 필수 거래정보")
-            st.caption("아래 내용은 AI가 자동 승인하지 않습니다. 실제 거래 자료와 대조한 뒤 입력하세요.")
-            sample = next(iter(trade_data.values()))
-            first_item = (sample.get("items") or [{}])[0]
-            with st.form("master_pdf_required_fields"):
-                doc_no = st.text_input("문서번호 (초안은 DRAFT)", value=str(sample.get("document_number") or "DRAFT"), key="master_pdf_doc_no")
-                buyer_name = st.text_input("Buyer 법인명", value=str((sample.get("buyer") or {}).get("legal_name") or ""), key="master_pdf_buyer_name")
-                buyer_addr = st.text_input("Buyer 영문 주소", value=str((sample.get("buyer") or {}).get("address") or ""), key="master_pdf_buyer_addr")
-                seller_name = st.text_input("Seller 법인명", value=str((sample.get("seller") or {}).get("legal_name") or ""), key="master_pdf_seller_name")
-                seller_addr = st.text_input("Seller 영문 주소", value=str((sample.get("seller") or {}).get("address") or ""), key="master_pdf_seller_addr")
-                doc_currency = st.text_input("통화 코드 (USD/KRW/EUR/CNY)", value=str(sample.get("currency") or "USD"), key="master_pdf_currency")
-                incoterms = st.text_input("인도조건 및 장소", value=str(sample.get("incoterms") or ""), key="master_pdf_incoterms")
-                payment = st.text_input("결제조건", value=str(sample.get("payment_terms") or ""), key="master_pdf_payment")
-                product = st.text_input("영문 제품명", value=str(first_item.get("product_name") or ""), key="master_pdf_product")
-                quantity = st.text_input("수량", value=str(first_item.get("quantity") if first_item.get("quantity") is not None else ""), key="master_pdf_quantity")
-                unit = st.text_input("수량 단위", value=str(first_item.get("unit") or ""), key="master_pdf_unit")
-                price = st.text_input("단가", value=str(first_item.get("unit_price") or ""), key="master_pdf_price")
-                basis = st.text_input("단가 기준 (PCS, KG 등)", value=str(first_item.get("price_basis") or first_item.get("unit") or ""), key="master_pdf_basis")
-                shipment = st.text_input("선적 참조번호 (CI/PL 필수)", value=str(sample.get("shipment_reference") or ""), key="master_pdf_shipment")
-                origin = st.text_input("원산지 (CI 필수)", value=str(sample.get("country_of_origin") or ""), key="master_pdf_origin")
-                st.form_submit_button("필수정보 적용 · PDF 생성 준비", type="primary",
-                                      on_click=_apply_pdf_required_fields, args=(digest,))
-            if st.session_state.pop("master_pdf_applied", False):
-                st.success("필수 거래정보를 반영했습니다. 아래 PDF 생성 버튼을 누르세요.")
-            for kind, trade in trade_data.items():
-                try:
-                    check = validate_and_calculate(trade)
-                    issues = check.get("blocking_issues") or []
-                    if issues:
-                        with st.expander(kind + " · PDF 생성 전 확인사항 (" + str(len(issues)) + ")", expanded=True):
-                            for issue in issues:
-                                st.write("• " + str(issue))
-                    else:
-                        st.success(kind + " 거래정보 검증 통과 · PDF 출력 준비 완료 (직인·은행정보 별도 확인)")
-                except (ValueError, TypeError, KeyError) as exc:
-                    st.warning(kind + " 거래정보 확인 필요: " + str(exc)[:250])
+            with st.expander("발행 전 추가 확인사항 (검토용 PDF는 다운로드 가능)", expanded=False):
+                for kind, trade in trade_data.items():
+                    try:
+                        checked = validate_and_calculate(trade)
+                        problems = checked.get("blocking_issues") or []
+                        st.markdown("**" + kind + "**")
+                        if problems:
+                            for problem in problems:
+                                st.write("• " + str(problem))
+                        else:
+                            st.success("형식 검증 통과 · 직인과 발행 승인은 별도 확인")
+                    except (ValueError, TypeError, KeyError) as exc:
+                        st.warning(kind + " 확인 필요: " + str(exc)[:200])
         st.divider()
         st.markdown("#### 기존 KE KOREA 양식 · PI / PO / CI / PL PDF·Excel")
         st.caption("현재 MASTER 앱에서 기존 업무 에이전트의 검증·직인·페이지 분할·PDF/XLSX 엔진을 직접 호출합니다. 기존 앱으로 이동하지 않습니다.")
@@ -563,10 +701,15 @@ def render_ai_intake(principal: str):
                     st.success(explanation)
                 else:
                     st.warning(explanation)
-            if st.button("기존 양식으로 무역서류 PDF·Excel 생성", key="master_legacy_export"):
+            st.caption("확인된 거래조건은 기존 KE KOREA 양식과 회사 직인을 사용합니다. "
+                       "미확정 항목이 있거나 발행 검증이 통과하지 않으면, 같은 입력값으로 "
+                       "직인 없는 '검토용 PDF' 파일을 생성합니다.")
+            if st.button("현재 거래정보로 PDF 생성", key="master_legacy_export", type="primary"):
                 st.session_state.pop("master_legacy_files", None)
                 try:
-                    from Quotation_KEKOREA.orchestration.workflows.legacy_document_exports import render_master_trade_draft
+                    from Quotation_KEKOREA.orchestration.workflows.legacy_document_exports import (
+                        render_master_trade_draft, render_incomplete_trade_pdf,
+                    )
                     updated = json.loads(raw)
                     if not isinstance(updated, dict):
                         raise ValueError("문서 데이터는 JSON 객체여야 합니다.")
@@ -577,24 +720,34 @@ def render_ai_intake(principal: str):
                         try:
                             results[kind] = render_master_trade_draft(kind, updated[kind], env)
                         except (ValueError, TypeError, KeyError, RuntimeError, OSError) as exc:
-                            errors[kind] = str(exc)[:450]
+                            # Do not weaken the original sealed PDF issuance rules.
+                            # Produce a visibly unapproved PDF using exactly the
+                            # user's still-unconfirmed facts (no fake bank data).
+                            try:
+                                results[kind] = render_incomplete_trade_pdf(kind, updated[kind])
+                                errors[kind] = "기존 정식 양식의 검증은 통과하지 않았습니다. 아래 PDF는 미확정 항목을 명시한 내부 검토용입니다."
+                            except (ValueError, TypeError, KeyError, RuntimeError, OSError) as fallback:
+                                errors[kind] = ("PDF 생성 오류: " + str(fallback))[:400]
                     st.session_state["master_legacy_files"] = (edited_key, results, errors)
                 except (ValueError, TypeError, KeyError) as exc:
-                    st.error("PDF·Excel 생성 실패: " + str(exc)[:450])
+                    st.error("PDF 생성 실패: " + str(exc)[:400])
             export_bundle = st.session_state.get("master_legacy_files")
             if export_bundle and export_bundle[0] != edited_key:
                 st.warning("거래조건이 변경되어 이전 PDF·Excel 파일을 무효화했습니다. 다시 생성하세요.")
             if export_bundle and export_bundle[0] == edited_key:
                 for kind, reason in export_bundle[2].items():
-                    st.warning(kind + " 출력 보류: " + reason)
+                    st.warning(kind + " 정식 양식 발행 보류: " + reason)
                 for kind, files in export_bundle[1].items():
                     with st.container(border=True):
-                        st.markdown("**" + kind + " · 기존 양식 검토용 문서**")
+                        title = ("미확정 내부 검토용 PDF (정식 발행 아님)"
+                                 if any(asset.get("review_only") for asset in files.values())
+                                 else "기존 KE KOREA 양식 검토용 문서")
+                        st.markdown("**" + kind + " · " + title + "**")
                         for fmt, file in files.items():
                             st.download_button(kind + " " + fmt.upper() + " DRAFT 다운로드",
                                                data=file["content"], file_name=file["filename"],
                                                mime=file["mime"], key="master_legacy_" + kind + "_" + fmt)
-            st.caption("기존 회사 직인 및 필수 정보 검증을 통과해야 생성됩니다. 생성물은 DRAFT이며 최종 발행·전송되지 않습니다.")
+            st.caption("미확정 항목이 있더라도 검토용 PDF 파일은 생성 가능합니다. 정식 발행·직인·전송에는 기존 검증과 승인이 필요합니다.")
         if "CONTRACT" in candidates[1]:
             st.caption("계약서 PDF·DOCX는 아래 기존 계약서 DRAFT 엔진으로 생성합니다. FINAL 계약서의 법률·계좌·승인 검증은 우회하지 않습니다.")
         doc = candidates[1].get("CONTRACT")

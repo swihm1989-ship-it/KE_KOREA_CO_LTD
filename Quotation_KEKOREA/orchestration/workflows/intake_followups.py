@@ -32,6 +32,7 @@ LABELS = {
     "item.unit_price": "단가(숫자)",
     "item.price_source": "단가의 확인 가능한 출처",
     "currency": "통화(USD 등)",
+    "document_number": "문서번호 (미확정 시 DRAFT)",
     "incoterms": "Incoterms 및 정확한 인도 장소",
     "payment_terms": "결제조건",
     "shipment_reference": "선적 참고번호",
@@ -103,7 +104,7 @@ def missing_fields(candidates: Mapping[str, Any]) -> tuple[MissingField, ...]:
     return tuple(MissingField(key=key, label=format_field_label(key)) for key in keys)
 
 
-def apply_answer(candidates: Mapping[str, Any], key: str, value: str) -> dict[str, Any]:
+def apply_answer(candidates: Mapping[str, Any], key: str, value: str, *, allow_blank: bool = False) -> dict[str, Any]:
     """Return revised private candidate bundle. All approval/draft state is external.
 
     This is a user-supplied answer, not an automatic 'confirmed' status.
@@ -111,10 +112,10 @@ def apply_answer(candidates: Mapping[str, Any], key: str, value: str) -> dict[st
     """
     if key not in LABELS:
         raise ValueError("지원하지 않는 거래조건입니다.")
-    if not isinstance(value, str) or not value.strip() or len(value) > 1500:
+    if not isinstance(value, str) or len(value) > 1500 or (not allow_blank and not value.strip()):
         raise ValueError("내용을 입력해 주세요 (1~1,500자).")
     text = value.strip()
-    if key in {"item.quantity", "item.unit_price"}:
+    if text and key in {"item.quantity", "item.unit_price"}:
         try:
             number = Decimal(text.replace(",", ""))
             if not number.is_finite() or number < 0 or (key == "item.unit_price" and number == 0):
@@ -139,12 +140,19 @@ def apply_answer(candidates: Mapping[str, Any], key: str, value: str) -> dict[st
                     items.append({})
                 items[0][field] = text
                 if field=='quantity':
-                    from .mail_trade_normalization import apply_quantity_edit
-                    apply_quantity_edit(items[0],text)
+                    if text:
+                        from .mail_trade_normalization import apply_quantity_edit
+                        apply_quantity_edit(items[0],text)
+                    else:
+                        # A cleared source quantity must not leave a hidden,
+                        # stale paid/shipped value that could price a draft.
+                        for calculated in ("paid_quantity", "shipped_quantity", "display_quantity"):
+                            items[0].pop(calculated, None)
         else:
             doc[key] = text
         from .mail_trade_normalization import resolve_notice_for_answer
-        resolve_notice_for_answer(doc,key)
+        if text:
+            resolve_notice_for_answer(doc,key)
     contract = revised.get("CONTRACT")
     if isinstance(contract, dict):
         # Cannot reuse a previously AI-drafted clause after business conditions change.
