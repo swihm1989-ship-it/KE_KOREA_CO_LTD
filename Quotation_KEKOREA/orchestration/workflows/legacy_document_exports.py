@@ -202,9 +202,14 @@ def render_incomplete_trade_pdf(kind: str, source: Mapping) -> dict:
         if kind != "PL":
             line("Unit price: " + stated(item.get("unit_price")) + " / " +
                  stated(item.get("price_basis")))
-            if qty is None or unit_price is None or unit_price == 0:
+            try:
+                discount = Decimal(str(item.get("discount_percent") or "0"))
+                has_adjustments = bool(item.get("promotion")) or discount != 0
+            except (InvalidOperation, TypeError, ValueError):
+                has_adjustments = True
+            if qty is None or unit_price is None or unit_price == 0 or has_adjustments:
                 amounts_complete = False
-                line("Line amount: NOT PROVIDED (price or quantity unconfirmed)")
+                line("Line amount: NOT PROVIDED (unconfirmed price, quantity or discount)")
             else:
                 line("Indicative line amount: " + str(qty * unit_price))
                 running += qty * unit_price
