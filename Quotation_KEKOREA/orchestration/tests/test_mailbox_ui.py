@@ -110,6 +110,23 @@ class MailboxUiTests(unittest.TestCase):
             self.assertNotIn('master_pdf_quantity',app.session_state)
             self.assertNotIn('ai_intake_contract_consent',app.session_state)
 
+    def test_extract_button_leaves_fragment_and_preserves_document_choice(self):
+        from Quotation_KEKOREA.orchestration.ui import mailbox_page
+        mail = parse_message('synthetic-pi-uid', message())
+        with (patch.object(mailbox_page, '_settings', return_value=CONFIG),
+              patch.object(mailbox_page, 'fetch_messages', return_value=(mail,))):
+            app = AppTest.from_file(str(PAGE), default_timeout=25).run()
+            app.radio(key='master_page').set_value('메일함').run()
+            self.assertFalse(app.button(key='whois_ai_extract_synthetic-pi-uid').disabled)
+            app.button(key='whois_ai_extract_synthetic-pi-uid').click().run()
+            self.assertFalse(app.exception, [x.message for x in app.exception])
+            self.assertEqual(app.radio(key='master_page').value, 'AI 업무 요청')
+            self.assertIn('100 PCS', app.text_area(key='ai_intake_instruction').value)
+            self.assertEqual(app.session_state['ai_intake_mail_source']['kinds'], ['PI'])
+            self.assertTrue(app.checkbox(key='ai_intake_consent').value)
+            self.assertNotIn('master_mail_navigation_pending', app.session_state)
+            self.assertNotIn('ai_intake_mail_pending', app.session_state)
+
     def test_inbox_list_selection_search_and_selected_mail_ai_handoff(self):
         from email.message import EmailMessage
         second = EmailMessage()
