@@ -143,6 +143,25 @@ def select_topic_references(references, plan):
             added += 1
             if added == 3:
                 break
+    # Semantic retrieval may find approved guidance without literal overlap with
+    # the drafting plan's terms. It has already passed the approved/type filter;
+    # do not discard it during the second, purely lexical excerpt pass.
+    retained_library = 0
+    for reference in references:
+        rid = str(reference.get('id') or '')
+        if not rid.startswith('library:') or rid in selected or retained_library >= 12:
+            continue
+        excerpt = str(reference.get('extracted_text') or '')[:2000]
+        if not excerpt or size + len(excerpt) + 2 > 100_000:
+            continue
+        selected[rid] = {
+            'id': rid, 'filename': reference.get('filename', rid),
+            'extracted_text': excerpt,
+            'source_locations': [{'locator': 'approved retrieved guidance',
+                                  'offset': 0, 'length': len(excerpt)}],
+        }
+        size += len(excerpt) + 2
+        retained_library += 1
     return list(selected.values())
 
 
