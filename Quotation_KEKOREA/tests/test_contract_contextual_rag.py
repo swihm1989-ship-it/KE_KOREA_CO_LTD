@@ -66,6 +66,8 @@ class ContextualRagTests(unittest.TestCase):
         self.assertEqual(self.repo.rows[self.source['id']], before)
 
     def test_restore_previous_extraction_is_private_verified_and_idempotent(self):
+        # Simulate the production 20 records whose extracted_text was not saved.
+        self.repo.rows[self.source['id']]['extracted_text'] = ''
         text = (
             '[document 1]\nArticle 1 Scope. The parties shall define the '
             'scope of their obligations in writing.\n\n'
@@ -93,6 +95,7 @@ class ContextualRagTests(unittest.TestCase):
         self.assertEqual(references['references'], [])
 
     def test_restore_bad_sha_does_not_modify_original(self):
+        self.repo.rows[self.source['id']]['extracted_text'] = ''
         payload = [{
             'sha': self.source['content_hash'], 'text':
                 '[document 1]\nArticle 1 Scope. Parties agree conditions.',
