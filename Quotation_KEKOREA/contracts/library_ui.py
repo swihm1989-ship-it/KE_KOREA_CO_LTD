@@ -102,7 +102,7 @@ def render_library_admin(repo, env):
             candidates = [
                 r for r in records_for_index
                 if not private_index(r)
-                and str(r.get('filename') or '').lower().endswith(('.pdf', '.docx', '.hwp'))
+                and str(r.get('filename') or '').lower().endswith(('.pdf', '.docx', '.hwp', '.xlsx'))
                 and str(r['id']) not in failed_ids
             ]
             completed = sum(bool(private_index(r)) for r in records_for_index)
