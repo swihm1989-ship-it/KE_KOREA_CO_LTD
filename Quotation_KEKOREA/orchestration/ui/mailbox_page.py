@@ -247,7 +247,10 @@ def _live_mailbox(pop, account):
     if not bundle:
         st.info("초기 동기화가 완료되지 않았습니다. 다음 자동 확인 또는 지금 동기화를 이용하세요.")
         return
-    st.caption("마지막 조회 성공: " + bundle[2])
+    st.caption("마지막 POP3 동기화 완료: " + bundle[2] +
+               " · 표시 가능한 메일 " + str(len(bundle[1])) + "건")
+    if not bundle[1] and not st.session_state.get("whois_refresh_failed"):
+        st.info("이번 동기화에서 표시 가능한 메일이 0건입니다. POP3 서버에 실제 메일이 0건인지, 본문 조회가 차단됐는지는 위 'POP3 상세 진단'에서 구분해 확인하세요.")
     if st.session_state.get("whois_refresh_failed"):
         st.warning("최근 동기화에 실패해 마지막 성공 메일을 유지합니다.")
     render_inbox(bundle[1], account)
