@@ -158,9 +158,15 @@ def render_mailbox(principal):
 def _merge_messages(previous, incoming, max_count=30):
     """Stable server UIDL based deduplication; keep previous entries when a poll fails."""
     merged = {}
+    # A failed POP3 RETR used to create an anonymous placeholder. Never let
+    # those records displace actual content, including older cached messages.
     for item in incoming:
+        if item.notice and 'RETR' in item.notice and not (item.sender or item.subject or item.body):
+            continue
         merged[item.uid] = item
     for item in previous:
+        if item.notice and 'RETR' in item.notice and not (item.sender or item.subject or item.body):
+            continue
         merged.setdefault(item.uid, item)
     return tuple(list(merged.values())[:max_count])
 
