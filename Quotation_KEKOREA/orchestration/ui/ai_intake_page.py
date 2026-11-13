@@ -328,11 +328,17 @@ def _render_single_editor(digest: str, candidates: dict) -> None:
                     "value": str(row.get(field) or "")}
                 st.text_input(label, key=widget, on_change=_apply_extra_item,
                               args=(digest, index, field, widget), **kwargs)
-        gaps = missing_fields(candidates)
-        if gaps:
-            st.warning("미확정 항목 " + str(len(gaps)) + "개 · 비어 있어도 검토용 PDF 생성 가능")
+        try:
+            gaps = missing_fields(candidates)
+        except RuntimeError as exc:
+            # Allow the page to remain usable when a hot-reloaded adapter
+            # cannot yet be resolved. Never mark unknown facts as complete.
+            st.warning(str(exc))
         else:
-            st.success("기본 거래정보 입력 완료 · 발행 전에 거래조건을 확인하세요.")
+            if gaps:
+                st.warning("미확정 항목 " + str(len(gaps)) + "개 · 비어 있어도 검토용 PDF 생성 가능")
+            else:
+                st.success("기본 거래정보 입력 완료 · 발행 전에 거래조건을 확인하세요.")
 
 
 def _reference_panel():
