@@ -110,6 +110,36 @@ class MailboxUiTests(unittest.TestCase):
             self.assertNotIn('master_pdf_quantity',app.session_state)
             self.assertNotIn('ai_intake_contract_consent',app.session_state)
 
+    def test_app_boot_with_cached_legacy_navigation_symbol(self):
+        # Streamlit hot-reloads entrypoint source, not necessarily imports.
+        # A missing new workflow symbol must NEVER take the whole Master down.
+        from Quotation_KEKOREA.orchestration.workflows import mail_intake
+        with patch.object(mail_intake, "consume_mail_navigation", None):
+            app = AppTest.from_file(str(PAGE), default_timeout=25).run()
+            self.assertFalse(app.exception, [x.message for x in app.exception])
+            app.session_state['master_mail_navigation_pending'] = True
+            app.run()
+            self.assertFalse(app.exception, [x.message for x in app.exception])
+            self.assertEqual(app.radio(key='master_page').value, 'AI 업무 요청')
+            self.assertNotIn('master_mail_navigation_pending', app.session_state)
+
+    def test_mail_handoff_reloads_cached_legacy_queue_signature(self):
+        from Quotation_KEKOREA.orchestration.ui import mailbox_page
+        from Quotation_KEKOREA.orchestration.workflows import mail_intake
+        mail = parse_message('synthetic-pi-uid', message())
+        def legacy_queue(state, msg, *, extract=False, attachments=(), requested=None):
+            raise AssertionError('legacy handler must never be invoked')
+        with (patch.object(mail_intake, 'queue_handoff', legacy_queue),
+              patch.object(mailbox_page.st, 'session_state', {})):
+            self.assertTrue(mailbox_page._use_for_ai(
+                mail, extract=True, requested=['PI']))
+            self.assertTrue(mailbox_page.st.session_state['master_mail_navigation_pending'])
+            self.assertEqual(mailbox_page.st.session_state['ai_intake_mail_source']['kinds'], ['PI'])
+            self.assertEqual(mailbox_page.st.session_state['master_page']
+                             if 'master_page' in mailbox_page.st.session_state
+                             else '메일함', '메일함')
+            self.assertTrue(mailbox_page.st.session_state['ai_intake_consent'])
+
     def test_extract_button_leaves_fragment_and_preserves_document_choice(self):
         from Quotation_KEKOREA.orchestration.ui import mailbox_page
         mail = parse_message('synthetic-pi-uid', message())
