@@ -13,6 +13,7 @@ from Quotation_KEKOREA.contracts.repository import ContractRepositoryError
 from Quotation_KEKOREA.contracts.promote_reference import promote_contract_reference
 from Quotation_KEKOREA.contracts.contextual_rag import (
     approve_source_excerpts, index_private_original, private_index, _SENSITIVE,
+    restore_private_extraction_bundle,
 )
 
 
@@ -94,6 +95,34 @@ def render_library_admin(repo, env):
                     )
         except (ValueError, RuntimeError, ContractRepositoryError) as exc:
             st.warning('RAG 임베딩 상태 확인 또는 생성 실패: ' + str(exc)[:220])
+        with st.expander('기존 ZIP에서 추출했던 원문 텍스트 복구', expanded=False):
+            st.caption(
+                '대화에서 전달된 계약서 ZIP의 이전 텍스트 추출 결과(JSON)를 업로드해 '
+                '원본 SHA-256을 확인한 후 비공개 extracted_text에 저장합니다. '
+                '기존 본문을 덮어쓰지 않으며 이 작업은 RAG 재사용 승인과 별개입니다.'
+            )
+            previous_extraction = st.file_uploader(
+                '개인정보가 포함될 수 있는 원문 복구 JSON · 관리자 전용',
+                type=['json'], key='private_extraction_restore_json',
+            )
+            restore_confirm = st.checkbox(
+                '모든 자료가 본인 소유이며 기존 저장 원본과 대조해 비공개 복원하는 데 동의합니다.',
+                key='private_extraction_restore_confirm',
+            )
+            if st.button('원문 텍스트 SHA 검증 후 DB 복구',
+                         disabled=not (previous_extraction and restore_confirm),
+                         key='private_extraction_restore_execute'):
+                bundle = json.loads(previous_extraction.getvalue().decode('utf-8'))
+                with st.spinner('원본 파일과 추출 결과를 비교하고 있습니다...'):
+                    restored = restore_private_extraction_bundle(repo, bundle)
+                st.success(
+                    f"본문 복구 {restored['restored']}개 · "
+                    f"이미 저장됨 {restored['unchanged']}개 · "
+                    f"확인 필요 {restored['skipped']}개"
+                )
+                for reason in restored['reasons'][:8]:
+                    st.warning(reason)
+                st.rerun()
         # Hierarchical source indexing is private until individual excerpts
         # are explicitly reviewed and approved; no raw originals reach the AI.
         with st.expander('원본 계약서 조항 인덱스 · 관리자 검증', expanded=False):
