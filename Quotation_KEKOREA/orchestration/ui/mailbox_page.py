@@ -63,7 +63,7 @@ def _ensure_smtp_adapter_current():
     global mail_config, probe_pop, probe_smtp, fetch_messages, MailConnectionError
     module = sys.modules.get(probe_smtp.__module__)
     expected = "smtp-starttls-20261112-v3"
-    pop_expected = "pop-health-20261113-v2"
+    pop_expected = "pop-health-20261113-v3"
     if module is None:
         return False
     if (getattr(module, "SMTP_DIAGNOSTIC_REVISION", None) == expected
@@ -168,6 +168,35 @@ def render_mailbox(principal):
                 st.warning('POP3 본문 조회가 정상 완료되지 않았습니다. UIDL/LIST와 RETR 단계를 구분해 확인하세요. 서버 원문은 출력하지 않습니다.')
             else:
                 st.success('POP3 UIDL/LIST와 최근 메일 1건의 RETR 조회에 성공했습니다. 본문 내용은 출력하거나 저장하지 않았습니다.')
+    if config.pop:
+        if st.button('POP3 교차 진단 (최신·중간·오래된 메일, 읽기 전용)',
+                     key='whois_pop_cross_diagnostics'):
+            adapter = sys.modules.get(probe_pop.__module__)
+            cross_diagnostic = getattr(adapter, 'probe_pop_cross_diagnostics', None)
+            if not callable(cross_diagnostic):
+                _ensure_smtp_adapter_current()
+                adapter = sys.modules.get(probe_pop.__module__)
+                cross_diagnostic = getattr(adapter, 'probe_pop_cross_diagnostics', None)
+            if not callable(cross_diagnostic):
+                st.warning('새 POP3 교차 진단 모듈을 아직 불러오지 못했습니다. Manage app에서 Reboot 후 다시 시도하세요.')
+            else:
+                try:
+                    report = cross_diagnostic(config.pop)
+                    st.session_state['whois_pop_cross_result'] = (account, report)
+                except MailConnectionError as exc:
+                    st.error(str(exc))
+        cross = st.session_state.get('whois_pop_cross_result')
+        if cross and cross[0] == account:
+            report = cross[1]
+            st.caption('POP3 교차 진단 · UIDL 총 ' + str(report['message_count']) +
+                       '건 · 최대 3건 검사 · 개인정보/메일 원문 표시 없음')
+            if report['samples']:
+                st.table([{'위치': {'newest':'최신', 'middle':'중간', 'oldest':'오래된'}[row['position']],
+                           '크기': row['size'], 'RETR 본문': row['retr'],
+                           'TOP 헤더': row['top']} for row in report['samples']])
+                st.caption('서버가 TOP 명령을 지원하지 않을 수도 있습니다. TOP 거부만으로 본문 조회 장애를 확정하지 않습니다.')
+            else:
+                st.warning('POP3 UIDL에서 메일이 0건으로 응답했습니다.')
     bundle=st.session_state.get('whois_mail_bundle')
     if bundle and bundle[0]!=account:
         st.session_state.pop('whois_mail_bundle',None);bundle=None

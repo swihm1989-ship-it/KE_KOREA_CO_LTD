@@ -44,7 +44,7 @@ class MailboxUiTests(unittest.TestCase):
               patch.object(mailbox_page.st, "session_state", {})):
             self.assertTrue(mailbox_page._ensure_smtp_adapter_current())
             self.assertEqual(whois_mail.POP_DIAGNOSTIC_REVISION,
-                             "pop-health-20261113-v2")
+                             "pop-health-20261113-v3")
             self.assertTrue(callable(whois_mail.probe_pop_diagnostics))
             self.assertFalse(mailbox_page._ensure_smtp_adapter_current())
 
