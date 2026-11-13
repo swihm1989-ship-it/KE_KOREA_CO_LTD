@@ -18,7 +18,7 @@ from Quotation_KEKOREA.orchestration.router import DOC_TYPES, classify
 from Quotation_KEKOREA.orchestration.workflows.commercial_values import normalize_trade_values
 from Quotation_KEKOREA.orchestration.workflows.label_typos import canonical_label
 from Quotation_KEKOREA.orchestration.workflows.ai_intake import (
-    extract_candidate, make_contract_candidate,
+    extract_candidate,
     selected_contract_reference,
 )
 from Quotation_KEKOREA.orchestration.workflows.unified_review import (
@@ -35,13 +35,13 @@ PDF_EXPORT_MODULE = "Quotation_KEKOREA.orchestration.workflows.legacy_document_e
 PDF_EXPORT_REVISION = "review-pdf-safe-loader-20261113-v4"
 TRADE_REVIEW_MODULE = "Quotation_KEKOREA.orchestration.workflows.trade_export_review"
 TRADE_REVIEW_REVISION = "approved-blank-final-20261113-v1"
-AI_INTAKE_REVISION = "ai-intake-hot-reload-20261113-v7"
+AI_INTAKE_REVISION = "ai-intake-hot-reload-20261113-v8"
 
 
 def _current_ai_workflow():
     """Keep pre-deploy workers compatible with the current workflow API."""
     module = importlib.import_module("Quotation_KEKOREA.orchestration.workflows.ai_intake")
-    if getattr(module, "AI_WORKFLOW_REVISION", None) != "trade-party-contacts-20261113-v1":
+    if getattr(module, "AI_WORKFLOW_REVISION", None) != "trade-missing-terms-20261113-v2":
         importlib.invalidate_caches()
         module = importlib.reload(module)
     return module
@@ -49,6 +49,10 @@ def _current_ai_workflow():
 
 def make_trade_candidate(*args, **kwargs):
     return _current_ai_workflow().make_trade_candidate(*args, **kwargs)
+
+
+def make_contract_candidate(*args, **kwargs):
+    return _current_ai_workflow().make_contract_candidate(*args, **kwargs)
 
 
 def generate_contract_draft(*args, **kwargs):

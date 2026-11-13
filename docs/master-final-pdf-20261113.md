@@ -41,6 +41,15 @@ PI output, missing bank fields remain blank.
    revisions and signatures; the export adapter refreshes shared renderers and
    PDF dependencies in order before invoking their current APIs.
 
+5. Live authenticated verification exposed a separate extraction contract
+   mismatch: the shared contract AI legitimately returns `status="missing"`,
+   while MASTER accepted only `suggested`. Normal missing facts could therefore
+   prevent any editor candidate from appearing. The adapter now accepts the
+   service's missing-term shape without confirming AI-proposed facts. Both PI
+   and contract candidate entry points load the current workflow revision; the
+   Streamlit page revision advances to v8. Confirmed or malformed model statuses
+   remain rejected.
+
 ## Approval and output boundaries
 
 Approval is bound to normalized current document content, the Seoul issue date,
@@ -62,8 +71,17 @@ The CONTRACT final engine and RAG changes are outside this trade-output path.
 ## Verification
 
 - Required legacy document/contract suite: 707 passed, no failures or skips.
-- Final MASTER suite: 464 passed, no failures or skips.
-- Combined final regression result: 1,171 passed, no failures or skips.
+- Final MASTER suite: 470 passed, no failures or skips.
+- Combined final regression result: 1,177 passed, no failures or skips.
+- Live extraction regression coverage adds six tests for upstream missing-term
+  responses, invalid statuses, a contract-only stale-module path, and the single
+  editor's missing-quantity-to-explicit-zero flow. The related 30-test focused
+  suite passed before the final full-suite run.
+- Final full suites run through `scripts/run_offline_regressions.py`, which
+  disables network connections and strips inherited provider credentials before
+  discovery. No tests are skipped or weakened. A raw legacy run was stopped by
+  automatic approval review when it attempted an unexpected external AI request;
+  it is not counted as a completed passing run.
 - Focused tests cover the reported stale input/approval/download conditions,
   incomplete actual PDF export, explicit zero, pricing/packing/source errors,
   incomplete sums, exact placeholder removal, and cached pre-FINAL renderer
@@ -80,9 +98,12 @@ The MASTER Google login screen was observed at
 `https://ke-korea-master.streamlit.app/`. The first attempt to click Google
 sign-in was rejected by automatic approval review. The owner subsequently
 explicitly approved production Google sign-in and final PDF verification.
-Logged-in final PDF download and deployed-code agreement remain unverified
-until that authorized live check completes. GitHub publication and CI results
-must be reported separately from the live verification result.
+The authenticated AI intake screen was then observed, and two synthetic
+requests reproduced the missing-term compatibility failure before deployment.
+The fix is included in this release. Final PDF download, blank/zero values,
+and reapproval after edits remain post-merge checks. Their final results will
+be recorded in [PR #95](https://github.com/swihm1989-ship-it/KE_KOREA_CO_LTD/pull/95),
+separately from local and GitHub CI results.
 
 ## GitHub publication status
 
@@ -90,6 +111,6 @@ The first release-tree upload was rejected by automatic approval review for
 missing explicit current-turn publication authorization. The owner subsequently
 explicitly approved uploading this reviewed change to
 `swihm1989-ship-it/KE_KOREA_CO_LTD`, opening the PR, checking CI, and merging to
-main after CI passes. The implementation, all 1,171 passing regression tests,
+main after CI passes. The implementation, all 1,177 passing regression tests,
 and local commit are complete; publication resumes under that approval. No
 alternate upload path was used to bypass the original rejection.
