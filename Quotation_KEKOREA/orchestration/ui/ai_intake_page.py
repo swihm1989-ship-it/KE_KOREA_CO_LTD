@@ -49,7 +49,14 @@ def _current_intake_followups():
             module = importlib.reload(module)
             func = getattr(module, "apply_answer", None)
             compatible = callable(func) and "allow_blank" in signature(func).parameters
-        if not compatible or not callable(getattr(module, "missing_fields", None)):
+        if (not compatible
+                or not callable(getattr(module, "missing_fields", None))
+                or not callable(getattr(module, "acknowledge_prior_source_notice", None))):
+            importlib.invalidate_caches()
+            module = importlib.reload(module)
+        if (not callable(getattr(module, "acknowledge_prior_source_notice", None))
+                or not callable(getattr(module, "missing_fields", None))
+                or "allow_blank" not in signature(module.apply_answer).parameters):
             raise RuntimeError("stale editor")
     except (ImportError, OSError, AttributeError, TypeError, ValueError, RuntimeError):
         raise RuntimeError(
@@ -247,6 +254,24 @@ def _apply_shared_input(digest: str, field: str, widget: str) -> None:
     st.session_state.pop("ai_intake_followup_error", None)
 
 
+def _acknowledge_ai_notice(digest: str, kind: str,
+                           category: str, index: int, expected: str) -> None:
+    """Explicit one-click acknowledgement in the SAME transaction editor."""
+    saved = st.session_state.get("ai_intake_candidates")
+    if not saved or saved[0] != digest:
+        return
+    try:
+        updated = _current_intake_followups().acknowledge_prior_source_notice(
+            saved[1], kind, category, index, expected)
+    except (ValueError, TypeError, RuntimeError) as exc:
+        st.session_state["ai_intake_followup_error"] = str(exc)
+        return
+    _remember_candidate_bundle(digest, updated)
+    st.session_state.pop("master_legacy_files", None)
+    st.session_state["ai_intake_last_answer"] = kind + " · 이전 AI 기록 확인"
+    st.session_state.pop("ai_intake_followup_error", None)
+
+
 def _apply_extra_item(digest: str, index: int, field: str, widget: str) -> None:
     saved = st.session_state.get("ai_intake_candidates")
     if not saved or saved[0] != digest:
@@ -328,17 +353,49 @@ def _render_single_editor(digest: str, candidates: dict) -> None:
                     "value": str(row.get(field) or "")}
                 st.text_input(label, key=widget, on_change=_apply_extra_item,
                               args=(digest, index, field, widget), **kwargs)
+        # AI may leave free-text conflicts/missing notes that do NOT disappear
+        # when required input widgets are filled. Never silently discard them.
+        unresolved = [
+            (kind, category, index, note)
+            for kind, doc in candidates.items()
+            if kind in {"PI", "PO", "CI", "PL"} and isinstance(doc, dict)
+            for category in ("missing_fields", "conflicts")
+            for index, note in enumerate(doc.get(category) or [])
+            if isinstance(note, str) and note.strip()
+        ]
         try:
             gaps = missing_fields(candidates)
         except RuntimeError as exc:
-            # Allow the page to remain usable when a hot-reloaded adapter
-            # cannot yet be resolved. Never mark unknown facts as complete.
             st.warning(str(exc))
         else:
             if gaps:
-                st.warning("미확정 항목 " + str(len(gaps)) + "개 · 비어 있어도 검토용 PDF 생성 가능")
+                st.warning("미입력 필수항목 " + str(len(gaps)) +
+                           "개 · 비어 있어도 검토용 PDF 생성 가능")
+            elif unresolved:
+                st.warning("입력칸은 채워졌지만 이전 AI 확인 기록 " +
+                           str(len(unresolved)) +
+                           "건이 남아 있습니다. 아래에서 실제 조건과 대조하세요.")
             else:
-                st.success("기본 거래정보 입력 완료 · 발행 전에 거래조건을 확인하세요.")
+                st.success("기본 거래정보 입력 및 이전 AI 기록 확인 완료 · "
+                           "은행정보·직인 등 정식 발행 검증은 별도입니다.")
+        if unresolved:
+            with st.expander("이전 AI 추출 기록 · 확인 필요 (" +
+                             str(len(unresolved)) + "건)", expanded=True):
+                st.caption("기존 메일에서 추출한 미확정·충돌 기록입니다. "
+                           "실제 거래조건과 대조하여 해결된 항목만 확인하세요. "
+                           "삭제해도 금액·직인·은행정보 등 기존 발행 검증은 생략되지 않습니다.")
+                for kind, category, index, note in unresolved[:40]:
+                    kind_label = ("충돌" if category == "conflicts" else "미확정")
+                    col1, col2 = st.columns([5, 1])
+                    col1.write("**" + kind + " · " + kind_label + "**: " + note)
+                    note_hash = sha256(
+                        (kind + "|" + category + "|" + note).encode("utf-8")
+                    ).hexdigest()[:14]
+                    col2.button("해소 확인", key="ai_intake_note_" + digest[:12] +
+                                "_" + category + "_" + note_hash + "_" + str(index),
+                                on_click=_acknowledge_ai_notice,
+                                args=(digest, kind, category, index, note))
+
 
 
 def _reference_panel():
