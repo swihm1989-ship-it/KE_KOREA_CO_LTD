@@ -24,6 +24,71 @@ class AiIntakeUiTests(unittest.TestCase):
         news.start()
         self.addCleanup(news.stop)
 
+    def test_final_contract_uses_original_output_only_after_approval_and_auth(self):
+        import hashlib
+        from Quotation_KEKOREA.orchestration.tests.test_master_contract_final import (
+            confirmed_sale, synthetic_seal,
+        )
+        doc = confirmed_sale()
+        instruction = "Synthetic solar cell contract"
+        digest = hashlib.sha256(
+            (instruction + "|한국어|solar_cell").encode()).hexdigest()
+        with (patch("Auth.gate.is_authenticated", return_value=True),
+              patch("Quotation_KEKOREA.contracts.ui._verified_contract_seal",
+                    return_value=synthetic_seal())):
+            app = AppTest.from_file(str(PAGE), default_timeout=30).run()
+            app.radio[0].set_value("AI 업무 요청").run()
+            app.text_area(key="ai_intake_instruction").set_value(instruction).run()
+            app.session_state["ai_intake_candidates"] = (digest, {"CONTRACT": doc})
+            app.session_state["ai_intake_result"] = (
+                digest, {"parties": [], "terms": [], "issues": [], "questions": []})
+            app.run()
+            self.assertFalse(app.exception, [e.message for e in app.exception])
+            self.assertTrue(app.button(
+                key="master_contract_final_export_" + __import__(
+                    "Quotation_KEKOREA.orchestration.workflows.master_contract_final",
+                    fromlist=["contract_fingerprint"]).contract_fingerprint(doc)[:20]).disabled)
+            self.assertEqual(
+                len([a for a in app.text_input if a.label == "Buyer · 설립국"]), 1)
+            approval = next(c for c in app.checkbox
+                            if "모든 조항·당사자·거래조건" in c.label)
+            approval.check().run()
+            self.assertFalse(app.exception, [e.message for e in app.exception])
+            self.assertFalse(next(b for b in app.button
+                                  if b.label == "기존 KE KOREA FINAL 양식으로 PDF·Word 생성").disabled)
+            next(b for b in app.button
+                 if b.label == "기존 KE KOREA FINAL 양식으로 PDF·Word 생성").click().run()
+            self.assertFalse(app.exception, [e.message for e in app.exception])
+            bundle = app.session_state["master_contract_final_files"][1]
+            self.assertTrue(bundle["pdf"]["content"].startswith(b"%PDF"))
+            self.assertTrue(bundle["docx"]["content"].startswith(b"PK"))
+            self.assertFalse(any("FINAL 생성 실패" in e.message for e in app.error))
+
+    def test_contract_final_password_required_when_original_login_absent(self):
+        import hashlib
+        from Quotation_KEKOREA.orchestration.tests.test_master_contract_final import (
+            confirmed_sale,
+        )
+        doc = confirmed_sale()
+        instruction = "Synthetic solar cell contract"
+        digest = hashlib.sha256(
+            (instruction + "|한국어|solar_cell").encode()).hexdigest()
+        with (patch("Auth.gate.is_authenticated", return_value=False),
+              patch.dict(os.environ, {"CONTRACT_FINAL_SEAL_PASSWORD": ""})):
+            app = AppTest.from_file(str(PAGE), default_timeout=30).run()
+            app.radio[0].set_value("AI 업무 요청").run()
+            app.text_area(key="ai_intake_instruction").set_value(instruction).run()
+            app.session_state["ai_intake_candidates"] = (digest, {"CONTRACT": doc})
+            app.session_state["ai_intake_result"] = (
+                digest, {"parties": [], "terms": [], "issues": [], "questions": []})
+            app.run()
+            self.assertFalse(app.exception, [e.message for e in app.exception])
+            next(c for c in app.checkbox
+                 if "모든 조항·당사자·거래조건" in c.label).check().run()
+            self.assertTrue(next(b for b in app.button
+                                 if b.label == "기존 KE KOREA FINAL 양식으로 PDF·Word 생성").disabled)
+            self.assertNotIn("master_contract_final_files", app.session_state)
+
     def test_no_key_shows_configuration_warning_and_no_automatic_request(self):
         with patch.dict(os.environ, {"OPENAI_API_KEY": "", "OPENAI_MODEL": ""}):
             app = AppTest.from_file(str(PAGE), default_timeout=20).run()
