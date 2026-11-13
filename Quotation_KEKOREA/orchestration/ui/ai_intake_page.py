@@ -35,7 +35,7 @@ PDF_EXPORT_MODULE = "Quotation_KEKOREA.orchestration.workflows.legacy_document_e
 PDF_EXPORT_REVISION = "review-pdf-safe-loader-20261113-v4"
 TRADE_REVIEW_MODULE = "Quotation_KEKOREA.orchestration.workflows.trade_export_review"
 TRADE_REVIEW_REVISION = "approved-blank-final-20261113-v1"
-AI_INTAKE_REVISION = "ai-intake-hot-reload-20261113-v8"
+AI_INTAKE_REVISION = "ai-intake-hot-reload-20261113-v9"
 
 
 def _current_ai_workflow():
@@ -223,10 +223,35 @@ def _clear_input_error(widget: str) -> None:
     st.session_state.pop("ai_intake_followup_error", None)
 
 
-def _remember_candidate_bundle(digest: str, candidate_map: dict) -> None:
+def _shared_widget_identity(digest: str) -> str:
+    generation = (st.session_state.get("ai_intake_editor_generations") or {}).get(digest, 0)
+    return digest[:12] + ("_g" + str(generation) if generation else "")
+
+
+def _is_current_shared_widget(digest: str, widget: str) -> bool:
+    """Reject an event from a browser input replaced by a newer candidate."""
+    base = "ai_intake_shared_" + digest[:12] + "_"
+    return (not widget.startswith(base)
+            or widget.startswith("ai_intake_shared_" + _shared_widget_identity(digest) + "_"))
+
+
+def _initialize_shared_widget(widget: str, value: str) -> None:
+    if widget not in st.session_state:
+        # A changed default does not replace a keyed browser widget's value.
+        # A session-state assignment sends Streamlit's explicit set_value signal.
+        st.session_state[widget] = value
+
+
+def _remember_candidate_bundle(digest: str, candidate_map: dict, *, replace_editor=False) -> None:
     """Synchronize candidate revisions; widgets refresh before their next render."""
     previous = st.session_state.get("ai_intake_candidates")
-    if not previous or previous[0] != digest:
+    if replace_editor:
+        snapshot = st.session_state.get("ai_intake_editor_snapshot")
+        if ((previous and previous[0] == digest) or (snapshot and snapshot[0] == digest)):
+            generations = dict(st.session_state.get("ai_intake_editor_generations") or {})
+            generations[digest] = generations.get(digest, 0) + 1
+            st.session_state["ai_intake_editor_generations"] = generations
+    if replace_editor or not previous or previous[0] != digest:
         st.session_state.pop("ai_intake_pending_input_errors", None)
         st.session_state.pop("ai_intake_followup_error", None)
     candidate_map = {kind: normalize_trade_values(data) if kind in {"PI", "PO", "CI", "PL"} else data
@@ -237,7 +262,8 @@ def _remember_candidate_bundle(digest: str, candidate_map: dict) -> None:
 
 def _refresh_shared_widgets(digest: str, candidates: dict) -> None:
     """Reflect committed JSON/cross-document edits without hiding rejected input."""
-    current = (digest, _fingerprint(json.dumps(candidates, ensure_ascii=False, sort_keys=True)))
+    current = (digest, _fingerprint(json.dumps(candidates, ensure_ascii=False, sort_keys=True)),
+               _shared_widget_identity(digest))
     pending = _pending_input_errors(digest)
     if st.session_state.get("ai_intake_editor_snapshot") != current:
         prefix = "ai_intake_shared_" + digest[:12] + "_"
@@ -402,7 +428,7 @@ def _shared_current(candidates: dict, field: str) -> str:
 
 def _apply_shared_input(digest: str, field: str, widget: str) -> None:
     saved = st.session_state.get("ai_intake_candidates")
-    if not saved or saved[0] != digest:
+    if not saved or saved[0] != digest or not _is_current_shared_widget(digest, widget):
         return
     raw = str(st.session_state.get(widget) or "").strip()
     if field in {"currency", "item.unit", "item.price_basis"}:
@@ -425,7 +451,7 @@ def _apply_shared_input(digest: str, field: str, widget: str) -> None:
 def _apply_input_to_missing(digest: str, field: str, widget: str) -> None:
     """Fill only absent party facts; retain other documents' named companies."""
     saved = st.session_state.get("ai_intake_candidates")
-    if not saved or saved[0] != digest:
+    if not saved or saved[0] != digest or not _is_current_shared_widget(digest, widget):
         return
     from Quotation_KEKOREA.agent.review_fields import _missing
     role, prop = field.split(".")
@@ -473,7 +499,7 @@ def _acknowledge_ai_notice(digest: str, kind: str,
 
 def _apply_extra_item(digest: str, index: int, field: str, widget: str) -> None:
     saved = st.session_state.get("ai_intake_candidates")
-    if not saved or saved[0] != digest:
+    if not saved or saved[0] != digest or not _is_current_shared_widget(digest, widget):
         return
     raw = str(st.session_state.get(widget) or "").strip()
     try:
@@ -492,7 +518,8 @@ def _edit_contract_fact(digest: str, section: str, identity: str,
                         field: str, widget: str) -> None:
     """Edit contract-specific facts in the same input card; revoke AI clauses."""
     saved = st.session_state.get("ai_intake_candidates")
-    if not saved or saved[0] != digest or not isinstance(saved[1].get("CONTRACT"), dict):
+    if (not saved or saved[0] != digest or not isinstance(saved[1].get("CONTRACT"), dict)
+            or not _is_current_shared_widget(digest, widget)):
         return
     value = str(st.session_state.get(widget) or "").strip()
     if len(value) > 1500 or section not in {"party", "term"}:
@@ -591,12 +618,11 @@ def _render_contract_confirmations(digest: str, snapshot: dict) -> None:
             if role not in {"buyer", "seller"}:
                 for field, label in (("legal_name", "법인명"), ("address", "주소"),
                                      ("country", "설립국")):
-                    widget = f"ai_intake_shared_{digest[:12]}_contract_{role}_{field}"
-                    kwargs = {} if widget in st.session_state else {
-                        "value": str(party.get(field) or "")}
+                    widget = f"ai_intake_shared_{_shared_widget_identity(digest)}_contract_{role}_{field}"
+                    _initialize_shared_widget(widget, str(party.get(field) or ""))
                     st.text_input(role + " · " + label, key=widget,
                                   on_change=_edit_contract_fact,
-                                  args=(digest, "party", role, field, widget), **kwargs)
+                                  args=(digest, "party", role, field, widget))
             else:
                 st.caption("회사명·주소·설립국은 위 공통 입력란에서 수정할 수 있습니다.")
             present = bool(party) and all(str(party.get(field) or "").strip()
@@ -629,11 +655,11 @@ def _render_contract_confirmations(digest: str, snapshot: dict) -> None:
             idx, term = match if match else (None, {})
             value = str(term.get("value") or "")
             if key not in shared_keys:
-                widget = f"ai_intake_shared_{digest[:12]}_contract_term_{key}"
-                kwargs = {} if widget in st.session_state else {"value": value}
+                widget = f"ai_intake_shared_{_shared_widget_identity(digest)}_contract_term_{key}"
+                _initialize_shared_widget(widget, value)
                 st.text_input(LABELS.get(key, key), key=widget,
                               on_change=_edit_contract_fact,
-                              args=(digest, "term", key, "value", widget), **kwargs)
+                              args=(digest, "term", key, "value", widget))
             else:
                 st.caption(LABELS.get(key, key) + ": " + (value or "미입력") +
                            " (위 공통 입력란에서 변경)")
@@ -665,7 +691,7 @@ def _generate_trade_numbers(digest: str, widget: str) -> None:
     from datetime import datetime, timezone, timedelta
     from uuid import uuid4
     saved = st.session_state.get("ai_intake_candidates")
-    if not saved or saved[0] != digest:
+    if not saved or saved[0] != digest or not _is_current_shared_widget(digest, widget):
         return
     updated = deepcopy(saved[1])
     stamp = datetime.now(timezone(timedelta(hours=9))).strftime("%Y%m%d-%H%M%S")
@@ -800,12 +826,12 @@ def _render_contact_inputs(digest: str, candidates: dict, field: str, label: str
     for bundle in groups.values():
         kind = next(iter(bundle))
         suffix = (kind + "_" if len(groups) > 1 else "") + field.replace(".", "_")
-        widget = "ai_intake_shared_" + digest[:12] + "_" + suffix
-        kwargs = {} if widget in st.session_state else {"value": _shared_current(bundle, field)}
+        widget = "ai_intake_shared_" + _shared_widget_identity(digest) + "_" + suffix
+        _initialize_shared_widget(widget, _shared_current(bundle, field))
         st.text_input((kind + " · " if len(groups) > 1 else "") + label,
                       key=widget, help="확인한 연락처를 입력하세요. 해당 없으면 N/A를 직접 입력하세요.",
                       on_change=_apply_shared_input,
-                      args=(digest, kind + "." + field, widget), **kwargs)
+                      args=(digest, kind + "." + field, widget))
     return True
 
 
@@ -853,13 +879,12 @@ def _render_single_editor(digest: str, candidates: dict) -> None:
             if field.startswith(("buyer.", "seller.")) and field.split(".")[-1] in {"contact", "phone", "email"}:
                 if _render_contact_inputs(digest, candidates, field, label):
                     continue
-            widget = "ai_intake_shared_" + digest[:12] + "_" + field.replace(".", "_")
-            kwargs = {} if widget in st.session_state else {
-                "value": _shared_current(candidates, field)}
+            widget = "ai_intake_shared_" + _shared_widget_identity(digest) + "_" + field.replace(".", "_")
+            _initialize_shared_widget(widget, _shared_current(candidates, field))
             help_text = ("누락 정보입니다. 확인한 값 또는 선택 항목의 N/A를 입력하세요."
                          if field in gap_keys else None)
             st.text_input(label, key=widget, help=help_text, on_change=_apply_shared_input,
-                          args=(digest, field, widget), **kwargs)
+                          args=(digest, field, widget))
             if field == "document_number":
                 st.button("문서번호 자동 생성", key=widget + "_generate",
                           on_click=_generate_trade_numbers, args=(digest, widget))
@@ -874,11 +899,10 @@ def _render_single_editor(digest: str, candidates: dict) -> None:
             for field, label in (("product_name", "상품명"), ("quantity", "수량"),
                                  ("unit", "단위"), ("unit_price", "단가"),
                                  ("price_basis", "단가 기준"), ("discount_percent", "할인율 % (없으면 0)")):
-                widget = "ai_intake_shared_" + digest[:12] + "_item_" + str(index) + "_" + field
-                kwargs = {} if widget in st.session_state else {
-                    "value": _shared_current(candidates, f"item.{index}.{field}")}
+                widget = "ai_intake_shared_" + _shared_widget_identity(digest) + "_item_" + str(index) + "_" + field
+                _initialize_shared_widget(widget, _shared_current(candidates, f"item.{index}.{field}"))
                 st.text_input(label, key=widget, on_change=_apply_extra_item,
-                              args=(digest, index, field, widget), **kwargs)
+                              args=(digest, index, field, widget))
         if isinstance(candidates.get("CONTRACT"), dict):
             _render_contract_confirmations(digest, candidates["CONTRACT"])
         # AI may leave free-text conflicts/missing notes that do NOT disappear
@@ -1124,7 +1148,7 @@ def _render_quick_corrections(digest: str, candidate_map: dict) -> None:
                                ("currency", currency)):
                 if value.strip():
                     updated = apply_answer(updated, key, value)
-            _remember_candidate_bundle(digest, updated)
+            _remember_candidate_bundle(digest, updated, replace_editor=True)
             st.session_state["ai_intake_last_answer"] = "Buyer / Seller / 통화"
             st.success("입력 내용이 PI·계약서 후보에 반영됐습니다. 아래 실시간 반영 결과를 확인하세요.")
             st.rerun()
@@ -1213,7 +1237,7 @@ def _render_recovery_inputs(digest: str, analysis: dict, requested: list[str]) -
                 if address.strip():bundle=apply_answer(bundle,role+'.address',address.strip())
             if currency_value.strip():bundle=apply_answer(bundle,'currency',currency_value.strip())
         if bundle:
-            _remember_candidate_bundle(digest, bundle)
+            _remember_candidate_bundle(digest, bundle, replace_editor=True)
         st.session_state.pop("ai_intake_recovery_error", None)
         st.success("입력한 거래조건을 저장하고 문서정보를 다시 만들었습니다.")
     except (ValueError, TypeError, KeyError, RuntimeError) as exc:
@@ -1319,7 +1343,7 @@ def render_ai_intake(principal: str):
                             candidate_map[kind] = make_trade_candidate(
                                 kind, extracted, product_family=family)
             st.session_state["ai_intake_result"] = (digest, extracted)
-            _remember_candidate_bundle(digest, candidate_map)
+            _remember_candidate_bundle(digest, candidate_map, replace_editor=True)
         except (PermissionError, ValueError, RuntimeError, TypeError) as exc:
             st.error("AI 거래조건 추출 실패: " + str(exc)[:400])
 
@@ -1362,7 +1386,7 @@ def render_ai_intake(principal: str):
                     if not original or original[0] != digest:
                         raise ValueError('메일 조건을 다시 추출해 주세요.')
                     candidate_map = deepcopy(original[1])
-                _remember_candidate_bundle(digest, candidate_map)
+                _remember_candidate_bundle(digest, candidate_map, replace_editor=True)
             except (ValueError, TypeError) as exc:
                 st.error("초안 입력 구성 실패: " + str(exc))
     candidates = st.session_state.get("ai_intake_candidates")
@@ -1376,7 +1400,7 @@ def render_ai_intake(principal: str):
                     else value
                     for kind, value in current_bundle.items()}
         if repaired != current_bundle:
-            _remember_candidate_bundle(digest, repaired)
+            _remember_candidate_bundle(digest, repaired, replace_editor=True)
             candidates = st.session_state.get("ai_intake_candidates")
         _render_single_editor(digest, candidates[1])
         candidates = st.session_state.get("ai_intake_candidates")
@@ -1426,7 +1450,7 @@ def render_ai_intake(principal: str):
                         # explicit clause verification before the final approval.
                     st.session_state.pop("ai_intake_pending_input_errors", None)
                     st.session_state.pop("ai_intake_followup_error", None)
-                    _remember_candidate_bundle(digest, pending_json)
+                    _remember_candidate_bundle(digest, pending_json, replace_editor=True)
                     st.success("고급 JSON 변경값을 후보에 반영했습니다. 계약조건을 다시 확인하세요.")
                     st.rerun()
                 except (TypeError, ValueError, KeyError):
@@ -1595,7 +1619,7 @@ def render_ai_intake(principal: str):
                     # Use an explicit callback state, never modify saved contract.
                     updated = deepcopy(edited)
                     updated["CONTRACT"] = generated
-                    _remember_candidate_bundle(digest, updated)
+                    _remember_candidate_bundle(digest, updated, replace_editor=True)
                     st.success("새 DRAFT 조항을 생성했습니다. 조건과 문구를 확인한 뒤 검증·다운로드하세요.")
                     st.rerun()
                 except (ValueError, RuntimeError, KeyError, TypeError) as exc:

@@ -34,7 +34,7 @@ if 'ai_intake_candidates' not in st.session_state:
         return patch('Quotation_KEKOREA.orchestration.workflows.legacy_document_exports.resolve_company_seal',
                      return_value=(Path('/not-present/seal.png'),image.getvalue(),None))
 
-    def full_app(self):
+    def full_app(self,doc=None):
         from hashlib import sha256
         from Quotation_KEKOREA.orchestration.ui import ai_intake_page
         instruction='Synthetic PI request'
@@ -45,7 +45,7 @@ if 'ai_intake_candidates' not in st.session_state:
     st.session_state['ai_intake_instruction']=INSTRUCTION
     st.session_state['ai_intake_candidates']=(DIGEST,DOC)
 render_ai_intake('synthetic@example.test')
-'''.replace('INSTRUCTION',repr(instruction)).replace('DIGEST',repr(digest)).replace('DOC',repr({'PI':self.doc()}))
+'''.replace('INSTRUCTION',repr(instruction)).replace('DIGEST',repr(digest)).replace('DOC',repr({'PI':doc if doc is not None else self.doc()}))
         for name, value in (('_model_config',{}),('document_export_env',{}),('_reference_panel',None)):
             replacement=patch.object(ai_intake_page,name,return_value=value)
             replacement.start();self.addCleanup(replacement.stop)
@@ -202,6 +202,68 @@ render_ai_intake('synthetic@example.test')
                          'SYNTHETIC JSON ADDRESS')
         self.assertEqual(next(t for t in app.text_input if t.label=='Buyer · 구매자 법인 주소').value,
                          'SYNTHETIC JSON ADDRESS')
+
+    def test_old_browser_widget_payload_cannot_overwrite_committed_json(self):
+        doc=self.doc();doc['document_number']='DRAFT';doc['buyer']['address']=''
+        for field in ('unit','price_basis','discount_percent'):
+            doc['items'][0][field]=''
+        app=self.full_app(doc)
+        expected={
+            '문서번호 (미확정은 DRAFT)':'PI-SYNTHETIC-CHECK',
+            '수량 단위':'PCS', '단가 기준':'PCS', '할인율 % (할인이 없으면 0)':'0',
+        }
+        old_ids={t.label:t.proto.id for t in app.text_input if t.label in expected}
+        old_browser={w.id:deepcopy(w) for w in app._tree.get_widget_states().widgets
+                     if w.id in old_ids.values()}
+        revised=deepcopy(app.session_state['ai_intake_candidates'][1])
+        revised['PI']['document_number']='PI-SYNTHETIC-CHECK'
+        revised['PI']['items'][0].update(unit='PCS',price_basis='PCS',discount_percent='0')
+        next(t for t in app.text_area if t.label=='문서별 JSON 조건 (고급 편집)').set_value(
+            json.dumps(revised)).run()
+        next(b for b in app.button if b.label=='고급 JSON 변경값 후보에 반영').click().run()
+        self.assertFalse(app.exception,[e.message for e in app.exception])
+
+        # Replay the browser's old wire states, alongside the only new edit.
+        # AppTest.value alone reads backend state and missed this production bug.
+        incoming=app._tree.get_widget_states()
+        for old_id, stale in old_browser.items():
+            target=next((w for w in incoming.widgets if w.id==old_id),None)
+            if target is None:
+                incoming.widgets.add().CopyFrom(stale)
+            else:
+                target.CopyFrom(stale)
+        address_id=next(t.proto.id for t in app.text_input if t.label=='Buyer · 구매자 법인 주소')
+        next(w for w in incoming.widgets if w.id==address_id).string_value='SYNTHETIC CURRENT ADDRESS'
+        app._run(widget_state=incoming)
+        self.assertFalse(app.exception,[e.message for e in app.exception])
+        current=app.session_state['ai_intake_candidates'][1]['PI']
+        self.assertEqual(current['document_number'],'PI-SYNTHETIC-CHECK')
+        self.assertEqual(current['buyer']['address'],'SYNTHETIC CURRENT ADDRESS')
+        self.assertEqual(current['items'][0]['unit'],'PCS')
+        self.assertEqual(current['items'][0]['price_basis'],'PCS')
+        self.assertEqual(current['items'][0]['discount_percent'],'0')
+        self.assertEqual(app.session_state['ai_intake_last_answer'],'buyer.address')
+        for widget in app.text_input:
+            if widget.label in expected:
+                # A fresh identity mounts at its default; an existing one must
+                # explicitly tell the real frontend to replace its old value.
+                self.assertTrue(widget.proto.id != old_ids[widget.label] or widget.proto.set_value)
+                shown=widget.proto.value if widget.proto.set_value else widget.proto.default
+                self.assertEqual(shown,expected[widget.label])
+
+    def test_shared_contact_update_tells_browser_to_refresh_the_other_company_field(self):
+        pi=self.doc();pi['buyer']['legal_name']='SYNTHETIC CUSTOMER'
+        po=deepcopy(pi);po.update(document_type='PO',buyer=deepcopy(pi['seller']))
+        po['seller']['legal_name']='SYNTHETIC SUPPLIER'
+        app=self.app(bundle={'PI':pi,'PO':po},editor=True)
+        old_id=next(t.proto.id for t in app.text_input if t.label=='PO · Buyer · 이메일')
+        next(t for t in app.text_input if t.label=='PI · Seller · 이메일').set_value(
+            'company@example.test').run()
+        self.assertFalse(app.exception,[e.message for e in app.exception])
+        counterpart=next(t for t in app.text_input if t.label=='PO · Buyer · 이메일')
+        self.assertTrue(counterpart.proto.id != old_id or counterpart.proto.set_value)
+        shown=counterpart.proto.value if counterpart.proto.set_value else counterpart.proto.default
+        self.assertEqual(shown,'company@example.test')
 
     def test_rejected_input_blocks_each_document_generation_button(self):
         app=self.full_app()

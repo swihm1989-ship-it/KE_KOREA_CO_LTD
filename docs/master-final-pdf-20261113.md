@@ -50,6 +50,16 @@ PI output, missing bank fields remain blank.
    Streamlit page revision advances to v8. Confirmed or malformed model statuses
    remain rejected.
 
+6. Live browser verification then exposed a client/server state mismatch after
+   advanced JSON replacement. The server candidate was correct, but the browser
+   retained keyed inputs because only their defaults changed. Its next widget
+   payload restored the old DRAFT number and empty unit/basis/discount. AppTest
+   `.value` checks had seen only the correct server state. New regressions replay
+   the real `WidgetStates` payload. Candidate replacement now advances the
+   editor generation; normal synchronized fields receive an explicit frontend
+   value update. Pending invalid text and approval revocation are preserved.
+   The page and entrypoint revisions advance together to v9.
+
 ## Approval and output boundaries
 
 Approval is bound to normalized current document content, the Seoul issue date,
@@ -71,8 +81,8 @@ The CONTRACT final engine and RAG changes are outside this trade-output path.
 ## Verification
 
 - Required legacy document/contract suite: 707 passed, no failures or skips.
-- Final MASTER suite: 470 passed, no failures or skips.
-- Combined final regression result: 1,177 passed, no failures or skips.
+- Final MASTER suite: 472 passed, no failures or skips.
+- Combined final regression result: 1,179 passed, no failures or skips.
 - Live extraction regression coverage adds six tests for upstream missing-term
   responses, invalid statuses, a contract-only stale-module path, and the single
   editor's missing-quantity-to-explicit-zero flow. The related 30-test focused
@@ -94,16 +104,28 @@ The CONTRACT final engine and RAG changes are outside this trade-output path.
 
 ## Production verification
 
-The MASTER Google login screen was observed at
-`https://ke-korea-master.streamlit.app/`. The first attempt to click Google
-sign-in was rejected by automatic approval review. The owner subsequently
-explicitly approved production Google sign-in and final PDF verification.
-The authenticated AI intake screen was then observed, and two synthetic
-requests reproduced the missing-term compatibility failure before deployment.
-The fix is included in this release. Final PDF download, blank/zero values,
-and reapproval after edits remain post-merge checks. Their final results will
-be recorded in [PR #95](https://github.com/swihm1989-ship-it/KE_KOREA_CO_LTD/pull/95),
-separately from local and GitHub CI results.
+PR #95 was merged as `818939344b9808477780c11e3e2a0ec224a59df7`. Its three
+pull-request CI workflows and the subsequent main push contract workflow passed.
+The authenticated MASTER app at `https://ke-korea-master.streamlit.app/` then
+successfully accepted the previously failing synthetic request with missing
+quantity and opened the single editor.
+
+The live app generated and downloaded two synthetic FINAL PDFs. The first
+retained the manually typed buyer address/email, left quantity and dependent
+amounts blank, used the existing company layout and seal, and had a FINAL
+footer without DRAFT or unknown-value placeholders. Changing quantity to `0`
+removed the prior approval/download. A new approval produced a second actual
+PDF showing `0 PCS` and `$0.00`. No email, order, saved transaction, or contract
+execution was performed. Real company assets and bank details were not added
+to this repository.
+
+The same live session exposed the advanced-JSON widget-state overwrite described
+above. The follow-up is covered by two protocol regressions plus 57 focused
+UI/mail/editor tests; the complete suites passed again (707 legacy plus 472 MASTER) before publication. The
+exact browser replacement/edit/download sequence will be repeated after the
+follow-up deploy. Final live results are recorded in
+[PR #95](https://github.com/swihm1989-ship-it/KE_KOREA_CO_LTD/pull/95), separately
+from local and GitHub CI results.
 
 ## GitHub publication status
 
@@ -111,6 +133,25 @@ The first release-tree upload was rejected by automatic approval review for
 missing explicit current-turn publication authorization. The owner subsequently
 explicitly approved uploading this reviewed change to
 `swihm1989-ship-it/KE_KOREA_CO_LTD`, opening the PR, checking CI, and merging to
-main after CI passes. The implementation, all 1,177 passing regression tests,
+main after CI passes. The implementation, all 1,179 passing regression tests,
 and local commit are complete; publication resumes under that approval. No
 alternate upload path was used to bypass the original rejection.
+
+## Browser follow-up publication blocker
+
+The browser widget-state follow-up passed all 1,179 local regressions and
+independent review, but its 10-file release-tree upload was rejected by automatic
+approval review. A read-only check confirmed that the authenticated GitHub
+account owns the target repository and has admin/push permission, and that the
+repository is public. The follow-up adds reviewed UI code, synthetic tests and
+README/verification updates; private assets, configuration and downloaded PDFs
+are excluded. Retrying the same upload after those checks was also rejected
+because the trusted user text did not explicitly name this follow-up payload
+and its public destination. No alternate upload method was attempted.
+
+PR #95 remains merged and its blank/zero FINAL production checks succeeded.
+The widget-state follow-up is preserved in the local commit and patch, with no
+follow-up remote branch or PR created. Its publication requires explicit
+authorization naming public repository `swihm1989-ship-it/KE_KOREA_CO_LTD` and
+the 10 source/test/documentation files. After approval, the remaining steps are
+PR creation, CI, main merge, and the exact browser edit/download recheck.
