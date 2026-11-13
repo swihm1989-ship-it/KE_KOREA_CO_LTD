@@ -15,9 +15,10 @@ from Quotation_KEKOREA.agent.branding import resolve_company_seal
 from Quotation_KEKOREA.agent.ci_import import ci_render_data, ci_import_issues
 from Quotation_KEKOREA.agent.renderers import render_files
 from Quotation_KEKOREA.agent.trade_documents import validate_and_calculate
+from Quotation_KEKOREA.agent.review_fields import missing_review_fields
 from Quotation_KEKOREA.orchestration.workflows.commercial_values import normalize_trade_values
 
-REVIEW_EXPORT_REVISION = "review-pdf-safe-loader-20261113-v1"
+REVIEW_EXPORT_REVISION = "review-pdf-safe-loader-20261113-v2"
 
 TRADE_KINDS = frozenset({"PI", "PO", "CI", "PL"})
 BANK_KEYS = ("BENEFICIARY", "BANK_NAME", "BRANCH", "SWIFT", "ACCOUNT_NUMBER", "BANK_ADDRESS")
@@ -50,6 +51,9 @@ def render_master_trade_draft(kind: str, source: Mapping, env: Mapping[str, str]
         blockers.extend(ci_import_issues(checked))
     if blockers or not checked.get("ready_for_issue"):
         raise ValueError("거래조건을 먼저 보완하세요: " + "; ".join(map(str, blockers[:8])))
+    pending = missing_review_fields(candidate)
+    if pending:
+        raise ValueError("문서 생성 전 누락 정보 입력: " + "; ".join(field.label for field in pending))
     bank = {key: str(env.get("KEKOREA_USD_" + key) or "").strip() for key in BANK_KEYS}
     if kind == "PI" and any(not value for value in bank.values()):
         raise ValueError("기존 업무 에이전트와 동일하게 PI 은행정보 6개 항목이 모두 필요합니다.")
@@ -184,6 +188,9 @@ def render_incomplete_trade_pdf(kind: str, source: Mapping) -> dict:
         line(role.upper(), size=12, heading=True)
         line("Legal name: " + stated(party.get("legal_name")))
         line("Address: " + stated(party.get("address")))
+        line("Tel: " + stated(party.get("phone")))
+        line("Email: " + stated(party.get("email")))
+        line("Representative: " + stated(party.get("contact")))
     line("COMMERCIAL TERMS", size=12, heading=True)
     for label, key in (("Currency", "currency"), ("Delivery", "incoterms"),
                        ("Payment", "payment_terms"), ("Shipment reference", "shipment_reference"),

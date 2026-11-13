@@ -225,9 +225,10 @@ class LegacyCommercialValueTests(unittest.TestCase):
     def test_legacy_export_normalizes_advanced_json_before_validation(self):
         from unittest.mock import patch
         from Quotation_KEKOREA.orchestration.workflows.legacy_document_exports import render_master_trade_draft
-        raw = {'document_type': 'PI', 'currency': '', 'items': [
+        from Quotation_KEKOREA.tests.test_review_fields import complete_draft
+        raw = dict(complete_draft(), currency='', items=[
             {'product_name': 'Hanwha Solar Cell', 'quantity': '2325860', 'unit': '',
-             'unit_price': '$0.2/pc', 'price_basis': '', 'price_source': ''}]}
+             'unit_price': '$0.2/pc', 'price_basis': '', 'price_source': '', 'discount_percent': '0'}])
         with patch('Quotation_KEKOREA.orchestration.workflows.legacy_document_exports.validate_and_calculate',
                    return_value={'blocking_issues': [], 'ready_for_issue': True}) as validate:
             with self.assertRaisesRegex(ValueError, '은행정보'):
@@ -248,6 +249,10 @@ class LegacyCommercialValueTests(unittest.TestCase):
         pi.update(seller={'legal_name': 'KE KOREA CO. LTD', 'address': 'Test address'},
                   buyer={'legal_name': 'Example Buyer Ltd', 'address': 'Wuxi'},
                   incoterms='EXW Jincheon', payment_terms='T/T', doc_no='TEST-UNIT')
+        pi.update(ship_to='N/A', country_of_origin='Korea', shipment_reference='N/A')
+        for role in ('seller', 'buyer'):
+            pi[role].update(contact='N/A', phone='N/A', email='N/A')
+        pi['items'][0]['discount_percent'] = '0'
         # Restore the same advanced-JSON notation shown in the reported issue.
         pi['currency'] = ''
         pi['items'][0].update(unit='', unit_price='$0.2/pc', price_basis='')

@@ -18,8 +18,8 @@ from Quotation_KEKOREA.orchestration.router import DOC_TYPES, classify
 from Quotation_KEKOREA.orchestration.workflows.commercial_values import normalize_trade_values
 from Quotation_KEKOREA.orchestration.workflows.label_typos import canonical_label
 from Quotation_KEKOREA.orchestration.workflows.ai_intake import (
-    extract_candidate, make_contract_candidate, make_trade_candidate,
-    generate_contract_draft, selected_contract_reference,
+    extract_candidate, make_contract_candidate,
+    selected_contract_reference,
 )
 from Quotation_KEKOREA.orchestration.workflows.unified_review import (
     new_request, prepare_documents,
@@ -32,8 +32,25 @@ from Quotation_KEKOREA.orchestration.workflows.document_assets import (
 # module in sys.modules while reloading this page's source code.
 FOLLOWUP_MODULE = "Quotation_KEKOREA.orchestration.workflows.intake_followups"
 PDF_EXPORT_MODULE = "Quotation_KEKOREA.orchestration.workflows.legacy_document_exports"
-PDF_EXPORT_REVISION = "review-pdf-safe-loader-20261113-v1"
-AI_INTAKE_REVISION = "ai-intake-hot-reload-20261113-v4"
+PDF_EXPORT_REVISION = "review-pdf-safe-loader-20261113-v2"
+AI_INTAKE_REVISION = "ai-intake-hot-reload-20261113-v5"
+
+
+def _current_ai_workflow():
+    """Keep pre-deploy workers compatible with the current workflow API."""
+    module = importlib.import_module("Quotation_KEKOREA.orchestration.workflows.ai_intake")
+    if getattr(module, "AI_WORKFLOW_REVISION", None) != "trade-party-contacts-20261113-v1":
+        importlib.invalidate_caches()
+        module = importlib.reload(module)
+    return module
+
+
+def make_trade_candidate(*args, **kwargs):
+    return _current_ai_workflow().make_trade_candidate(*args, **kwargs)
+
+
+def generate_contract_draft(*args, **kwargs):
+    return _current_ai_workflow().generate_contract_draft(*args, **kwargs)
 
 
 def _current_intake_followups():
@@ -45,7 +62,7 @@ def _current_intake_followups():
             compatible = callable(func) and "allow_blank" in signature(func).parameters
         except (TypeError, ValueError):
             compatible = False
-        if not compatible:
+        if not compatible or getattr(module, "FOLLOWUP_REVISION", None) != "visible-document-fields-20261113-v1":
             importlib.invalidate_caches()
             module = importlib.reload(module)
             func = getattr(module, "apply_answer", None)
@@ -105,6 +122,8 @@ def _formal_pdf_hold_reason(kind: str, error: Exception, env: dict) -> str:
     The strict existing renderer remains authoritative for actual issuance.
     """
     message = str(error)
+    if message.startswith("문서 생성 전 누락 정보"):
+        return "문서 생성 전 누락 정보가 있습니다. 위 거래정보 입력창에서 연락처 등 표시된 항목을 입력하세요."
     if message.startswith("거래조건을 먼저 보완하세요:"):
         return ("거래조건 검증 미통과입니다. 위 '발행 전 추가 확인사항'의 "
                 "구체적인 오류 및 '이전 AI 추출 기록'의 미확정·충돌 항목을 확인하세요.")
@@ -215,8 +234,15 @@ SHARED_FIELDS = (
     ("document_number", "문서번호 (미확정은 DRAFT)"),
     ("buyer.legal_name", "Buyer · 구매자 법인명"),
     ("buyer.address", "Buyer · 구매자 법인 주소"),
+    ("buyer.contact", "Buyer · 담당자 / 대표자"),
+    ("buyer.phone", "Buyer · 전화번호"),
+    ("buyer.email", "Buyer · 이메일"),
     ("seller.legal_name", "Seller · 판매자 법인명"),
     ("seller.address", "Seller · 판매자 법인 주소"),
+    ("seller.contact", "Seller · 담당자 / 대표자"),
+    ("seller.phone", "Seller · 전화번호"),
+    ("seller.email", "Seller · 이메일"),
+    ("ship_to", "배송지 (해당 없으면 N/A)"),
     ("currency", "통화 (USD / KRW / EUR / CNY)"),
     ("incoterms", "인도조건 및 장소"),
     ("payment_terms", "결제조건"),
@@ -225,8 +251,10 @@ SHARED_FIELDS = (
     ("item.unit", "수량 단위"),
     ("item.unit_price", "단가"),
     ("item.price_basis", "단가 기준"),
-    ("shipment_reference", "선적 참조번호 (CI / PL)"),
-    ("country_of_origin", "제품 원산지 (CI)"),
+    ("item.discount_percent", "할인율 % (할인이 없으면 0)"),
+    ("container_count", "컨테이너 수 (컨테이너 운송이 아니면 0)"),
+    ("shipment_reference", "선적 참조번호 (CI / PL 필수 · 해당 없으면 N/A)"),
+    ("country_of_origin", "제품 원산지 (CI 필수 · 해당 없으면 N/A)"),
 )
 
 
@@ -235,19 +263,39 @@ def _shared_current(candidates: dict, field: str) -> str:
     trade = next((doc for kind, doc in candidates.items()
                   if kind in {"PI", "PO", "CI", "PL"} and isinstance(doc, dict)), {})
     contract = candidates.get("CONTRACT") or {}
+    from Quotation_KEKOREA.agent.review_fields import _missing, missing_review_fields
+    # Keep a gap visible even when an earlier document already has a value.
+    # Typing into this one shared input then updates every applicable candidate.
+    for kind, doc in candidates.items():
+        if kind not in {"PI", "PO", "CI", "PL"} or not isinstance(doc, dict):
+            continue
+        for pending in missing_review_fields(dict(doc, document_type=kind)):
+            path = pending.path
+            pending_key = ("item." + (str(path[1]) + "." if path[1] else "") + path[2]
+                           if path[0] == "items" else ".".join(path))
+            if pending_key == field and field not in {
+                    "buyer.legal_name", "seller.legal_name", "buyer.address", "seller.address"}:
+                return ""
     if field.startswith(("buyer.", "seller.")):
         role, prop = field.split(".", 1)
         value = str((trade.get(role) or {}).get(prop) or "").strip()
-        if value:
+        if not _missing(value, prop in {"legal_name", "address", "country"}):
             return value
-        return next((str(p.get(prop) or "") for p in contract.get("parties", [])
+        if trade and prop != "country":
+            return ""
+        return next((str(p.get("representative" if prop == "contact" else prop) or "") for p in contract.get("parties", [])
                      if isinstance(p, dict) and role in [
                          canonical_label(str(r)) or str(r)
                          for r in p.get("roles", [])]), "")
     if field.startswith("item."):
-        prop = field.split(".", 1)[1]
-        value = (trade.get("items") or [{}])[0].get(prop)
-        if value is not None and str(value).strip():
+        parts = field.split(".")
+        index = int(parts[1]) if len(parts) == 3 else 0
+        prop = parts[-1]
+        row = next((doc["items"][index] for kind, doc in candidates.items()
+                    if kind in {"PI", "PO", "CI", "PL"} and isinstance(doc, dict)
+                    and len(doc.get("items") or []) > index), {})
+        value = row.get(prop)
+        if not _missing(value, True):
             return str(value)
         term = {"product_name": "products", "quantity": "quantity",
                 "unit": "unit", "unit_price": "unit_price"}.get(prop)
@@ -256,7 +304,7 @@ def _shared_current(candidates: dict, field: str) -> str:
                          if t.get("key") == term), "")
         return ""
     value = trade.get(field)
-    if value is not None and str(value).strip():
+    if not _missing(value, field in {"currency", "document_number", "incoterms", "container_count"}):
         return str(value)
     term = {"currency": "currency", "incoterms": "delivery",
             "payment_terms": "payment_trigger"}.get(field)
@@ -284,7 +332,46 @@ def _apply_shared_input(digest: str, field: str, widget: str) -> None:
     st.session_state.pop("master_legacy_files", None)
     st.session_state.pop("master_contract_final_files", None)
     st.session_state["ai_intake_last_answer"] = field
+    if field.split(".")[-1] in {"contact", "phone", "email"}:
+        # A company can be PO buyer and PI seller. Refresh its other contact
+        # widgets from the updated candidates before the next script run.
+        suffixes = tuple("_" + role + "_" + prop for role in ("buyer", "seller")
+                         for prop in ("contact", "phone", "email"))
+        for key in list(st.session_state):
+            if str(key).startswith("ai_intake_shared_" + digest[:12] + "_") and str(key).endswith(suffixes):
+                st.session_state.pop(key, None)
     st.session_state.pop("ai_intake_followup_error", None)
+
+
+def _apply_input_to_missing(digest: str, field: str, widget: str) -> None:
+    """Fill only absent party facts; retain other documents' named companies."""
+    saved = st.session_state.get("ai_intake_candidates")
+    if not saved or saved[0] != digest:
+        return
+    from Quotation_KEKOREA.agent.review_fields import _missing
+    role, prop = field.split(".")
+    raw = str(st.session_state.get(widget) or "").strip()
+    if role not in {"buyer", "seller"} or prop not in {"legal_name", "address", "country"}:
+        return
+    updated = deepcopy(saved[1])
+    try:
+        for kind, doc in list(updated.items()):
+            if kind in {"PI", "PO", "CI", "PL"} and isinstance(doc, dict):
+                if prop != "country" and _missing((doc.get(role) or {}).get(prop), True):
+                    updated[kind] = apply_answer({kind: doc}, field, raw)[kind]
+            elif kind == "CONTRACT" and isinstance(doc, dict):
+                party = next((p for p in doc.get("parties") or []
+                              if role in [canonical_label(str(r)) or str(r)
+                                          for r in p.get("roles", [])]), {})
+                if _missing(party.get(prop), True):
+                    updated[kind] = apply_answer({kind: doc}, field, raw)[kind]
+    except (ValueError, TypeError, RuntimeError) as exc:
+        st.session_state["ai_intake_followup_error"] = str(exc)
+        return
+    _remember_candidate_bundle(digest, updated)
+    st.session_state.pop("master_legacy_files", None)
+    st.session_state.pop("ai_intake_followup_error", None)
+    st.session_state["ai_intake_last_answer"] = field + " (누락 항목만 반영)"
 
 
 def _acknowledge_ai_notice(digest: str, kind: str,
@@ -310,33 +397,11 @@ def _apply_extra_item(digest: str, index: int, field: str, widget: str) -> None:
     if not saved or saved[0] != digest:
         return
     raw = str(st.session_state.get(widget) or "").strip()
-    # Edit all matching item positions without losing any additional item rows.
-    from decimal import Decimal, InvalidOperation
-    if raw and field in {"quantity", "unit_price"}:
-        try:
-            number = Decimal(raw.replace(",", ""))
-            if not number.is_finite() or number < 0 or (field == "unit_price" and number == 0):
-                raise InvalidOperation
-        except (ValueError, InvalidOperation):
-            st.session_state["ai_intake_followup_error"] = "수량과 단가는 올바른 0 이상 숫자로 입력하세요."
-            return
-    updated = deepcopy(saved[1])
-    for kind, source in updated.items():
-        if kind not in {"PI", "PO", "CI", "PL"} or not isinstance(source, dict):
-            continue
-        rows = source.get("items") or []
-        if index >= len(rows):
-            continue
-        rows[index][field] = raw
-        if field == "quantity":
-            if raw:
-                from Quotation_KEKOREA.orchestration.workflows.mail_trade_normalization import apply_quantity_edit
-                apply_quantity_edit(rows[index], raw)
-            else:
-                for derived in ("paid_quantity", "shipped_quantity", "display_quantity"):
-                    rows[index].pop(derived, None)
-    if isinstance(updated.get("CONTRACT"), dict):
-        updated["CONTRACT"]["clauses"] = []
+    try:
+        updated = apply_answer(saved[1], f"item.{index}.{field}", raw, allow_blank=True)
+    except (ValueError, TypeError, RuntimeError) as exc:
+        st.session_state["ai_intake_followup_error"] = str(exc)
+        return
     _remember_candidate_bundle(digest, updated)
     st.session_state.pop("master_legacy_files", None)
     st.session_state["ai_intake_last_answer"] = "item " + str(index + 1)
@@ -516,23 +581,49 @@ def _render_contract_confirmations(digest: str, snapshot: dict) -> None:
                 st.error("계약서 차단 사항: " + str(issue.get("message") or ""))
 
 
+def _render_contact_inputs(digest: str, candidates: dict, field: str, label: str) -> bool:
+    """Keep contacts separate when a PO and sales document name different firms."""
+    from Quotation_KEKOREA.agent.review_fields import _missing
+    role, prop = field.split(".")
+    groups = {}
+    for kind, doc in candidates.items():
+        if kind not in {"PI", "PO", "CI", "PL"} or not isinstance(doc, dict):
+            continue
+        name = str((doc.get(role) or {}).get("legal_name") or "").strip().casefold()
+        identity = name if not _missing(name, True) else kind
+        groups.setdefault(identity, {})[kind] = doc
+    if not groups:
+        return False
+    for bundle in groups.values():
+        kind = next(iter(bundle))
+        suffix = (kind + "_" if len(groups) > 1 else "") + field.replace(".", "_")
+        widget = "ai_intake_shared_" + digest[:12] + "_" + suffix
+        kwargs = {} if widget in st.session_state else {"value": _shared_current(bundle, field)}
+        st.text_input((kind + " · " if len(groups) > 1 else "") + label,
+                      key=widget, help="확인한 연락처를 입력하세요. 해당 없으면 N/A를 직접 입력하세요.",
+                      on_change=_apply_shared_input,
+                      args=(digest, kind + "." + field, widget), **kwargs)
+    return True
+
+
 def _render_single_editor(digest: str, candidates: dict) -> None:
     """One editor is the source of truth for trade/contract and PDF output."""
     trade = next((doc for kind, doc in candidates.items()
                   if kind in {"PI", "PO", "CI", "PL"} and isinstance(doc, dict)), {})
     fields = list(SHARED_FIELDS)
+    gaps = missing_fields(candidates)
+    gap_keys = {gap.key for gap in gaps}
     if not trade:
         fields = [(key, label) for key, label in fields
                   if key not in {"document_number", "incoterms", "payment_terms",
-                                 "item.price_basis", "shipment_reference", "country_of_origin"}]
+                                 "item.price_basis", "item.discount_percent", "shipment_reference",
+                                 "country_of_origin", "container_count", "ship_to"}]
         fields.extend((("buyer.country", "Buyer · 설립국"),
                        ("seller.country", "Seller · 설립국")))
     else:
         requested_kinds = {key for key in candidates if key in {"PI", "PO", "CI", "PL"}}
-        if not requested_kinds.intersection({"CI", "PL"}):
-            fields = [(k, label) for k, label in fields if k != "shipment_reference"]
-        if "CI" not in requested_kinds:
-            fields = [(k, label) for k, label in fields if k != "country_of_origin"]
+        if "PL" not in requested_kinds:
+            fields = [(k, label) for k, label in fields if k != "container_count"]
     if isinstance(candidates.get("CONTRACT"), dict):
         for country_field, country_label in (("buyer.country", "Buyer · 설립국"),
                                              ("seller.country", "Seller · 설립국")):
@@ -541,6 +632,10 @@ def _render_single_editor(digest: str, candidates: dict) -> None:
     with st.container(border=True):
         st.markdown("#### ✏️ 거래정보 입력 · 수정 (한 번만)")
         st.caption("한 곳에서 입력한 값이 PI/PO/CI/PL·계약서 후보와 PDF 입력에 함께 반영됩니다. Enter 또는 칸 이동 시 자동 저장됩니다.")
+        st.caption("전화번호·이메일·담당자 등 선택 항목이 해당 없으면 N/A를 직접 입력하세요. "
+                   "Not provided / TBD는 입력 완료로 처리하지 않습니다.")
+        if gaps:
+            st.warning("문서 생성 전 누락 정보 입력: " + "; ".join(gap.label for gap in gaps))
         error = st.session_state.get("ai_intake_followup_error")
         if error:
             st.error(error)
@@ -548,20 +643,30 @@ def _render_single_editor(digest: str, candidates: dict) -> None:
         if last:
             st.caption("최근 반영: " + str(last) + " · 이전 PDF 및 검토 상태 무효화")
         for field, label in fields:
+            if field.startswith(("buyer.", "seller.")) and field.split(".")[-1] in {"contact", "phone", "email"}:
+                if _render_contact_inputs(digest, candidates, field, label):
+                    continue
             widget = "ai_intake_shared_" + digest[:12] + "_" + field.replace(".", "_")
             kwargs = {} if widget in st.session_state else {
                 "value": _shared_current(candidates, field)}
-            st.text_input(label, key=widget, on_change=_apply_shared_input,
+            help_text = ("누락 정보입니다. 확인한 값 또는 선택 항목의 N/A를 입력하세요."
+                         if field in gap_keys else None)
+            st.text_input(label, key=widget, help=help_text, on_change=_apply_shared_input,
                           args=(digest, field, widget), **kwargs)
-        extra = (trade.get("items") or [])[1:]
-        for index, row in enumerate(extra, 1):
+            if field in gap_keys and _shared_current(candidates, field):
+                st.button(label + " · 현재 값으로 누락 항목에도 반영",
+                          key=widget + "_apply_to_missing", on_click=_apply_input_to_missing,
+                          args=(digest, field, widget))
+        item_count = max((len(doc.get("items") or []) for kind, doc in candidates.items()
+                          if kind in {"PI", "PO", "CI", "PL"} and isinstance(doc, dict)), default=0)
+        for index in range(1, item_count):
             st.markdown("**상품 " + str(index + 1) + "**")
             for field, label in (("product_name", "상품명"), ("quantity", "수량"),
                                  ("unit", "단위"), ("unit_price", "단가"),
-                                 ("price_basis", "단가 기준")):
+                                 ("price_basis", "단가 기준"), ("discount_percent", "할인율 % (없으면 0)")):
                 widget = "ai_intake_shared_" + digest[:12] + "_item_" + str(index) + "_" + field
                 kwargs = {} if widget in st.session_state else {
-                    "value": str(row.get(field) or "")}
+                    "value": _shared_current(candidates, f"item.{index}.{field}")}
                 st.text_input(label, key=widget, on_change=_apply_extra_item,
                               args=(digest, index, field, widget), **kwargs)
         if isinstance(candidates.get("CONTRACT"), dict):
@@ -582,13 +687,13 @@ def _render_single_editor(digest: str, candidates: dict) -> None:
             st.warning(str(exc))
         else:
             if gaps:
-                st.warning("미입력 필수항목 " + str(len(gaps)) +
+                st.warning("미입력·확인 필요 항목 " + str(len(gaps)) +
                            "개 · 비어 있어도 검토용 PDF 생성 가능")
-            elif unresolved:
-                st.warning("입력칸은 채워졌지만 이전 AI 확인 기록 " +
+            if unresolved:
+                st.warning("이전 AI 확인 기록 " +
                            str(len(unresolved)) +
                            "건이 남아 있습니다. 아래에서 실제 조건과 대조하세요.")
-            else:
+            elif not gaps:
                 st.success("기본 거래정보 입력 및 이전 AI 기록 확인 완료 · "
                            "은행정보·직인 등 정식 발행 검증은 별도입니다.")
         if unresolved:
