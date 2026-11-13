@@ -263,7 +263,7 @@ def fetch_messages(endpoint: Endpoint, limit: int=30) -> tuple[MailMessage,...]:
                 continue
             try:
                 lines = client.retr(number)[1]
-                raw = b'\\r\\n'.join(lines)
+                raw = b'\r\n'.join(lines)
             except Exception:
                 failed_uids.append(uid)
                 continue
@@ -299,7 +299,7 @@ def fetch_messages(endpoint: Endpoint, limit: int=30) -> tuple[MailMessage,...]:
                 if total + size > MAX_BATCH_BYTES:
                     continue
                 try:
-                    raw = b'\\r\\n'.join(retry_client.retr(number)[1])
+                    raw = b'\r\n'.join(retry_client.retr(number)[1])
                     total += len(raw)
                     if total > MAX_BATCH_BYTES:
                         break
