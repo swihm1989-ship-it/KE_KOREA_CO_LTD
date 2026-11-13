@@ -17,6 +17,8 @@ from Quotation_KEKOREA.agent.renderers import render_files
 from Quotation_KEKOREA.agent.trade_documents import validate_and_calculate
 from Quotation_KEKOREA.orchestration.workflows.commercial_values import normalize_trade_values
 
+REVIEW_EXPORT_REVISION = "review-pdf-safe-loader-20261113-v1"
+
 TRADE_KINDS = frozenset({"PI", "PO", "CI", "PL"})
 BANK_KEYS = ("BENEFICIARY", "BANK_NAME", "BRANCH", "SWIFT", "ACCOUNT_NUMBER", "BANK_ADDRESS")
 MIMES = {"pdf": "application/pdf",
