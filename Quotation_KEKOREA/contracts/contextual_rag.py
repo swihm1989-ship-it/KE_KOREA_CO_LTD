@@ -113,6 +113,95 @@ def sections_from_extraction(extracted, *, max_sections=MAX_SECTIONS):
     return sections
 
 
+def restore_private_extraction_bundle(repo, records, *, max_records=25):
+    """Restore previously extracted private text against byte-verified originals.
+
+    The upload is a private administrator action; it does not approve RAG
+    clauses or send text to external models. Existing nonempty text is kept.
+    If an earlier private hierarchy exists, this operation does not overwrite
+    its section references; administrators must review any new version first.
+    """
+    if not isinstance(records, list) or not 1 <= len(records) <= max_records:
+        raise ValueError('복구 대상은 한 번에 1~25개여야 합니다.')
+    by_hash = {}
+    for record in repo.list_library_records():
+        try:
+            read_manifest(record)
+        except ValueError:
+            continue
+        digest = str(record.get('content_hash') or '')
+        if len(digest) == 64:
+            by_hash[digest] = record
+    results = {'restored': 0, 'unchanged': 0, 'skipped': 0, 'reasons': []}
+    for item in records:
+        if not isinstance(item, dict):
+            raise ValueError('복구 데이터가 유효하지 않습니다.')
+        digest = str(item.get('sha') or item.get('hash') or '').lower()
+        text = item.get('text')
+        if not re.fullmatch(r'[0-9a-f]{64}', digest) or not isinstance(text, str):
+            raise ValueError('복구 원본 해시 또는 텍스트 형식이 잘못되었습니다.')
+        if not 35 <= len(text) <= MAX_SOURCE_TEXT:
+            results['skipped'] += 1
+            results['reasons'].append('유효하지 않은 텍스트 길이: ' + digest[:10])
+            continue
+        record = by_hash.get(digest)
+        if not record:
+            results['skipped'] += 1
+            results['reasons'].append('저장된 원본이 없음: ' + digest[:10])
+            continue
+        if str(record.get('extracted_text') or '').strip():
+            results['unchanged'] += 1
+            continue
+        if private_index(record):
+            results['skipped'] += 1
+            results['reasons'].append('기존 조항 인덱스가 있어 건너뜀: ' + digest[:10])
+            continue
+        path = str(record.get('storage_path') or '')
+        if not path.startswith('library/sources/') or '..' in path.split('/'):
+            raise ValueError('비공개 원본 저장 경로 검증에 실패했습니다.')
+        original_data = repo.download_private_file('kekorea-contracts', path)
+        if sha256(original_data).hexdigest() != digest:
+            raise ValueError('원본 파일과 복구 텍스트의 SHA-256이 불일치합니다.')
+        try:
+            total_pages = int(item.get('pages') or 0)
+            covered_pages = int(item.get('extracted_pages') or 0)
+            missing_pages = [int(v) for v in item.get('missing_pages') or []]
+        except (ValueError, TypeError):
+            raise ValueError('추출 페이지 메타데이터가 잘못되었습니다.') from None
+        if (not 1 <= total_pages <= 1000 or not 0 <= covered_pages <= total_pages
+                or any(n <= 0 or n > total_pages for n in missing_pages)):
+            raise ValueError('추출 페이지 범위가 잘못되었습니다.')
+        marker = {
+            'kind': 'private_text_extraction_v1', 'sha256': digest,
+            'pages': total_pages, 'extracted_pages': covered_pages,
+            'unread_pages': sorted(set(missing_pages)),
+            'review_required': True,
+        }
+        manifest = read_manifest(record)
+        next_manifest = manifest.model_copy(deep=True)
+        next_manifest.revision += 1
+        locations = [
+            loc for loc in record.get('source_locations') or []
+            if loc.get('kind') not in ('private_text_extraction_v1', 'contract_sample_library')
+        ]
+        repo.update_library_record(
+            record['id'],
+            {'extracted_text': text,
+             'source_locations': [
+                 {'kind': 'contract_sample_library',
+                  'manifest': next_manifest.model_dump()},
+                 *locations, marker,
+             ]},
+            expected_revision=manifest.revision,
+        )
+        saved = repo.get_library_record(record['id'])
+        if (not saved or saved.get('extracted_text') != text
+                or not _restored_private_extraction(saved, digest)):
+            raise ValueError('복구 텍스트의 저장 확인에 실패했습니다.')
+        results['restored'] += 1
+    return results
+
+
 def _restored_private_extraction(record, verified_sha):
     """Reuse user-provided extracted text only if bound to a verified original SHA.
 
