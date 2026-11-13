@@ -406,6 +406,25 @@ def _confirm_contract_item(digest: str, section: str, index: int,
     st.session_state.pop("ai_intake_followup_error", None)
 
 
+def _confirm_contract_review_issue(digest: str, index: int, expected: str) -> None:
+    saved = st.session_state.get("ai_intake_candidates")
+    if not saved or saved[0] != digest or not isinstance(saved[1].get("CONTRACT"), dict):
+        return
+    try:
+        from Quotation_KEKOREA.orchestration.workflows.master_contract_final import (
+            confirm_contract_issue,
+        )
+        updated = deepcopy(saved[1])
+        updated["CONTRACT"] = confirm_contract_issue(
+            updated["CONTRACT"], index, expected)
+    except (ImportError, ValueError, TypeError):
+        st.session_state["ai_intake_followup_error"] = (
+            "검토 항목을 확인할 수 없습니다. 조건을 다시 확인하세요.")
+        return
+    _remember_candidate_bundle(digest, updated)
+    st.session_state.pop("ai_intake_followup_error", None)
+
+
 def _render_contract_confirmations(digest: str, snapshot: dict) -> None:
     """Use the existing ONE editor for contract facts and explicit approvals."""
     from Quotation_KEKOREA.contracts.rules import COMMON_REQUIRED, TYPE_REQUIRED, LABELS
@@ -483,6 +502,18 @@ def _render_contract_confirmations(digest: str, snapshot: dict) -> None:
                               args=(digest, "terms", idx, value))
             elif idx is None:
                 st.caption("미입력 · 위 칸에서 내용을 입력하세요.")
+        for issue_idx, issue in enumerate(snapshot.get("issues") or []):
+            if not isinstance(issue, dict):
+                continue
+            if issue.get("severity") == "confirm" and not issue.get("confirmed"):
+                msg = str(issue.get("message") or "AI 확인 필요 사항")
+                st.warning("계약서 검토: " + msg)
+                st.button("이 AI 검토 항목 확인 완료",
+                          key=f"ai_contract_issue_{digest[:12]}_{issue_idx}",
+                          on_click=_confirm_contract_review_issue,
+                          args=(digest, issue_idx, str(issue.get("message") or "")))
+            elif issue.get("severity") == "block":
+                st.error("계약서 차단 사항: " + str(issue.get("message") or ""))
 
 
 def _render_single_editor(digest: str, candidates: dict) -> None:
