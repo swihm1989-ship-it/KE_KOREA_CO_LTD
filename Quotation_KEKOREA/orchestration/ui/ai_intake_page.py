@@ -615,7 +615,18 @@ def render_ai_intake(principal: str):
             except (ValueError, TypeError) as exc:
                 st.error("초안 입력 구성 실패: " + str(exc))
     candidates = st.session_state.get("ai_intake_candidates")
-    if candidates and candidates[0] == digest:
+    if candidates and candidates[0] == digest and isinstance(candidates[1], dict):
+        # Existing Streamlit sessions can retain AI results from a previous
+        # schema version; normalize all PI/PO/CI/PL roles BEFORE any input,
+        # strict validator or export uses their nested .get() attributes.
+        current_bundle = candidates[1]
+        repaired = {kind: normalize_trade_values(value)
+                    if kind in {"PI", "PO", "CI", "PL"} and isinstance(value, dict)
+                    else value
+                    for kind, value in current_bundle.items()}
+        if repaired != current_bundle:
+            _remember_candidate_bundle(digest, repaired)
+            candidates = st.session_state.get("ai_intake_candidates")
         _render_single_editor(digest, candidates[1])
         candidates = st.session_state.get("ai_intake_candidates")
         st.markdown("#### 실시간 반영 결과")
@@ -687,8 +698,10 @@ def render_ai_intake(principal: str):
                                 st.write("• " + str(problem))
                         else:
                             st.success("형식 검증 통과 · 직인과 발행 승인은 별도 확인")
-                    except (ValueError, TypeError, KeyError) as exc:
-                        st.warning(kind + " 확인 필요: " + str(exc)[:200])
+                    except (ValueError, TypeError, KeyError, AttributeError) as exc:
+                        # Corrupt historical candidate data should be a review
+                        # warning, not an unhandled Streamlit exception.
+                        st.warning(kind + " 확인 필요: 거래정보 형식을 다시 확인해 주세요.")
         st.divider()
         st.markdown("#### 기존 KE KOREA 양식 · PI / PO / CI / PL PDF·Excel")
         st.caption("현재 MASTER 앱에서 기존 업무 에이전트의 검증·직인·페이지 분할·PDF/XLSX 엔진을 직접 호출합니다. 기존 앱으로 이동하지 않습니다.")
@@ -719,14 +732,14 @@ def render_ai_intake(principal: str):
                     for kind in trade_kinds:
                         try:
                             results[kind] = render_master_trade_draft(kind, updated[kind], env)
-                        except (ValueError, TypeError, KeyError, RuntimeError, OSError) as exc:
+                        except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as exc:
                             # Do not weaken the original sealed PDF issuance rules.
                             # Produce a visibly unapproved PDF using exactly the
                             # user's still-unconfirmed facts (no fake bank data).
                             try:
                                 results[kind] = render_incomplete_trade_pdf(kind, updated[kind])
                                 errors[kind] = "기존 정식 양식의 검증은 통과하지 않았습니다. 아래 PDF는 미확정 항목을 명시한 내부 검토용입니다."
-                            except (ValueError, TypeError, KeyError, RuntimeError, OSError) as fallback:
+                            except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as fallback:
                                 errors[kind] = ("PDF 생성 오류: " + str(fallback))[:400]
                     st.session_state["master_legacy_files"] = (edited_key, results, errors)
                 except (ValueError, TypeError, KeyError) as exc:
