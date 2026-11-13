@@ -127,7 +127,7 @@ class AiIntakeUiTests(unittest.TestCase):
         )
         app.run()
         self.assertFalse(app.exception, [e.message for e in app.exception])
-        self.assertTrue(any("이전 AI 확인 기록" in x.message for x in app.warning))
+        self.assertTrue(any("이전 AI 확인 기록" in x.value for x in app.warning))
         self.assertEqual(len([x for x in app.button if x.label == "해소 확인"]), 2)
         next(x for x in app.button if x.label == "해소 확인").click().run()
         self.assertFalse(app.exception, [e.message for e in app.exception])
