@@ -48,9 +48,9 @@ def _settings():
     return values
 
 
-def _use_for_ai(message, extract=False, attachments=()):
+def _use_for_ai(message, extract=False, attachments=(), requested=None):
     from Quotation_KEKOREA.orchestration.workflows.mail_intake import queue_handoff
-    queue_handoff(st.session_state, message, extract=extract, attachments=attachments)
+    queue_handoff(st.session_state, message, extract=extract, attachments=attachments, requested=requested)
 
 
 def _ensure_smtp_adapter_current():
@@ -303,6 +303,14 @@ def render_inbox(messages, account):
             except ValueError as exc:
                 detected_kinds = ()
                 st.warning(str(exc))
+            from Quotation_KEKOREA.orchestration.router import DOC_TYPES
+            # Explicit correction also supports valid mails without recognizable
+            # document names. Keep choices isolated per selected message UID.
+            chosen_kinds = st.multiselect(
+                "준비할 문서 종류 (자동 인식 오류 시 직접 선택)",
+                list(DOC_TYPES), default=list(detected_kinds),
+                key='whois_ai_kinds_' + selected.uid,
+            )
             available = [(i,a) for i,a in enumerate(selected.attachments)
                          if a.mime in {'application/pdf','image/png','image/jpeg','image/webp'}]
             chosen = []
@@ -316,8 +324,8 @@ def render_inbox(messages, account):
             st.caption("아래 추출 버튼을 누르면 선택한 메일 제목·본문과 직접 선택한 첨부만 외부 AI에 전송합니다. "
                        "CIPL은 CI·PL을 각각 준비하며 CI 출력에는 원본 PI가 필요합니다.")
             st.button("AI로 거래조건 추출·문서 준비", key='whois_ai_extract_'+selected.uid,
-                      disabled=not bool(detected_kinds), type='primary', width='stretch',
-                      on_click=_use_for_ai, args=(selected,True,chosen))
+                      disabled=not bool(chosen_kinds) or not bool(selected.body and selected.body.strip()), type='primary', width='stretch',
+                      on_click=_use_for_ai, args=(selected,True,chosen,chosen_kinds))
             st.button(
                 "이 메일로 AI 업무 요청 작성",
                 key="whois_ai_" + selected.uid,
