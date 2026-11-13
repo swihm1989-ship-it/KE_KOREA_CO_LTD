@@ -381,7 +381,8 @@ def fetch_messages(endpoint: Endpoint, limit: int=30) -> tuple[MailMessage,...]:
     total = 0
     try:
         try:
-            entries = _uidl(client)[:limit]
+            all_entries = _uidl(client)
+            entries = all_entries[:limit]
         except Exception:
             raise MailConnectionError('메일 UIDL 목록 조회에 실패했습니다.') from None
         try:
@@ -427,7 +428,9 @@ def fetch_messages(endpoint: Endpoint, limit: int=30) -> tuple[MailMessage,...]:
                 parts = line.split()
                 if len(parts) >= 2:
                     retry_sizes[int(parts[0])] = int(parts[1])
-            for uid in failed_uids:
+            # Start with the oldest failed UID so a problematic newest message
+            # cannot prevent other messages in the same retry session.
+            for uid in reversed(failed_uids):
                 number = current.get(uid)
                 size = retry_sizes.get(number)
                 if number is None or size is None or size < 0 or size > MAX_MESSAGE_BYTES:
@@ -447,6 +450,55 @@ def fetch_messages(endpoint: Endpoint, limit: int=30) -> tuple[MailMessage,...]:
         finally:
             if retry_client is not None:
                 _finish(retry_client)
+
+    # If a faulty recent item poisons both batch connections, do not hide
+    # every older mail. Probe a bounded set of older UIDs, each in its own
+    # connection, only when the normal batch yielded no readable message.
+    # There are at most THREE extra reads; no DELE or message mutation.
+    if failed_uids and not any(m.body or m.subject or m.sender for m in result):
+        candidates = tuple(dict.fromkeys((
+            limit, len(all_entries) // 2, len(all_entries) - 1,
+        )))
+        recovered = 0
+        for position in candidates:
+            if position < limit or position >= len(all_entries):
+                continue
+            uid = all_entries[position][1]
+            backup = None
+            try:
+                backup = _pop(endpoint)
+                # Message sequence numbers may change after a reconnect.
+                fresh = {item_uid: number for number, item_uid in _uidl(backup)}
+                number = fresh.get(uid)
+                if number is None:
+                    continue
+                size = None
+                for line in backup.list()[1]:
+                    parts = line.split()
+                    if len(parts) >= 2 and int(parts[0]) == number:
+                        size = int(parts[1])
+                        break
+                if size is None or not 0 <= size <= MAX_MESSAGE_BYTES:
+                    continue
+                if total + size > MAX_BATCH_BYTES:
+                    continue
+                raw = b'\r\n'.join(backup.retr(number)[1])
+                if len(raw) > MAX_MESSAGE_BYTES or total + len(raw) > MAX_BATCH_BYTES:
+                    continue
+                total += len(raw)
+                parsed = parse_message(uid, raw)
+                if not (parsed.sender or parsed.subject or parsed.body):
+                    continue
+                result.append(parsed)
+                recovered += 1
+            except Exception:
+                # Do not leak the POP3 exception; it can contain private data.
+                continue
+            finally:
+                if backup is not None:
+                    _finish(backup)
+            if recovered >= 2:
+                break
 
     if failed_uids and not any(message.body or message.subject or message.sender
                                 for message in result):
