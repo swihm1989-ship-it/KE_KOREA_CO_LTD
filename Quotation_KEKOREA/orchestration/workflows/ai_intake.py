@@ -6,7 +6,7 @@ No writing to repository, no automatic approval, finalization, or SMTP.
 """
 from __future__ import annotations
 
-AI_WORKFLOW_REVISION = "trade-party-contacts-20261113-v1"
+AI_WORKFLOW_REVISION = "trade-missing-terms-20261113-v2"
 from Quotation_KEKOREA.observability.core import traced
 from copy import deepcopy
 from typing import Any, Mapping
@@ -69,7 +69,7 @@ def _validated_analysis(analysis: Mapping[str, Any]) -> dict[str, Any]:
             raise ValueError("AI가 당사자 확정 상태를 임의로 지정했습니다.")
     for term in terms:
         if (not isinstance(term, dict) or not isinstance(term.get("key"), str)
-                or term.get("status", "suggested") != "suggested"):
+                or term.get("status", "suggested") not in ("suggested", "missing")):
             raise ValueError("AI가 거래조건을 확정했거나 조건 형식이 유효하지 않습니다.")
     return deepcopy(dict(analysis))
 
@@ -97,7 +97,12 @@ def make_contract_candidate(analysis: Mapping[str, Any], language: str,
         t = {k: deepcopy(v) for k, v in term.items() if k in (
             "key", "value", "unit", "currency", "source_refs"
         )}
-        t["status"] = "suggested"
+        # The upstream service explicitly emits missing terms. Keep absent
+        # values unresolved; a supplied value is only a suggestion, matching
+        # mail intake's treatment of nonempty terms marked missing.
+        value = term.get("value")
+        absent = value is None or (isinstance(value, str) and not value.strip())
+        t["status"] = "missing" if term.get("status") == "missing" and absent else "suggested"
         snap["terms"].append(t)
     snap["issues"] = deepcopy(data.get("issues", []))
     return validate_snapshot(snap)

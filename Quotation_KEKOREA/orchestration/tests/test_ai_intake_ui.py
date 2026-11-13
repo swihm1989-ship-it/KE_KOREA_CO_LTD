@@ -300,6 +300,56 @@ class AiIntakeUiTests(unittest.TestCase):
                              ["buyer"]["legal_name"], "")
             self.assertNotIn("ai_intake_followup_error", state)
 
+    def test_contract_only_builder_reloads_stale_missing_term_validation(self):
+        from Quotation_KEKOREA.orchestration.ui import ai_intake_page
+        from Quotation_KEKOREA.orchestration.workflows import ai_intake
+        analysis = {
+            "contract_type": "sale", "parties": [], "issues": [], "questions": [],
+            "terms": [{"key": "quantity", "value": None, "status": "missing", "source_refs": []}],
+        }
+        with (patch.object(ai_intake, "AI_WORKFLOW_REVISION", "prior-release"),
+              patch.object(ai_intake, "_validated_analysis",
+                           side_effect=AssertionError("stale contract validator executed"))):
+            candidate = ai_intake_page.make_contract_candidate(analysis, "ko")
+        quantity = next(t for t in candidate["terms"] if t["key"] == "quantity")
+        self.assertIsNone(quantity["value"])
+        self.assertEqual(quantity["status"], "missing")
+        self.assertEqual(candidate["clauses"], [])
+
+    def test_valid_missing_ai_terms_open_the_single_editor_without_a_retry(self):
+        from copy import deepcopy
+        analysis = {
+            "contract_type": "sale", "parties": [], "issues": [], "questions": [],
+            "terms": [
+                {"key": "products", "value": "SYNTHETIC CELL", "status": "suggested", "source_refs": []},
+                {"key": "quantity", "value": None, "status": "missing", "source_refs": []},
+                {"key": "unit_price", "value": "0.20", "unit": "PCS", "currency": "USD",
+                 "status": "suggested", "source_refs": []},
+            ],
+        }
+        prompt = (
+            "합성 화면 검증용 PI를 작성해줘. 실제 주문이 아니다. "
+            "Seller는 KE KOREA CO. LTD, Buyer는 SYNTHETIC TEST BUYER, 상품은 SYNTHETIC CELL이다. "
+            "통화 USD, 단가 0.20/PCS, 할인율 0이다. 수량과 주소, 연락처는 아직 입력하지 않는다. "
+            "비고는 SYNTHETIC VALIDATION ONLY - NOT AN ORDER이다."
+        )
+        with (patch("Quotation_KEKOREA.orchestration.ui.ai_intake_page._model_config",
+                    return_value={"OPENAI_API_KEY": "fake", "OPENAI_MODEL": "fake-model"}),
+              patch("Quotation_KEKOREA.contracts.service._call", return_value=deepcopy(analysis))):
+            app = AppTest.from_file(str(PAGE), default_timeout=25).run()
+            app.radio[0].set_value("AI 업무 요청").run()
+            app.text_area(key="ai_intake_instruction").set_value(prompt).run()
+            app.checkbox(key="ai_intake_consent").check().run()
+            app.button(key="ai_intake_extract").click().run()
+            self.assertFalse(app.exception, [e.message for e in app.exception])
+            self.assertTrue("ai_intake_candidates" in app.session_state)
+            self.assertFalse(any("AI 거래조건 추출 실패" in e.value for e in app.error))
+            quantity = next(t for t in app.text_input if t.label == "수량")
+            self.assertEqual(quantity.value, "")
+            self.assertEqual(len([t for t in app.text_input if t.label == "수량"]), 1)
+            quantity.set_value("0").run()
+            self.assertEqual(app.session_state["ai_intake_candidates"][1]["PI"]["items"][0]["quantity"], "0")
+
     def test_cached_pdf_module_without_review_function_is_reloaded(self):
         from Quotation_KEKOREA.orchestration.ui import ai_intake_page
         from Quotation_KEKOREA.orchestration.workflows import legacy_document_exports

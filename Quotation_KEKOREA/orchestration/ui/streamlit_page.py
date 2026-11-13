@@ -139,11 +139,11 @@ elif page == "AI 업무 요청":
         ai_page = importlib.import_module(
             "Quotation_KEKOREA.orchestration.ui.ai_intake_page")
         if getattr(ai_page, "AI_INTAKE_REVISION", None) != (
-                "ai-intake-hot-reload-20261113-v5"):
+                "ai-intake-hot-reload-20261113-v8"):
             importlib.invalidate_caches()
             ai_page = importlib.reload(ai_page)
         if getattr(ai_page, "AI_INTAKE_REVISION", None) != (
-                "ai-intake-hot-reload-20261113-v5"):
+                "ai-intake-hot-reload-20261113-v8"):
             raise RuntimeError("AI page module version mismatch")
     except (ImportError, OSError, AttributeError, TypeError, RuntimeError):
         st.error("AI 업무 화면을 최신 버전으로 불러오지 못했습니다. 입력 내용을 보존한 후 Manage app에서 Reboot를 실행하세요.")

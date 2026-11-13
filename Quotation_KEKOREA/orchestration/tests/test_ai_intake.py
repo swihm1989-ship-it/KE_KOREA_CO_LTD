@@ -74,6 +74,67 @@ class AiIntakeTests(unittest.TestCase):
         self.assertEqual(pi["items"][0]["price_source"], "")  # verified provenance must be user-supplied
         self.assertNotIn("price_override_confirmed", pi["items"][0])
 
+    def test_upstream_missing_terms_reach_trade_candidate_as_empty_fields(self):
+        for absent in (None, ""):
+            with self.subTest(value=absent):
+                analysis = copy.deepcopy(self.ai)
+                analysis["terms"][1].update(value=absent, status="missing")
+                analysis["terms"][6].update(value=absent, status="missing")
+                # Exercise the real contract-service response validator; only
+                # its external model call is replaced with synthetic JSON.
+                with patch("Quotation_KEKOREA.contracts.service._call",
+                           return_value=analysis):
+                    extracted = extract_candidate(self.instruction,
+                        {"OPENAI_API_KEY": "fake", "OPENAI_MODEL": "fake-model"}, consent=True)
+                before = copy.deepcopy(extracted)
+                pi = make_trade_candidate("PI", extracted)
+                self.assertEqual(pi["items"][0]["quantity"], "")
+                self.assertEqual(pi["payment_terms"], "")
+                self.assertEqual(pi["items"][0]["unit_price"], "0.20")
+                self.assertEqual(extracted, before)
+                self.assertFalse(pi.get("ready_for_issue", False))
+
+    def test_empty_missing_contract_terms_remain_unresolved(self):
+        for absent in (None, "", "   "):
+            with self.subTest(value=absent):
+                analysis = copy.deepcopy(self.ai)
+                analysis["terms"][1].update(value=absent, status="missing")
+                before = copy.deepcopy(analysis)
+                contract = make_contract_candidate(analysis, "ko")
+                quantity = next(t for t in contract["terms"] if t["key"] == "quantity")
+                self.assertEqual(quantity["value"], absent)
+                self.assertEqual(quantity["status"], "missing")
+                self.assertEqual(contract["clauses"], [])
+                self.assertFalse(any(t["status"] == "confirmed" for t in contract["terms"]))
+                self.assertEqual(analysis, before)
+
+    def test_nonempty_missing_term_is_only_a_suggestion_like_mail_intake(self):
+        analysis = copy.deepcopy(self.ai)
+        analysis["terms"][1].update(value="2500", status="missing")
+        with patch("Quotation_KEKOREA.contracts.service._call", return_value=analysis):
+            extracted = extract_candidate(self.instruction,
+                {"OPENAI_API_KEY": "fake", "OPENAI_MODEL": "fake-model"}, consent=True)
+        self.assertEqual(extracted["terms"][1]["status"], "missing")
+        contract = make_contract_candidate(extracted, "ko")
+        quantity = next(t for t in contract["terms"] if t["key"] == "quantity")
+        self.assertEqual(quantity["value"], "2500")
+        self.assertEqual(quantity["status"], "suggested")
+        self.assertEqual(make_trade_candidate("PI", extracted)["items"][0]["quantity"], "2500")
+        self.assertEqual(extracted["terms"][1]["status"], "missing")
+        self.assertFalse(any(t["status"] == "confirmed" for t in contract["terms"]))
+
+    def test_invalid_term_statuses_stay_blocked_in_both_candidate_builders(self):
+        for status in ("confirmed", "approved", "", None, 1, ["suggested"]):
+            for kind in ("PI", "CONTRACT"):
+                with self.subTest(status=status, kind=kind):
+                    analysis = copy.deepcopy(self.ai)
+                    analysis["terms"][1]["status"] = status
+                    with self.assertRaises(ValueError):
+                        if kind == "PI":
+                            make_trade_candidate("PI", analysis)
+                        else:
+                            make_contract_candidate(analysis, "ko")
+
     def test_prior_contract_reference_is_immutable_and_never_autofilled(self):
         repo = Mock()
         reference = {"contract_id": "c-1", "revision": 2, "contract_type": "sale",
