@@ -1,24 +1,26 @@
 """MASTER-side adapter to the EXISTING trade-document renderer.
 
-This does not issue final documents or change the legacy app. The existing
-validation, seal resolver, PDF pagination and XLSX layout are reused unchanged.
+The default remains a strict draft; a revision-bound explicit approval enables
+FINAL in the existing layout with verified company assets and no automatic send.
 """
 from __future__ import annotations
 
 from Quotation_KEKOREA.observability.core import traced
 from hashlib import sha256
+import importlib
+from inspect import signature
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Mapping
 
 from Quotation_KEKOREA.agent.branding import resolve_company_seal
-from Quotation_KEKOREA.agent.ci_import import ci_render_data, ci_import_issues
 from Quotation_KEKOREA.agent.renderers import render_files
+from Quotation_KEKOREA.agent.ci_import import ci_render_data, ci_import_issues
 from Quotation_KEKOREA.agent.trade_documents import validate_and_calculate
 from Quotation_KEKOREA.agent.review_fields import missing_review_fields
 from Quotation_KEKOREA.orchestration.workflows.commercial_values import normalize_trade_values
 
-REVIEW_EXPORT_REVISION = "review-pdf-safe-loader-20261113-v2"
+REVIEW_EXPORT_REVISION = "review-pdf-safe-loader-20261113-v4"
 
 TRADE_KINDS = frozenset({"PI", "PO", "CI", "PL"})
 BANK_KEYS = ("BENEFICIARY", "BANK_NAME", "BRANCH", "SWIFT", "ACCOUNT_NUMBER", "BANK_ADDRESS")
@@ -27,12 +29,70 @@ MIMES = {"pdf": "application/pdf",
          "html": "text/html"}
 
 
+_BOUND_RENDER_FILES = render_files
+
+
+def _ensure_trade_renderers_current():
+    """Refresh the two shared renderer dependencies in order after hot deploys."""
+    global render_files, _BOUND_RENDER_FILES
+    revision = 'approved-blank-final-20261113-v1'
+    shared = importlib.import_module('Quotation_KEKOREA.agent.renderers')
+    def compatible(module, marker, function):
+        try:
+            return (getattr(module, marker, None) == revision
+                    and 'final' in signature(getattr(module, function)).parameters)
+        except (AttributeError, TypeError, ValueError):
+            return False
+    refreshed = (not compatible(shared, 'TRADE_RENDERER_REVISION', 'render_files')
+                 or any(not callable(getattr(shared, helper, None)) for helper in (
+                     '_display_value', '_final_number', '_final_packing_totals', '_final_quantities')))
+    if refreshed:
+        importlib.invalidate_caches()
+        shared = importlib.reload(shared)
+    pdf = importlib.import_module('Quotation_KEKOREA.agent.pi_pdf')
+    if refreshed or not compatible(pdf, 'TRADE_PDF_REVISION', 'render_trade_document'):
+        importlib.invalidate_caches()
+        pdf = importlib.reload(pdf)
+    if (not compatible(shared, 'TRADE_RENDERER_REVISION', 'render_files')
+            or not compatible(pdf, 'TRADE_PDF_REVISION', 'render_trade_document')):
+        raise RuntimeError('최종 PDF 출력 모듈 버전이 일치하지 않습니다. 앱을 재시작한 후 다시 시도하세요.')
+    if render_files is _BOUND_RENDER_FILES:
+        render_files = shared.render_files
+        _BOUND_RENDER_FILES = render_files
+
+
 @traced('document.generate', kind_argument=True)
 def render_master_trade_draft(kind: str, source: Mapping, env: Mapping[str, str]) -> dict:
-    """Generate PDF/XLSX/HTML via the legacy engine, fail closed on missing inputs.
+    return _render_master_trade(kind, source, env)
 
-    The branded PDF requires the *original verified* KE KOREA seal. The PI
-    additionally requires the same complete USD bank profile as the old app.
+
+@traced('document.generate', kind_argument=True)
+def render_master_trade_final(kind: str, source: Mapping, env: Mapping[str, str], *,
+                              approved=False, expected_fingerprint=None,
+                              allow_optional_na=False, allow_incomplete=False) -> dict:
+    # Retained Streamlit sessions may reload the review module independently.
+    from .trade_export_review import review_trade_document, trade_export_fingerprint, TradeExportValidationError
+    if approved is not True:
+        raise ValueError('최종 PDF 생성에 대한 사용자 승인이 필요합니다.')
+    current = trade_export_fingerprint(kind, source, allow_optional_na=allow_optional_na,
+                                       allow_incomplete=allow_incomplete)
+    if expected_fingerprint != current:
+        raise ValueError('승인 후 문서 내용이 변경되었습니다. 다시 확인하고 승인하세요.')
+    report = review_trade_document(kind, source, final=True, allow_optional_na=allow_optional_na,
+                                    allow_incomplete=allow_incomplete)
+    if report['issues']:
+        raise TradeExportValidationError(report['issues'])
+    return _render_master_trade(kind, report['candidate'], env, final=True,
+                                reviewed=report if allow_incomplete is True else None)
+
+
+def _render_master_trade(kind: str, source: Mapping, env: Mapping[str, str], *, final=False,
+                         reviewed=None) -> dict:
+    """Generate PDF/XLSX/HTML through the legacy layout and verified assets.
+
+    The branded PDF requires the *original verified* KE KOREA seal. Strict PI
+    drafts require the complete USD bank profile; approved incomplete finals
+    preserve missing bank fields as blanks.
     """
     kind = str(kind).upper()
     if kind not in TRADE_KINDS:
@@ -45,23 +105,38 @@ def render_master_trade_draft(kind: str, source: Mapping, env: Mapping[str, str]
     candidate["document_type"] = kind
     candidate.pop("ready_for_issue", None)
     candidate.pop("status", None)
-    checked = validate_and_calculate(candidate)
-    blockers = list(checked.get("blocking_issues") or [])
-    if kind == "CI":
-        blockers.extend(ci_import_issues(checked))
-    if blockers or not checked.get("ready_for_issue"):
-        raise ValueError("거래조건을 먼저 보완하세요: " + "; ".join(map(str, blockers[:8])))
-    pending = missing_review_fields(candidate)
-    if pending:
-        raise ValueError("문서 생성 전 누락 정보 입력: " + "; ".join(field.label for field in pending))
+    if final and reviewed is not None:
+        checked = reviewed['render_data']
+    else:
+        checked = validate_and_calculate(candidate)
+        blockers = list(checked.get("blocking_issues") or [])
+        if kind == "CI":
+            blockers.extend(ci_import_issues(checked))
+        if blockers or not checked.get("ready_for_issue"):
+            raise ValueError("거래조건을 먼저 보완하세요: " + "; ".join(map(str, blockers[:8])))
+        pending = missing_review_fields(candidate)
+        if pending:
+            raise ValueError("문서 생성 전 누락 정보 입력: " + "; ".join(field.label for field in pending))
     bank = {key: str(env.get("KEKOREA_USD_" + key) or "").strip() for key in BANK_KEYS}
-    if kind == "PI" and any(not value for value in bank.values()):
+    if kind == "PI" and reviewed is None and any(not value for value in bank.values()):
         raise ValueError("기존 업무 에이전트와 동일하게 PI 은행정보 6개 항목이 모두 필요합니다.")
     root = Path(__file__).resolve().parents[2]
     seal_path, seal_bytes, error = resolve_company_seal(root, env)
     if seal_bytes is None and not seal_path.is_file():
         raise ValueError("검증된 KE KOREA 회사 직인이 필요합니다: " + str(error or "설정 없음"))
+    prepared = checked
     checked = ci_render_data(checked)
+    if final and reviewed is not None and kind == 'CI':
+        # The old CI adapter removes payment/bank details and supplies default
+        # N/A/zero values. Keep its redaction/FOC behavior but preserve reviewed
+        # unknown facts on the explicitly approved blank-output path.
+        if checked.get('payment_terms') != prepared.get('payment_terms'):
+            checked['payment_terms'] = ''
+        if checked.get('remarks') != prepared.get('remarks'):
+            checked['remarks'] = ''
+        for original, row in zip(prepared.get('items') or [], checked.get('items') or []):
+            if original.get('discount_percent') is None:
+                row['discount_percent'] = None
     with TemporaryDirectory(prefix="ke-master-doc-") as directory:
         actual_seal = seal_path
         if seal_bytes is not None:
@@ -70,9 +145,10 @@ def render_master_trade_draft(kind: str, source: Mapping, env: Mapping[str, str]
         # Match the original KE KOREA app: pass the very same logo and seal
         # locations to the unmodified shared PI/PO/CI/PL PDF/XLSX renderer.
         logo_path = root / "assets" / "company_logo.png"
+        _ensure_trade_renderers_current()
         paths = render_files(checked, Path(directory) / "outputs",
                              bank_details=bank, logo_path=logo_path,
-                             seal_path=actual_seal)
+                             seal_path=actual_seal, **({"final": True} if final else {}))
         result = {}
         for extension in ("pdf", "xlsx", "html"):
             path = paths[extension]
@@ -84,7 +160,7 @@ def render_master_trade_draft(kind: str, source: Mapping, env: Mapping[str, str]
                 "content": data,
                 "mime": MIMES[extension],
                 "sha256": sha256(data).hexdigest(),
-                "final": False,
+                "final": bool(final),
                 "sendable": False,
             }
     return result

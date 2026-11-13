@@ -5,8 +5,10 @@ from pathlib import Path
 import re
 import zipfile
 from xml.sax.saxutils import escape as xml_escape
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from .trade_documents import current_issue_date
+
+TRADE_RENDERER_REVISION = 'approved-blank-final-20261113-v1'
 
 
 def _english(value):
@@ -19,7 +21,75 @@ def _english(value):
     return value
 
 
-def _format_quantity(value):
+def _display_value(value, fallback="", *, final=False):
+    """Keep explicit values, including zero, while leaving final unknowns empty."""
+    if final:
+        return "" if value is None or isinstance(value, str) and not value.strip() else value
+    return value or fallback
+
+
+def _final_number(value):
+    """Parse a known numeric value without interpreting absence as zero."""
+    if value is None or isinstance(value, str) and not value.strip():
+        return None
+    try:
+        number = Decimal(str(value))
+        return number if number.is_finite() and number >= 0 else None
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+
+
+def _final_quantities(items):
+    """Only display totals when every row has a known quantity and unit."""
+    totals = {}
+    for item in items:
+        if "shipped_quantity" in item:
+            quantity = _final_number(item["shipped_quantity"])
+        else:
+            paid = _final_number(item.get("paid_quantity", item.get("quantity")))
+            free = _final_number(item.get("free_quantity", "0"))
+            quantity = paid + free if paid is not None and free is not None else None
+        unit = str(_display_value(item.get("unit"), final=True)).strip()
+        if quantity is None or not unit:
+            return None
+        key = unit.upper()
+        if key not in totals:
+            totals[key] = [Decimal("0"), unit]
+        totals[key][0] += quantity
+    return {unit: format(amount, "f") for amount, unit in totals.values()} or None
+
+
+def _final_packing_totals(doc):
+    """Use caller-prepared totals verbatim, including authoritative unknowns."""
+    fields = (("package_count", "actual_package_count"),
+              ("net_weight_kg", "declared_net_weight_kg"),
+              ("gross_weight_kg", "declared_gross_weight_kg"),
+              ("volume_cbm", "declared_volume_cbm"))
+    if "_final_packing_totals" in doc:
+        supplied = doc.get("_final_packing_totals") or {}
+        return {**{field: supplied.get(field) for field, _ in fields},
+                "quantities": supplied.get("quantities")}
+    from .packing import reconcile_packing
+    calculated = reconcile_packing(doc)["calculated"]
+    totals = {}
+    for field, declared_field in fields:
+        total = _final_number(calculated.get(field))
+        if total is None:
+            total = _final_number(doc.get(declared_field))
+        if total is None and field in {"net_weight_kg", "gross_weight_kg"}:
+            values = [_final_number(package.get(field)) for package in doc.get("packages") or []]
+            if values and all(value is not None for value in values):
+                total = sum(values, Decimal("0"))
+        totals[field] = format(total, "f") if total is not None else None
+    totals["quantities"] = _final_quantities(doc.get("items") or [])
+    return totals
+
+
+def _format_quantity(value, *, final=False):
+    if final:
+        value = _final_number(value)
+        if value is None:
+            return ""
     try:
         amount = Decimal(str(value))
         rendered = format(amount, ",f")
@@ -28,8 +98,12 @@ def _format_quantity(value):
         return str(value or "")
 
 
-def format_currency_amount(value, currency):
+def format_currency_amount(value, currency, *, final=False):
     """Format transaction money with KRW whole units and two decimal places otherwise."""
+    if final:
+        value = _final_number(value)
+        if value is None:
+            return ""
     currency = str(currency or "").upper()
     quantum = Decimal("1") if currency == "KRW" else Decimal("0.01")
     try:
@@ -40,12 +114,12 @@ def format_currency_amount(value, currency):
     return f"${rendered}" if currency == "USD" else f"{currency} {rendered}".strip()
 
 
-def _rows(doc):
+def _rows(doc, *, final=False):
     if doc.get("document_type") == "PL":
         rows = [["Line", "Product", "Capacity / Specification", "Qty", "Unit", "Package Type", "Packages", "NW (KG)", "GW (KG)", "CBM", "HS Code"]]
         for i, item in enumerate(doc.get("items", []), 1):
             rows.append([str(i), _english(item.get("product_name")), _english(item.get("capacity")),
-                         _format_quantity(item.get("display_quantity", item.get("quantity", ""))), _english(item.get("unit")),
+                         _format_quantity(item.get("display_quantity", item.get("quantity", "")), final=final), _english(item.get("unit")),
                          _english(item.get("package_type")), _english(item.get("package_count")),
                          _english(item.get("net_weight_kg")), _english(item.get("gross_weight_kg")), _english(item.get("volume_cbm")), _english(item.get("hs_code"))])
         return rows
@@ -58,20 +132,26 @@ def _rows(doc):
             price = item.get("final_unit_price", "")
             amount = item.get("line_total", "")
             if doc.get("product_family") == "cosmetics":
-                price = format_currency_amount(price, doc.get("currency"))
-                amount = format_currency_amount(amount, doc.get("currency"))
-        if float(item.get("free_quantity") or 0):
+                price = format_currency_amount(price, doc.get("currency"), final=final)
+                amount = format_currency_amount(amount, doc.get("currency"), final=final)
+        discount = item.get("discount_percent", "0")
+        if final:
+            discount = _format_quantity(item.get("discount_percent"), final=True)
+        discount = str(discount) + "%" if final and discount != "" else ("" if final else discount + "%")
+        free_quantity = (_final_number(item.get("free_quantity")) if final else
+                         float(item.get("free_quantity") or 0))
+        if free_quantity:
             rows.append([str(i), _english(item.get("product_name")) + " (PAID)", _english(item.get("capacity")),
-                         _format_quantity(item.get("paid_quantity", "")), _english(item.get("unit")), price,
-                         item.get("discount_percent", "0") + "%", amount])
+                         _format_quantity(item.get("paid_quantity", ""), final=final), _english(item.get("unit")), price,
+                         discount, amount])
             rows.append([str(i), _english(item.get("product_name")) + " (FREE OF CHARGE)", _english(item.get("capacity")),
-                         _format_quantity(item.get("free_quantity", "")), _english(item.get("unit")),
+                         _format_quantity(item.get("free_quantity", ""), final=final), _english(item.get("unit")),
                          format_currency_amount("0", doc.get("currency")) if doc.get("product_family") == "cosmetics" else "0",
                          "FOC", format_currency_amount("0", doc.get("currency")) if doc.get("product_family") == "cosmetics" else "0"])
         else:
             rows.append([str(i), _english(item.get("product_name")), _english(item.get("capacity")),
-                         _format_quantity(item.get("display_quantity", item.get("shipped_quantity", item.get("quantity", "")))), _english(item.get("unit")), price,
-                         item.get("discount_percent", "0") + "%", amount])
+                         _format_quantity(item.get("display_quantity", item.get("shipped_quantity", item.get("quantity", ""))), final=final), _english(item.get("unit")), price,
+                         discount, amount])
     return rows
 
 
@@ -91,7 +171,11 @@ def _under_1000(n):
     return " ".join(words)
 
 
-def amount_in_english(amount, currency):
+def amount_in_english(amount, currency, *, final=False):
+    if final:
+        amount = _final_number(amount)
+        if amount is None or not currency:
+            return ""
     value = Decimal(str(amount)).quantize(Decimal("1") if currency == "KRW" else Decimal("0.01"), rounding=ROUND_HALF_UP)
     integer = int(value)
     fraction = int((value - integer) * 100)
@@ -103,7 +187,7 @@ def amount_in_english(amount, currency):
         if count:
             words.extend([_under_1000(count), label])
     if remainder or not words:
-        words.append(_under_1000(remainder))
+        words.append("ZERO" if final and not remainder else _under_1000(remainder))
     major, minor = {"USD": ("US DOLLARS", "CENTS"), "KRW": ("KOREAN WON", "JEON"),
                     "EUR": ("EUROS", "CENTS"), "CNY": ("CHINESE YUAN", "FEN")}.get(currency, (currency, "HUNDREDTHS"))
     result = " ".join(words) + " " + major
@@ -112,13 +196,23 @@ def amount_in_english(amount, currency):
     return result + " ONLY"
 
 
-def document_lines(doc, bank_details=None):
+def _render_status(doc, final):
+    """Only an explicit rendering option can mark an output as final."""
+    if final:
+        return "FINAL"
     status = doc.get("status", "DRAFT")
+    return "DRAFT" if str(status).strip().upper() == "FINAL" else status
+
+
+def document_lines(doc, bank_details=None, *, final=False):
+    status = _render_status(doc, final)
     dtype = doc.get("document_type", "TRADE DOCUMENT")
-    lines = [status.replace("_", " "), "KE KOREA CO. LTD - REVIEW DRAFT", "", dtype, "".join(["Document No.: ", _english(doc.get("document_number") or "TBD")]),
-             "Issue Date: " + _english(doc.get("issue_date") or "TBD"),
-             "Product Family: " + _english(doc.get("product_family") or "TBD").upper(),
-             "Currency: " + _english(doc.get("currency") or "TBD"), "", "SELLER / SUPPLIER"]
+    company_heading = "KE KOREA CO. LTD" if final else "KE KOREA CO. LTD - REVIEW DRAFT"
+    lines = [status.replace("_", " "), company_heading, "", dtype,
+             "Document No.: " + _english(_display_value(doc.get("document_number"), "TBD", final=final)),
+             "Issue Date: " + _english(_display_value(doc.get("issue_date"), "TBD", final=final)),
+             "Product Family: " + _english(_display_value(doc.get("product_family"), "TBD", final=final)).upper(),
+             "Currency: " + _english(_display_value(doc.get("currency"), "TBD", final=final)), "", "SELLER / SUPPLIER"]
     lines.extend([_english((doc.get("seller") or {}).get(k)) for k in ("legal_name", "address", "contact", "phone", "email") if (doc.get("seller") or {}).get(k)])
     lines += ["", "BUYER / CUSTOMER"]
     lines.extend([_english((doc.get("buyer") or {}).get(k)) for k in ("legal_name", "address", "contact", "phone", "email", "registration_details") if (doc.get("buyer") or {}).get(k)])
@@ -127,20 +221,24 @@ def document_lines(doc, bank_details=None):
                          ("Country of Origin", "country_of_origin")):
         if doc.get(field):
             lines.append(f"{label}: {_english(doc[field])}")
-    lines += ["", "LINE ITEMS: " + " | ".join(_rows(doc)[0])]
-    for row in _rows(doc)[1:]:
+    rows = _rows(doc, final=final)
+    lines += ["", "LINE ITEMS: " + " | ".join(rows[0])]
+    for row in rows[1:]:
         lines.append(" | ".join(_english(cell) for cell in row))
     if doc.get("document_type") != "PL":
-        total_display = (format_currency_amount(doc.get("total", "0"), doc.get("currency"))
+        total = doc.get("total", None if final else "0")
+        total_display = (format_currency_amount(total, doc.get("currency"), final=final)
                          if doc.get("product_family") == "cosmetics"
-                         else _english(doc.get("currency") or "") + " " + _english(doc.get("total", "0")))
+                         else _english(doc.get("currency") or "") + " " + _english(total))
+        if final and _final_number(total) is None:
+            total_display = ""
         lines += ["", "TOTAL: " + _english(total_display)]
-        lines.append("AMOUNT IN WORDS: " + amount_in_english(doc.get("total", "0"), doc.get("currency") or ""))
+        lines.append("AMOUNT IN WORDS: " + amount_in_english(total, doc.get("currency") or "", final=final))
     if doc.get("actual_package_count") and doc.get("document_type") != "PL":
         lines.append("Actual Package Count: " + _english(doc["actual_package_count"]))
     for i, package in enumerate(doc.get("packages", []), 1):
         lines.append(f"Package {i}: {_english(package.get('package_type'))}; Count {_english(package.get('package_count'))}; Net {_english(package.get('net_weight_kg'))} kg; Gross {_english(package.get('gross_weight_kg'))} kg")
-    if (doc.get("document_type") == "PL" and doc.get("packages") and
+    if (not final and doc.get("document_type") == "PL" and doc.get("packages") and
             not any(item.get("package_count") or item.get("net_weight_kg") or item.get("gross_weight_kg") or item.get("volume_cbm") for item in doc.get("items", []))):
         try:
             net_total = sum(Decimal(str(p.get("net_weight_kg"))) for p in doc["packages"])
@@ -149,20 +247,30 @@ def document_lines(doc, bank_details=None):
         except Exception:
             lines.append("TOTAL PACKAGE WEIGHTS: REVIEW REQUIRED")
     if doc.get("document_type") == "PL":
-        from .packing import reconcile_packing
-        packing = reconcile_packing(doc)
-        calculated = packing["calculated"]
-        package_total = calculated.get("package_count") or doc.get("actual_package_count")
-        if packing["quantity_complete"]:
-            for unit, quantity in packing["quantities"].items():
-                lines.append(f"Total quantity ({_english(unit)}): {_format_quantity(quantity)}")
+        if final:
+            calculated = _final_packing_totals(doc)
+            package_total = calculated["package_count"]
+            quantities = calculated.get("quantities")
+            if quantities:
+                for unit, quantity in quantities.items():
+                    lines.append(f"Total quantity ({_english(unit)}): {_format_quantity(quantity, final=True)}")
+            else:
+                lines.append("Total quantity: ")
+        else:
+            from .packing import reconcile_packing
+            packing = reconcile_packing(doc)
+            calculated = packing["calculated"]
+            package_total = calculated.get("package_count") or doc.get("actual_package_count")
+            if packing["quantity_complete"]:
+                for unit, quantity in packing["quantities"].items():
+                    lines.append(f"Total quantity ({_english(unit)}): {_format_quantity(quantity)}")
         for label, value in (("Containers", doc.get("container_count")),
                              ("HS Code", doc.get("hs_code")),
-                             ("Total packages", _format_quantity(package_total) if package_total else None),
-                             ("Total net weight (kg)", calculated.get("net_weight_kg") or doc.get("declared_net_weight_kg")),
-                             ("Total gross weight (kg)", calculated.get("gross_weight_kg") or doc.get("declared_gross_weight_kg")),
-                             ("Total volume (CBM)", calculated.get("volume_cbm") or doc.get("declared_volume_cbm"))):
-            lines.append(f"{label}: {_english(value or 'TO BE CONFIRMED')}")
+                             ("Total packages", _format_quantity(package_total, final=final) if final or package_total else None),
+                             ("Total net weight (kg)", calculated.get("net_weight_kg") if final else calculated.get("net_weight_kg") or doc.get("declared_net_weight_kg")),
+                             ("Total gross weight (kg)", calculated.get("gross_weight_kg") if final else calculated.get("gross_weight_kg") or doc.get("declared_gross_weight_kg")),
+                             ("Total volume (CBM)", calculated.get("volume_cbm") if final else calculated.get("volume_cbm") or doc.get("declared_volume_cbm"))):
+            lines.append(f"{label}: {_english(_display_value(value, 'TO BE CONFIRMED', final=final))}")
     if doc.get("remarks"):
         lines += ["", "REMARKS", _english(doc["remarks"])]
     if doc.get("document_type") == "PI":
@@ -174,10 +282,11 @@ def document_lines(doc, bank_details=None):
             value = bank_details.get(key)
             if key == "ACCOUNT_NUMBER" and value:
                 value = str(value) + " (USD)"
-            lines.append(f"{label}: {_english(value or '[BANK DETAIL REQUIRED]')}")
-    lines += ["", "AUTHORIZED SIGNATURE", "DAVID, SEOKWON IHM", "KE KOREA CO. LTD",
-              "[OFFICIAL COMPANY SEAL TO BE INSERTED]"]
-    if doc.get("blocking_issues"):
+            lines.append(f"{label}: {_english(_display_value(value, '[BANK DETAIL REQUIRED]', final=final))}")
+    lines += ["", "AUTHORIZED SIGNATURE", "DAVID, SEOKWON IHM", "KE KOREA CO. LTD"]
+    if not final:
+        lines.append("[OFFICIAL COMPANY SEAL TO BE INSERTED]")
+    if doc.get("blocking_issues") and not final:
         lines += ["", "OPEN ITEMS - DO NOT ISSUE"]
         for issue in doc["blocking_issues"]:
             if any(ord(ch) > 255 for ch in str(issue)):
@@ -218,48 +327,62 @@ def _pdf_bytes(lines):
     return bytes(output)
 
 
-def _xlsx_bytes(doc, bank_details=None, *, seal_path=None):
-    rows = [[doc.get("document_type", "DRAFT"), "STATUS", doc.get("status", "DRAFT")],
-            ["Currency", doc.get("currency") or "TBD", "Product Family", doc.get("product_family") or "TBD"],
-            ["Document Number", doc.get("document_number") or "TBD", "Issue Date", doc.get("issue_date") or "TBD"],
-            ["Seller", (doc.get("seller") or {}).get("legal_name") or "TBD"],
-            ["Seller Address", (doc.get("seller") or {}).get("address") or "TBD"],
+def _xlsx_bytes(doc, bank_details=None, *, seal_path=None, final=False):
+    rows = [[doc.get("document_type", "DRAFT"), "STATUS", "FINAL" if final else doc.get("status", "DRAFT")],
+            ["Currency", _display_value(doc.get("currency"), "TBD", final=final),
+             "Product Family", _display_value(doc.get("product_family"), "TBD", final=final)],
+            ["Document Number", _display_value(doc.get("document_number"), "TBD", final=final),
+             "Issue Date", _display_value(doc.get("issue_date"), "TBD", final=final)],
+            ["Seller", _display_value((doc.get("seller") or {}).get("legal_name"), "TBD", final=final)],
+            ["Seller Address", _display_value((doc.get("seller") or {}).get("address"), "TBD", final=final)],
             ["Seller Contact", (doc.get("seller") or {}).get("contact") or ""],
             ["Seller Tel", (doc.get("seller") or {}).get("phone") or ""],
             ["Seller Email", (doc.get("seller") or {}).get("email") or ""],
-            ["Buyer", (doc.get("buyer") or {}).get("legal_name") or "TBD"],
-            ["Buyer Address", (doc.get("buyer") or {}).get("address") or "TBD"],
+            ["Buyer", _display_value((doc.get("buyer") or {}).get("legal_name"), "TBD", final=final)],
+            ["Buyer Address", _display_value((doc.get("buyer") or {}).get("address"), "TBD", final=final)],
             ["Buyer Contact", (doc.get("buyer") or {}).get("contact") or ""],
             ["Buyer Tel", (doc.get("buyer") or {}).get("phone") or ""],
             ["Buyer Email", (doc.get("buyer") or {}).get("email") or ""],
-            ["Buyer Registration Details", (doc.get("buyer") or {}).get("registration_details") or ""], [], *_rows(doc),
+            ["Buyer Registration Details", (doc.get("buyer") or {}).get("registration_details") or ""], [], *_rows(doc, final=final),
             ["", "", "", "", "", "TOTAL", doc.get("currency") or "",
-             format_currency_amount(doc.get("total", "0"), doc.get("currency")) if doc.get("product_family") == "cosmetics" else doc.get("total", "0")],
-            ["Incoterms", doc.get("incoterms") or "TBD"], ["Payment Terms", doc.get("payment_terms") or "TBD"],
+             format_currency_amount(doc.get("total", None if final else "0"), doc.get("currency"), final=final)
+             if doc.get("product_family") == "cosmetics" else doc.get("total", None if final else "0")],
+            ["Incoterms", _display_value(doc.get("incoterms"), "TBD", final=final)],
+            ["Payment Terms", _display_value(doc.get("payment_terms"), "TBD", final=final)],
             ["Remarks", doc.get("remarks") or ""]]
     if doc.get("document_type") == "PL":
-        from .packing import reconcile_packing
-        packing = reconcile_packing(doc)
-        calculated = packing["calculated"]
-        package_total = calculated.get("package_count") or doc.get("actual_package_count")
+        if final:
+            calculated = _final_packing_totals(doc)
+            package_total = calculated["package_count"]
+            quantities = calculated.get("quantities")
+        else:
+            from .packing import reconcile_packing
+            packing = reconcile_packing(doc)
+            calculated = packing["calculated"]
+            package_total = calculated.get("package_count") or doc.get("actual_package_count")
+            quantities = packing["quantities"] if packing["quantity_complete"] else None
         rows = [row for row in rows if not (len(row) > 5 and row[:5] == ["", "", "", "", ""] and row[5] == "TOTAL")]
-        rows += [["Containers", doc.get("container_count") or "TO BE CONFIRMED"],
-                 ["HS Code", doc.get("hs_code") or "TO BE CONFIRMED"],
-                 ["Total packages", _format_quantity(package_total) if package_total else "TO BE CONFIRMED"],
-                 ["Total net weight (kg)", calculated.get("net_weight_kg") or doc.get("declared_net_weight_kg") or "TO BE CONFIRMED"],
-                 ["Total gross weight (kg)", calculated.get("gross_weight_kg") or doc.get("declared_gross_weight_kg") or "TO BE CONFIRMED"],
-                 ["Total volume (CBM)", calculated.get("volume_cbm") or doc.get("declared_volume_cbm") or "TO BE CONFIRMED"]]
-        if packing["quantity_complete"]:
-            rows += [[f"Total quantity ({unit})", _format_quantity(quantity)]
-                     for unit, quantity in packing["quantities"].items()]
+        rows += [["Containers", _display_value(doc.get("container_count"), "TO BE CONFIRMED", final=final)],
+                 ["HS Code", _display_value(doc.get("hs_code"), "TO BE CONFIRMED", final=final)],
+                 ["Total packages", _format_quantity(package_total, final=final) if final or package_total else "TO BE CONFIRMED"]]
+        for label, field, declared_field in (("Total net weight (kg)", "net_weight_kg", "declared_net_weight_kg"),
+                                              ("Total gross weight (kg)", "gross_weight_kg", "declared_gross_weight_kg"),
+                                              ("Total volume (CBM)", "volume_cbm", "declared_volume_cbm")):
+            value = calculated.get(field) if final else calculated.get(field) or doc.get(declared_field)
+            rows.append([label, _display_value(value, "TO BE CONFIRMED", final=final)])
+        if quantities:
+            rows += [[f"Total quantity ({unit})", _format_quantity(quantity, final=final)]
+                     for unit, quantity in quantities.items()]
+        elif final:
+            rows.append(["Total quantity", ""])
     if doc.get("document_type") == "PI":
         bank_details = bank_details or {}
-        rows += [["Bank Information", "Beneficiary", bank_details.get("BENEFICIARY") or "[BANK DETAIL REQUIRED]"],
-                 ["", "Bank Name", bank_details.get("BANK_NAME") or "[BANK DETAIL REQUIRED]"],
-                 ["", "Branch Name", bank_details.get("BRANCH") or "[BANK DETAIL REQUIRED]"],
-                 ["", "SWIFT Code", bank_details.get("SWIFT") or "[BANK DETAIL REQUIRED]"],
-                 ["", "Account Number (USD)", bank_details.get("ACCOUNT_NUMBER") or "[BANK DETAIL REQUIRED]"],
-                 ["", "Bank Address", bank_details.get("BANK_ADDRESS") or "[BANK DETAIL REQUIRED]"]]
+        rows += [["Bank Information", "Beneficiary", _display_value(bank_details.get("BENEFICIARY"), "[BANK DETAIL REQUIRED]", final=final)],
+                 ["", "Bank Name", _display_value(bank_details.get("BANK_NAME"), "[BANK DETAIL REQUIRED]", final=final)],
+                 ["", "Branch Name", _display_value(bank_details.get("BRANCH"), "[BANK DETAIL REQUIRED]", final=final)],
+                 ["", "SWIFT Code", _display_value(bank_details.get("SWIFT"), "[BANK DETAIL REQUIRED]", final=final)],
+                 ["", "Account Number (USD)", _display_value(bank_details.get("ACCOUNT_NUMBER"), "[BANK DETAIL REQUIRED]", final=final)],
+                 ["", "Bank Address", _display_value(bank_details.get("BANK_ADDRESS"), "[BANK DETAIL REQUIRED]", final=final)]]
     seal_bytes = Path(seal_path).read_bytes() if seal_path and Path(seal_path).is_file() else None
     if seal_bytes:
         rows += [[], ["Authorized Representative", "DAVID, SEOKWON IHM"], ["KE KOREA CO. LTD"]]
@@ -279,7 +402,8 @@ def _xlsx_bytes(doc, bank_details=None, *, seal_path=None):
         xml_rows.append(f'<row r="{ri}">{"".join(cells)}</row>')
     drawing = '<drawing r:id="rId1"/>' if seal_bytes else ""
     sheet = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheetData>' + "".join(xml_rows) + "</sheetData>" + drawing + "</worksheet>")
-    workbook = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Trade Document Draft" sheetId="1" r:id="rId1"/></sheets></workbook>'
+    sheet_name = "Trade Document Final" if final else "Trade Document Draft"
+    workbook = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="' + sheet_name + '" sheetId="1" r:id="rId1"/></sheets></workbook>'
     with __import__("io").BytesIO() as buf:
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
             drawing_types = '<Default Extension="png" ContentType="image/png"/><Override PartName="/xl/drawings/drawing1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>' if seal_bytes else ""
@@ -296,26 +420,28 @@ def _xlsx_bytes(doc, bank_details=None, *, seal_path=None):
         return buf.getvalue()
 
 
-def render_files(doc, output_dir, *, bank_details=None, logo_path=None, seal_path=None):
-    """Write draft outputs (even incomplete ones carry a DRAFT status and open-items list)."""
+def render_files(doc, output_dir, *, bank_details=None, logo_path=None, seal_path=None, final=False):
+    """Write review drafts by default, or final outputs after caller-side approval."""
     # Keep the date and destination defaults consistent across PDF, Excel, and HTML.
-    doc = {**doc, "issue_date": current_issue_date(), "ship_to": doc.get("ship_to") or "N/A"}
+    doc = {**doc, "status": _render_status(doc, final), "issue_date": current_issue_date(),
+           "ship_to": _display_value(doc.get("ship_to"), "N/A", final=final)}
     dtype = re.sub(r"[^A-Za-z0-9_-]", "_", str(doc.get("document_type") or "DRAFT"))
     stamp = re.sub(r"[^0-9-]", "", str(doc.get("issue_date") or "")) or date.today().isoformat()
     directory = Path(output_dir)
     directory.mkdir(parents=True, exist_ok=True)
     run_id = datetime.now().strftime("%Y%m%d%H%M%S%f")
-    stem = f"{dtype}_{stamp}_DRAFT_{run_id}"
-    lines = document_lines(doc, bank_details)
-    html_rows = "".join("<tr>" + "".join(f"<td>{escape(_english(v))}</td>" for v in row) + "</tr>" for row in _rows(doc))
-    html_doc = "<!doctype html><meta charset='utf-8'><title>Trade Document Draft</title><h1>" + escape(dtype) + "</h1><h2>" + escape(doc.get("status", "DRAFT")) + "</h2><table border='1'>" + html_rows + "</table><pre>" + escape("\n".join(lines)) + "</pre>"
+    output_label = "FINAL" if final else "DRAFT"
+    stem = f"{dtype}_{stamp}_{output_label}_{run_id}"
+    lines = document_lines(doc, bank_details, final=final)
+    html_rows = "".join("<tr>" + "".join(f"<td>{escape(_english(v))}</td>" for v in row) + "</tr>" for row in _rows(doc, final=final))
+    html_doc = "<!doctype html><meta charset='utf-8'><title>Trade Document " + output_label.title() + "</title><h1>" + escape(dtype) + "</h1><h2>" + escape(doc.get("status", "DRAFT")) + "</h2><table border='1'>" + html_rows + "</table><pre>" + escape("\n".join(lines)) + "</pre>"
     paths = {"pdf": directory / f"{stem}.pdf", "xlsx": directory / f"{stem}.xlsx", "html": directory / f"{stem}.html"}
     try:
         from .pi_pdf import render_trade_document
     except ImportError:
         from Quotation_KEKOREA.agent.pi_pdf import render_trade_document
     paths["pdf"].write_bytes(render_trade_document(
-        doc, bank_details or {}, logo_path=logo_path, seal_path=seal_path))
-    paths["xlsx"].write_bytes(_xlsx_bytes(doc, bank_details, seal_path=seal_path))
+        doc, bank_details or {}, logo_path=logo_path, seal_path=seal_path, final=final))
+    paths["xlsx"].write_bytes(_xlsx_bytes(doc, bank_details, seal_path=seal_path, final=final))
     paths["html"].write_text(html_doc, encoding="utf-8")
     return paths

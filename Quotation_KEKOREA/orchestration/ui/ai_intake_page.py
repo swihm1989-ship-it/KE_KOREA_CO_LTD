@@ -32,8 +32,10 @@ from Quotation_KEKOREA.orchestration.workflows.document_assets import (
 # module in sys.modules while reloading this page's source code.
 FOLLOWUP_MODULE = "Quotation_KEKOREA.orchestration.workflows.intake_followups"
 PDF_EXPORT_MODULE = "Quotation_KEKOREA.orchestration.workflows.legacy_document_exports"
-PDF_EXPORT_REVISION = "review-pdf-safe-loader-20261113-v2"
-AI_INTAKE_REVISION = "ai-intake-hot-reload-20261113-v5"
+PDF_EXPORT_REVISION = "review-pdf-safe-loader-20261113-v4"
+TRADE_REVIEW_MODULE = "Quotation_KEKOREA.orchestration.workflows.trade_export_review"
+TRADE_REVIEW_REVISION = "approved-blank-final-20261113-v1"
+AI_INTAKE_REVISION = "ai-intake-hot-reload-20261113-v7"
 
 
 def _current_ai_workflow():
@@ -91,6 +93,29 @@ def missing_fields(*args, **kwargs):
     return _current_intake_followups().missing_fields(*args, **kwargs)
 
 
+def _current_trade_export_review():
+    """Refresh the review API before rendering a retained Streamlit session."""
+    try:
+        module = importlib.import_module(TRADE_REVIEW_MODULE)
+        def compatible():
+            return (
+                getattr(module, "TRADE_REVIEW_REVISION", None) == TRADE_REVIEW_REVISION
+                and all(callable(getattr(module, name, None))
+                        and "allow_incomplete" in signature(getattr(module, name)).parameters
+                        for name in ("review_trade_document", "trade_export_fingerprint"))
+            )
+        if not compatible():
+            importlib.invalidate_caches()
+            module = importlib.reload(module)
+        if not compatible():
+            raise RuntimeError("stale review module")
+    except (ImportError, OSError, AttributeError, TypeError, ValueError, RuntimeError):
+        raise RuntimeError(
+            "문서 검토 모듈 버전이 일치하지 않습니다. 앱을 재시작한 후 다시 시도하세요."
+        ) from None
+    return module
+
+
 def _current_pdf_export_renderers():
     """Resolve a fresh PDF renderer only for an explicit PDF button click."""
     try:
@@ -99,6 +124,8 @@ def _current_pdf_export_renderers():
             getattr(module, "REVIEW_EXPORT_REVISION", None) != PDF_EXPORT_REVISION
             or not callable(getattr(module, "render_incomplete_trade_pdf", None))
             or not callable(getattr(module, "render_master_trade_draft", None))
+            or not callable(getattr(module, "render_master_trade_final", None))
+            or "allow_incomplete" not in signature(module.render_master_trade_final).parameters
         ):
             importlib.invalidate_caches()
             module = importlib.reload(module)
@@ -106,6 +133,8 @@ def _current_pdf_export_renderers():
             getattr(module, "REVIEW_EXPORT_REVISION", None) != PDF_EXPORT_REVISION
             or not callable(getattr(module, "render_incomplete_trade_pdf", None))
             or not callable(getattr(module, "render_master_trade_draft", None))
+            or not callable(getattr(module, "render_master_trade_final", None))
+            or "allow_incomplete" not in signature(module.render_master_trade_final).parameters
         ):
             raise RuntimeError("stale PDF module")
     except (ImportError, OSError, AttributeError, TypeError, ValueError, RuntimeError):
@@ -125,7 +154,7 @@ def _formal_pdf_hold_reason(kind: str, error: Exception, env: dict) -> str:
     if message.startswith("문서 생성 전 누락 정보"):
         return "문서 생성 전 누락 정보가 있습니다. 위 거래정보 입력창에서 연락처 등 표시된 항목을 입력하세요."
     if message.startswith("거래조건을 먼저 보완하세요:"):
-        return ("거래조건 검증 미통과입니다. 위 '발행 전 추가 확인사항'의 "
+        return ("거래조건 검증 미통과입니다. 위 '현재 입력 확인사항'의 "
                 "구체적인 오류 및 '이전 AI 추출 기록'의 미확정·충돌 항목을 확인하세요.")
     if kind == "PI" and "은행정보" in message:
         keys = ("BENEFICIARY", "BANK_NAME", "BRANCH", "SWIFT",
@@ -157,13 +186,66 @@ def _model_config():
     )}
 
 
+def _invalidate_document_outputs() -> None:
+    """Every accepted or rejected visible edit revokes previous output approval."""
+    for key in ("ai_intake_drafts", "master_legacy_files",
+                "master_contract_final_files", "master_trade_final_files"):
+        st.session_state.pop(key, None)
+    st.session_state["ai_intake_edit_revision"] = st.session_state.get("ai_intake_edit_revision", 0) + 1
+
+
+def _pending_input_errors(digest: str) -> dict:
+    return {key: value for key, value in
+            (st.session_state.get("ai_intake_pending_input_errors") or {}).items()
+            if value.get("digest") == digest}
+
+
+def _record_input_error(digest: str, field: str, widget: str, message: str) -> None:
+    pending = dict(st.session_state.get("ai_intake_pending_input_errors") or {})
+    pending[widget] = {"digest": digest, "field": field, "message": message,
+                       "value": str(st.session_state.get(widget) or "")}
+    st.session_state["ai_intake_pending_input_errors"] = pending
+    st.session_state["ai_intake_followup_error"] = message
+    _invalidate_document_outputs()
+
+
+def _clear_input_error(widget: str) -> None:
+    pending = dict(st.session_state.get("ai_intake_pending_input_errors") or {})
+    pending.pop(widget, None)
+    if pending:
+        st.session_state["ai_intake_pending_input_errors"] = pending
+    else:
+        st.session_state.pop("ai_intake_pending_input_errors", None)
+    st.session_state.pop("ai_intake_followup_error", None)
+
+
 def _remember_candidate_bundle(digest: str, candidate_map: dict) -> None:
-    """Synchronize answer widgets and advanced editor in memory."""
+    """Synchronize candidate revisions; widgets refresh before their next render."""
+    previous = st.session_state.get("ai_intake_candidates")
+    if not previous or previous[0] != digest:
+        st.session_state.pop("ai_intake_pending_input_errors", None)
+        st.session_state.pop("ai_intake_followup_error", None)
     candidate_map = {kind: normalize_trade_values(data) if kind in {"PI", "PO", "CI", "PL"} else data
                      for kind, data in candidate_map.items()}
     st.session_state["ai_intake_candidates"] = (digest, candidate_map)
-    st.session_state.pop("ai_intake_drafts", None)
-    st.session_state.pop("master_contract_final_files", None)
+    _invalidate_document_outputs()
+
+
+def _refresh_shared_widgets(digest: str, candidates: dict) -> None:
+    """Reflect committed JSON/cross-document edits without hiding rejected input."""
+    current = (digest, _fingerprint(json.dumps(candidates, ensure_ascii=False, sort_keys=True)))
+    pending = _pending_input_errors(digest)
+    if st.session_state.get("ai_intake_editor_snapshot") != current:
+        prefix = "ai_intake_shared_" + digest[:12] + "_"
+        for key in list(st.session_state):
+            if str(key).startswith(prefix) and key not in pending:
+                st.session_state.pop(key, None)
+        st.session_state["ai_intake_editor_snapshot"] = current
+    # Streamlit removes widget values on menu navigation; keep unsaved errors
+    # with the exact visible input until the user corrects or replaces it.
+    for key, error in pending.items():
+        if key not in st.session_state:
+            st.session_state[key] = error["value"]
 
 
 def _handle_missing_answer(digest: str, key: str, widget_key: str) -> None:
@@ -326,20 +408,13 @@ def _apply_shared_input(digest: str, field: str, widget: str) -> None:
     try:
         updated = apply_answer(saved[1], field, raw, allow_blank=True)
     except (ValueError, TypeError, RuntimeError) as exc:
-        st.session_state["ai_intake_followup_error"] = str(exc)
+        _record_input_error(digest, field, widget, str(exc))
         return
+    _clear_input_error(widget)
     _remember_candidate_bundle(digest, updated)
     st.session_state.pop("master_legacy_files", None)
     st.session_state.pop("master_contract_final_files", None)
     st.session_state["ai_intake_last_answer"] = field
-    if field.split(".")[-1] in {"contact", "phone", "email"}:
-        # A company can be PO buyer and PI seller. Refresh its other contact
-        # widgets from the updated candidates before the next script run.
-        suffixes = tuple("_" + role + "_" + prop for role in ("buyer", "seller")
-                         for prop in ("contact", "phone", "email"))
-        for key in list(st.session_state):
-            if str(key).startswith("ai_intake_shared_" + digest[:12] + "_") and str(key).endswith(suffixes):
-                st.session_state.pop(key, None)
     st.session_state.pop("ai_intake_followup_error", None)
 
 
@@ -400,8 +475,9 @@ def _apply_extra_item(digest: str, index: int, field: str, widget: str) -> None:
     try:
         updated = apply_answer(saved[1], f"item.{index}.{field}", raw, allow_blank=True)
     except (ValueError, TypeError, RuntimeError) as exc:
-        st.session_state["ai_intake_followup_error"] = str(exc)
+        _record_input_error(digest, f"item.{index}.{field}", widget, str(exc))
         return
+    _clear_input_error(widget)
     _remember_candidate_bundle(digest, updated)
     st.session_state.pop("master_legacy_files", None)
     st.session_state["ai_intake_last_answer"] = "item " + str(index + 1)
@@ -581,6 +657,129 @@ def _render_contract_confirmations(digest: str, snapshot: dict) -> None:
                 st.error("계약서 차단 사항: " + str(issue.get("message") or ""))
 
 
+def _generate_trade_numbers(digest: str, widget: str) -> None:
+    from datetime import datetime, timezone, timedelta
+    from uuid import uuid4
+    saved = st.session_state.get("ai_intake_candidates")
+    if not saved or saved[0] != digest:
+        return
+    updated = deepcopy(saved[1])
+    stamp = datetime.now(timezone(timedelta(hours=9))).strftime("%Y%m%d-%H%M%S")
+    first = None
+    for kind, doc in updated.items():
+        if kind not in {"PI", "PO", "CI", "PL"} or not isinstance(doc, dict):
+            continue
+        value = str(doc.get("document_number") or "").strip()
+        from Quotation_KEKOREA.agent.review_fields import _missing
+        if _missing(value, True) or value.upper().startswith("DRAFT"):
+            doc["document_number"] = kind + "-" + stamp + "-" + uuid4().hex[:6].upper()
+        if first is None:
+            first = doc["document_number"]
+    _remember_candidate_bundle(digest, updated)
+    st.session_state.pop("master_legacy_files", None)
+    st.session_state[widget] = first or ""
+
+
+def _render_trade_issue_list(kind: str, report: dict) -> None:
+    warnings = report.get("warnings") or []
+    issues = report.get("issues") or []
+    if warnings:
+        st.warning(kind + " · 누락·확인 필요 " + str(len(warnings)) + "건 · 승인 시 빈칸 유지")
+        for row in warnings:
+            prefix = ("이전 AI 기록 · " if row["code"] in {"ai_missing", "ai_conflict"} else "")
+            st.text(prefix + row["message"])
+    if issues:
+        st.warning(kind + " · 발행 전 수정 필요 " + str(len(issues)) + "건")
+        for row in issues:
+            prefix = ("이전 AI 기록 · " if row["code"] in {"ai_missing", "ai_conflict"} else "")
+            st.text(prefix + row["message"])
+    elif not warnings:
+        st.success(kind + " · 현재 입력값 검증 통과")
+
+
+def _discard_trade_final(kind: str) -> None:
+    bundle = dict(st.session_state.get("master_trade_final_files") or {})
+    bundle.pop(kind, None)
+    if bundle:
+        st.session_state["master_trade_final_files"] = bundle
+    else:
+        st.session_state.pop("master_trade_final_files", None)
+
+
+def _render_trade_final_panel(digest: str, sources: dict, env: dict, *, edited_matches=True) -> None:
+    trade = {kind: doc for kind, doc in sources.items()
+             if kind in {"PI", "PO", "CI", "PL"} and isinstance(doc, dict)}
+    if not trade:
+        return
+    try:
+        review = _current_trade_export_review()
+    except RuntimeError as exc:
+        st.error(str(exc))
+        return
+    st.divider()
+    st.markdown("#### 최종 PDF · 기존 KE KOREA 양식")
+    st.caption("현재 문서별 입력·금액을 검증하고 직접 승인한 최종본을 생성합니다. "
+               "누락된 값은 승인 후에도 빈칸으로 남고, 계산 근거가 부족한 금액도 빈칸으로 출력합니다. "
+               "실제 전송은 하지 않습니다.")
+    if not edited_matches:
+        st.error("고급 JSON 변경값을 먼저 문서 후보에 반영하세요. 저장되지 않은 값으로 최종 발행하지 않습니다.")
+    pending_errors = _pending_input_errors(digest)
+    if pending_errors:
+        st.error("입력 오류를 먼저 수정하세요. 화면의 변경값이 아직 문서에 저장되지 않아 최종 출력을 보류합니다.")
+    revision = st.session_state.get("ai_intake_edit_revision", 0)
+    for kind, source in trade.items():
+        try:
+            report = review.review_trade_document(kind, source, final=True, allow_incomplete=True)
+            fingerprint = review.trade_export_fingerprint(kind, source, allow_incomplete=True)
+        except (ValueError, TypeError, KeyError, AttributeError):
+            st.error(kind + " 문서 형식을 확인해 주세요.")
+            _discard_trade_final(kind)
+            continue
+        with st.container(border=True):
+            st.markdown("**" + kind + " · " + str(source.get("document_number") or "미입력") + "**")
+            _render_trade_issue_list(kind, report)
+            if report['missing']:
+                st.caption("누락 항목은 위 거래정보 입력창에서 보완하거나, 아래 승인 후 빈칸으로 출력할 수 있습니다.")
+            if source.get('missing_fields'):
+                st.caption("이전 AI 미입력 기록은 참고용으로 유지됩니다. 현재 입력값과 위 누락 항목을 확인하세요.")
+            key = digest[:12] + "_" + kind + "_" + fingerprint[:18] + "_" + str(revision)
+            approval_key = "master_trade_final_approve_" + key
+            blocked = bool(report['issues']) or not edited_matches or bool(pending_errors)
+            if blocked:
+                st.session_state.pop(approval_key, None)
+            approved = st.checkbox(
+                kind + " · 최종 출력 승인: 현재 입력과 누락 항목을 확인했으며, 미입력값과 계산할 수 없는 금액을 빈칸으로 두고 이 버전의 최종 PDF 생성을 승인합니다.",
+                key=approval_key, disabled=blocked)
+            if blocked or not approved:
+                _discard_trade_final(kind)
+            if st.button(kind + " 최종 PDF 생성", key="master_trade_final_export_" + key,
+                         disabled=blocked or not approved, type="primary"):
+                _discard_trade_final(kind)
+                try:
+                    _current_pdf_export_renderers()
+                    exports = importlib.import_module(PDF_EXPORT_MODULE)
+                    files = exports.render_master_trade_final(
+                        kind, source, env, approved=approved,
+                        expected_fingerprint=fingerprint, allow_incomplete=True)
+                    bundle = dict(st.session_state.get("master_trade_final_files") or {})
+                    bundle[kind] = {"fingerprint": fingerprint, "revision": revision, "files": files}
+                    st.session_state["master_trade_final_files"] = bundle
+                except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as exc:
+                    if isinstance(exc, review.TradeExportValidationError):
+                        _render_trade_issue_list(kind, {'issues': exc.issues})
+                    elif str(exc).startswith(('승인 후 문서', '최종 PDF 생성에 대한 사용자')):
+                        st.error(str(exc))
+                    else:
+                        st.error(kind + " 최종 PDF 생성 보류: " + _formal_pdf_hold_reason(kind, exc, env))
+            saved = (st.session_state.get("master_trade_final_files") or {}).get(kind)
+            if (saved and approved and not blocked
+                    and saved['fingerprint'] == fingerprint and saved['revision'] == revision):
+                for fmt, asset in saved['files'].items():
+                    st.download_button(kind + " " + fmt.upper() + " FINAL 다운로드",
+                                       data=asset['content'], file_name=asset['filename'],
+                                       mime=asset['mime'], key="master_trade_final_download_" + kind + "_" + fmt)
+
+
 def _render_contact_inputs(digest: str, candidates: dict, field: str, label: str) -> bool:
     """Keep contacts separate when a PO and sales document name different firms."""
     from Quotation_KEKOREA.agent.review_fields import _missing
@@ -608,6 +807,7 @@ def _render_contact_inputs(digest: str, candidates: dict, field: str, label: str
 
 def _render_single_editor(digest: str, candidates: dict) -> None:
     """One editor is the source of truth for trade/contract and PDF output."""
+    _refresh_shared_widgets(digest, candidates)
     trade = next((doc for kind, doc in candidates.items()
                   if kind in {"PI", "PO", "CI", "PL"} and isinstance(doc, dict)), {})
     fields = list(SHARED_FIELDS)
@@ -633,12 +833,15 @@ def _render_single_editor(digest: str, candidates: dict) -> None:
         st.markdown("#### ✏️ 거래정보 입력 · 수정 (한 번만)")
         st.caption("한 곳에서 입력한 값이 PI/PO/CI/PL·계약서 후보와 PDF 입력에 함께 반영됩니다. Enter 또는 칸 이동 시 자동 저장됩니다.")
         st.caption("전화번호·이메일·담당자 등 선택 항목이 해당 없으면 N/A를 직접 입력하세요. "
-                   "Not provided / TBD는 입력 완료로 처리하지 않습니다.")
+                   "확인되지 않은 값은 비워둘 수 있으며, 최종 출력 시 빈칸 유지 승인이 필요합니다.")
         if gaps:
-            st.warning("문서 생성 전 누락 정보 입력: " + "; ".join(gap.label for gap in gaps))
+            st.warning("누락 정보 · 입력하거나 최종 출력에서 빈칸 유지 승인: " + "; ".join(gap.label for gap in gaps))
         error = st.session_state.get("ai_intake_followup_error")
         if error:
             st.error(error)
+        for pending in _pending_input_errors(digest).values():
+            if pending["message"] != error:
+                st.error(pending["field"] + ": " + pending["message"])
         last = st.session_state.get("ai_intake_last_answer")
         if last:
             st.caption("최근 반영: " + str(last) + " · 이전 PDF 및 검토 상태 무효화")
@@ -653,6 +856,9 @@ def _render_single_editor(digest: str, candidates: dict) -> None:
                          if field in gap_keys else None)
             st.text_input(label, key=widget, help=help_text, on_change=_apply_shared_input,
                           args=(digest, field, widget), **kwargs)
+            if field == "document_number":
+                st.button("문서번호 자동 생성", key=widget + "_generate",
+                          on_click=_generate_trade_numbers, args=(digest, widget))
             if field in gap_keys and _shared_current(candidates, field):
                 st.button(label + " · 현재 값으로 누락 항목에도 반영",
                           key=widget + "_apply_to_missing", on_click=_apply_input_to_missing,
@@ -688,7 +894,8 @@ def _render_single_editor(digest: str, candidates: dict) -> None:
         else:
             if gaps:
                 st.warning("미입력·확인 필요 항목 " + str(len(gaps)) +
-                           "개 · 비어 있어도 검토용 PDF 생성 가능")
+                           "개 (전체 문서 기준): " + "; ".join(gap.label for gap in gaps))
+                st.caption("아래 최종 출력은 선택한 문서별로 다시 검증합니다. 다른 문서의 누락 항목 때문에 PI 출력을 막지 않습니다.")
             if unresolved:
                 st.warning("이전 AI 확인 기록 " +
                            str(len(unresolved)) +
@@ -741,8 +948,8 @@ def _render_original_contract_final(principal: str, snapshot: dict,
             for sentence in clause.get("sentences") or []:
                 st.write(str(sentence.get("text") or ""))
     if not edited_matches:
-        st.error("고급 JSON에서 수정한 내용이 아직 단일 입력창의 문서 후보에 저장되지 "
-                 "않았습니다. 먼저 '고급 JSON 변경값 후보에 반영'을 클릭하세요.")
+        st.error("입력 변경값이 아직 문서 후보에 저장되지 않았습니다. 위 입력 오류를 수정하고, "
+                 "고급 JSON을 수정했다면 '고급 JSON 변경값 후보에 반영'을 클릭하세요.")
         return
     env = document_export_env(st.secrets, os.environ)
     try:
@@ -1169,6 +1376,7 @@ def render_ai_intake(principal: str):
             candidates = st.session_state.get("ai_intake_candidates")
         _render_single_editor(digest, candidates[1])
         candidates = st.session_state.get("ai_intake_candidates")
+        editor_matches = not bool(_pending_input_errors(digest))
         st.markdown("#### 실시간 반영 결과")
         for kind, data in candidates[1].items():
             if kind in ("PI", "PO", "CI", "PL"):
@@ -1212,13 +1420,16 @@ def render_ai_intake(principal: str):
                             term["status"] = "suggested" if str(term.get("value") or "").strip() else "missing"
                         # A changed contract requires fresh AI clauses or
                         # explicit clause verification before the final approval.
+                    st.session_state.pop("ai_intake_pending_input_errors", None)
+                    st.session_state.pop("ai_intake_followup_error", None)
                     _remember_candidate_bundle(digest, pending_json)
                     st.success("고급 JSON 변경값을 후보에 반영했습니다. 계약조건을 다시 확인하세요.")
                     st.rerun()
                 except (TypeError, ValueError, KeyError):
                     st.error("문서 후보 형식이 올바르지 않습니다. 변경값을 검토해 주세요.")
         edited_key = _fingerprint(digest + raw)
-        if st.button("기존 문서 엔진으로 검증·DRAFT 생성", key="ai_intake_prepare"):
+        if st.button("기존 문서 엔진으로 검증·DRAFT 생성", key="ai_intake_prepare",
+                     disabled=not editor_matches):
             st.session_state.pop("ai_intake_drafts", None)
             try:
                 data = json.loads(raw)
@@ -1254,19 +1465,13 @@ def render_ai_intake(principal: str):
         trade_data = {k: v for k, v in candidates[1].items()
                       if k in ("PI", "PO", "CI", "PL") and isinstance(v, dict)}
         if trade_data:
-            from Quotation_KEKOREA.agent.trade_documents import validate_and_calculate
-            with st.expander("발행 전 추가 확인사항 (검토용 PDF는 다운로드 가능)", expanded=False):
+            with st.expander("현재 입력 확인사항 · 누락·오류 상세", expanded=True):
                 for kind, trade in trade_data.items():
                     try:
-                        checked = validate_and_calculate(trade)
-                        problems = checked.get("blocking_issues") or []
-                        st.markdown("**" + kind + "**")
-                        if problems:
-                            for problem in problems:
-                                st.write("• " + str(problem))
-                        else:
-                            st.success("형식 검증 통과 · 직인과 발행 승인은 별도 확인")
-                    except (ValueError, TypeError, KeyError, AttributeError) as exc:
+                        report = _current_trade_export_review().review_trade_document(
+                            kind, trade, final=True, allow_incomplete=True)
+                        _render_trade_issue_list(kind, report)
+                    except (ValueError, TypeError, KeyError, AttributeError, RuntimeError) as exc:
                         # Corrupt historical candidate data should be a review
                         # warning, not an unhandled Streamlit exception.
                         st.warning(kind + " 확인 필요: 거래정보 형식을 다시 확인해 주세요.")
@@ -1285,7 +1490,8 @@ def render_ai_intake(principal: str):
             st.caption("확인된 거래조건은 기존 KE KOREA 양식과 회사 직인을 사용합니다. "
                        "미확정 항목이 있거나 발행 검증이 통과하지 않으면, 같은 입력값으로 "
                        "직인 없는 '검토용 PDF' 파일을 생성합니다.")
-            if st.button("현재 거래정보로 PDF 생성", key="master_legacy_export", type="primary"):
+            if st.button("현재 거래정보로 PDF 생성", key="master_legacy_export", type="primary",
+                         disabled=not editor_matches):
                 try:
                     render_master_trade_draft, render_incomplete_trade_pdf = (
                         _current_pdf_export_renderers()
@@ -1322,6 +1528,12 @@ def render_ai_intake(principal: str):
             if export_bundle and export_bundle[0] == edited_key:
                 for kind, reason in export_bundle[2].items():
                     st.warning(kind + " 정식 양식 발행 보류: " + reason)
+                    try:
+                        report = _current_trade_export_review().review_trade_document(
+                            kind, json.loads(raw)[kind])
+                        _render_trade_issue_list(kind, report)
+                    except (ValueError, TypeError, KeyError, AttributeError, RuntimeError):
+                        st.warning(kind + " 입력 데이터 형식을 확인하세요.")
                 for kind, files in export_bundle[1].items():
                     with st.container(border=True):
                         title = ("미확정 내부 검토용 PDF (정식 발행 아님)"
@@ -1332,7 +1544,10 @@ def render_ai_intake(principal: str):
                             st.download_button(kind + " " + fmt.upper() + " DRAFT 다운로드",
                                                data=file["content"], file_name=file["filename"],
                                                mime=file["mime"], key="master_legacy_" + kind + "_" + fmt)
-            st.caption("미확정 항목이 있더라도 검토용 PDF 파일은 생성 가능합니다. 정식 발행·직인·전송에는 기존 검증과 승인이 필요합니다.")
+            st.caption("미확정 항목이 있어도 검토용 PDF를 생성할 수 있습니다. "
+                       "아래 최종 PDF에서는 누락 항목을 빈칸으로 유지하도록 직접 승인할 수 있습니다.")
+        _render_trade_final_panel(digest, candidates[1], document_export_env(st.secrets, os.environ),
+                                  edited_matches=not json_changed)
         if "CONTRACT" in candidates[1]:
             st.caption("계약서 DRAFT는 기존 초안 엔진, FINAL은 기존 원본 계약서 "
                        "출력 엔진을 사용합니다. 두 방식 모두 별도 검토·승인 정책을 유지합니다.")
@@ -1342,7 +1557,7 @@ def render_ai_intake(principal: str):
                 raw_snapshot = None
             _render_original_contract_final(
                 principal, candidates[1]["CONTRACT"],
-                edited_matches=(raw_snapshot == candidates[1]["CONTRACT"]))
+                edited_matches=(raw_snapshot == candidates[1]["CONTRACT"] and editor_matches))
         doc = candidates[1].get("CONTRACT")
         if doc and not doc.get("clauses"):
             st.divider()
