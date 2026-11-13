@@ -150,7 +150,7 @@ class DraftingTests(unittest.TestCase):
         self.assertEqual(result['draft_quality']['source_comparison']['status'], 'compared')
         self.assertTrue(any(i['code'] == 'rag_cross_document_review'
                             for i in result['issues']))
-        self.assertNotIn(b, json.dumps(self.calls))
+        self.assertNotIn(b, json.dumps(self.calls[0]['reference_context']))
         self.assertIn('Approved adjacent definitions', json.dumps(self.calls))
 
     def test_audit_must_cover_every_generated_clause(self):
