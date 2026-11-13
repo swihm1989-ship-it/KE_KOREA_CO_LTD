@@ -7,6 +7,7 @@ import streamlit as st
 
 from Quotation_KEKOREA.contracts.library import (
     publish_sample, read_manifest, register_sample, set_sample_active,
+    backfill_library_embeddings, library_embedding_status,
 )
 from Quotation_KEKOREA.contracts.repository import ContractRepositoryError
 from Quotation_KEKOREA.contracts.promote_reference import promote_contract_reference
@@ -45,6 +46,35 @@ def render_library_admin(repo, env):
             st.session_state.pop('_sample_admin_session', None)
             st.rerun()
         st.caption('원본과 추출 내용은 관리자 전용입니다. 검색에는 승인한 익명화 참고 메모만 사용됩니다.')
+        try:
+            stats = library_embedding_status(
+                repo.list_library_records(approved_only=True),
+                model=env.get('CONTRACT_LIBRARY_EMBEDDING_MODEL') or 'text-embedding-3-small',
+            )
+            st.caption(
+                f"공통 RAG 벡터 · 승인 문서 {stats['documents']}개 · "
+                f"임베딩 {stats['embedded']}/{stats['chunks']}개 · 미적용 {stats['missing']}개"
+            )
+            if stats['missing'] and st.button(
+                '승인 참고 조항의 누락 임베딩 생성',
+                key='library_embedding_backfill',
+                help='현재 승인된 익명화 참고 메모만 OpenAI API로 전송합니다. '
+                     '원본 계약서·계좌·직인·미승인 문서는 전송하지 않습니다.',
+            ):
+                with st.spinner('누락 벡터를 생성하고 유효성을 검사합니다...'):
+                    result = backfill_library_embeddings(repo, env=env)
+                st.success(
+                    f"임베딩 저장: {result['chunks_updated']}개 / "
+                    f"문서 {result['documents_updated']}개 · "
+                    f"남은 미적용 {result['remaining']}개"
+                )
+                if result['failed_documents']:
+                    st.warning(
+                        f"동시 변경 등으로 {result['failed_documents']}개 문서는 저장하지 못했습니다. "
+                        "기존 원문·승인은 유지됩니다."
+                    )
+        except (ValueError, RuntimeError, ContractRepositoryError) as exc:
+            st.warning('RAG 임베딩 상태 확인 또는 생성 실패: ' + str(exc)[:220])
         # Explicitly promote a previously saved per-contract reference. Admin-only.
         # No source deletion and no AI retrieval before reviewed guidance approval.
         current_contract_id = st.session_state.get('contract_active_id')
