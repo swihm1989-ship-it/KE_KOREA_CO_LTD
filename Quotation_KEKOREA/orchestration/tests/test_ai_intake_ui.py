@@ -128,6 +128,19 @@ class AiIntakeUiTests(unittest.TestCase):
         self.assertFalse(pdf["final"])
         self.assertFalse(pdf["sendable"])
 
+    def test_stale_cached_ai_page_is_reloaded_before_render(self):
+        from Quotation_KEKOREA.orchestration.ui import ai_intake_page
+        # Simulates a Streamlit process that still holds the old Python
+        # module after the entrypoint source has been deployed.
+        with (patch.object(ai_intake_page, "AI_INTAKE_REVISION", "prior-release"),
+              patch.object(ai_intake_page, "render_ai_intake",
+                           side_effect=AssertionError("stale code executed"))):
+            app = AppTest.from_file(str(PAGE), default_timeout=25).run()
+            app.radio[0].set_value("AI 업무 요청").run()
+            self.assertFalse(app.exception, [e.message for e in app.exception])
+            self.assertFalse(any("최신 버전으로" in e.message for e in app.error))
+            self.assertIsNotNone(app.button(key="ai_intake_extract"))
+
     def test_cached_legacy_apply_answer_reloads_and_preserves_user_edit(self):
         from Quotation_KEKOREA.orchestration.ui import ai_intake_page
         from Quotation_KEKOREA.orchestration.workflows import intake_followups
