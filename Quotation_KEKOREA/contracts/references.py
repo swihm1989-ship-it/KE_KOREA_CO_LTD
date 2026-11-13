@@ -110,9 +110,41 @@ def extract_reference(file_bytes, filename, *, vision_client=None):
         return {"filename": name, "content_hash": digest, "extraction_status": "extracted",
                 "extracted_text": "\n\n".join(f"[{entry['locator']}]\n{entry['text']}" for entry in paragraphs),
                 "source_locations": paragraphs, "scanned_pages": []}
+    if suffix == "xlsx":
+        # Some commission precedents were signed/stored as Excel workbooks.
+        # Extract display data only; never execute formulas, macros or links.
+        try:
+            from openpyxl import load_workbook
+            workbook = load_workbook(io.BytesIO(file_bytes), read_only=True, data_only=True)
+            locations = []
+            for sheet in workbook.worksheets:
+                sheet.reset_dimensions()
+                # Hard cap prevents malicious workbooks from exhausting RAM.
+                lines = []
+                for i, row in enumerate(sheet.iter_rows(values_only=True), 1):
+                    if i > 1000:
+                        raise ValueError("Spreadsheet exceeds the 1000-row extraction limit.")
+                    cells = [str(value).strip()[:400] for value in row if value is not None]
+                    text = " | ".join(x for x in cells if x)
+                    if text:
+                        lines.append(text[:1500])
+                if lines:
+                    locations.append({"locator": "sheet " + sheet.title[:100],
+                                      "text": "\n".join(lines)})
+            workbook.close()
+        except (OSError, ValueError, KeyError, zipfile.BadZipFile) as exc:
+            raise ValueError("Could not safely read this XLSX precedent.") from exc
+        if not locations:
+            raise ValueError("The XLSX contains no readable cell values.")
+        text = "\n\n".join(f"[{loc['locator']}]\n{loc['text']}" for loc in locations)
+        if len(text) > 250_000:
+            raise ValueError("XLSX extracted content exceeds the processing limit.")
+        return {'filename': name, 'content_hash': digest,
+                'extraction_status': 'extracted', 'extracted_text': text,
+                'source_locations': locations, 'scanned_pages': []}
     if suffix == "doc":
         raise ValueError("Legacy .doc files are not supported. Save the document as PDF or DOCX.")
-    raise ValueError("Upload PDF, DOCX or HWP5 reference contracts only.")
+    raise ValueError("Upload PDF, DOCX, HWP5 or XLSX reference contracts only.")
 
 
 def candidate_clauses(reference):
