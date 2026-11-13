@@ -32,7 +32,7 @@ from Quotation_KEKOREA.orchestration.workflows.document_assets import (
 FOLLOWUP_MODULE = "Quotation_KEKOREA.orchestration.workflows.intake_followups"
 PDF_EXPORT_MODULE = "Quotation_KEKOREA.orchestration.workflows.legacy_document_exports"
 PDF_EXPORT_REVISION = "review-pdf-safe-loader-20261113-v1"
-AI_INTAKE_REVISION = "ai-intake-hot-reload-20261113-v1"
+AI_INTAKE_REVISION = "ai-intake-hot-reload-20261113-v2"
 
 
 def _current_intake_followups():
@@ -95,6 +95,36 @@ def _current_pdf_export_renderers():
             "PDF 모듈 버전이 일치하지 않습니다. 앱을 재시작한 후 다시 시도하세요."
         ) from None
     return module.render_master_trade_draft, module.render_incomplete_trade_pdf
+
+
+def _formal_pdf_hold_reason(kind: str, error: Exception, env: dict) -> str:
+    """Safe, specific category instead of hiding every failure as 'not approved'.
+
+    Never display raw third-party errors, bank data, credentials or seal bytes.
+    The strict existing renderer remains authoritative for actual issuance.
+    """
+    message = str(error)
+    if message.startswith("거래조건을 먼저 보완하세요:"):
+        return ("거래조건 검증 미통과입니다. 위 '발행 전 추가 확인사항'의 "
+                "구체적인 오류 및 '이전 AI 추출 기록'의 미확정·충돌 항목을 확인하세요.")
+    if kind == "PI" and "은행정보" in message:
+        keys = ("BENEFICIARY", "BANK_NAME", "BRANCH", "SWIFT",
+                "ACCOUNT_NUMBER", "BANK_ADDRESS")
+        missing = sum(not str(env.get("KEKOREA_USD_" + key) or "").strip()
+                      for key in keys)
+        return ("거래조건과 별개로 PI 발행용 은행정보 " +
+                str(missing) + "/6개가 서버 설정에 없습니다. "
+                "Streamlit Secrets에서 기존 KE KOREA 은행 설정을 확인해야 합니다.")
+    if "직인" in message:
+        return ("거래조건과 별개로 회사 직인 확인에 실패했습니다. "
+                "'회사 직인 · 기존 서식 연결 확인'을 눌러 연결 상태를 확인하세요.")
+    if "attached PI" in message or "원본 PI" in message:
+        return "CI 출력에는 검증된 원본 PI 자료가 필요합니다."
+    if "Document type mismatch" in message:
+        return "문서 종류가 현재 후보와 일치하지 않습니다. 종류를 다시 확인하세요."
+    return ("기존 PDF 렌더러 처리 오류가 발생했습니다. "
+            "문서 생성 서버 로그에서 원인을 확인해야 합니다. "
+            "거래정보가 누락됐다는 의미는 아닙니다.")
 
 
 def _fingerprint(text: str) -> str:
@@ -864,7 +894,10 @@ def render_ai_intake(principal: str):
                             # user's still-unconfirmed facts (no fake bank data).
                             try:
                                 results[kind] = render_incomplete_trade_pdf(kind, updated[kind])
-                                errors[kind] = "기존 정식 양식의 검증은 통과하지 않았습니다. 아래 PDF는 미확정 항목을 명시한 내부 검토용입니다."
+                                errors[kind] = (
+                                    _formal_pdf_hold_reason(kind, exc, env) +
+                                    " 아래 PDF는 정식 발행본이 아닌 내부 검토용입니다."
+                                )
                             except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as fallback:
                                 errors[kind] = ("PDF 생성 오류: " + str(fallback))[:400]
                     st.session_state["master_legacy_files"] = (edited_key, results, errors)
