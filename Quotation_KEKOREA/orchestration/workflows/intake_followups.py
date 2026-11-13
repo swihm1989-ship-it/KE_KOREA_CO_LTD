@@ -180,3 +180,29 @@ def apply_answer(candidates: Mapping[str, Any], key: str, value: str, *, allow_b
             term["value"] = text
             term["status"] = "suggested"
     return revised
+
+
+def acknowledge_prior_source_notice(candidates: Mapping[str, Any], kind: str,
+                                    category: str, index: int,
+                                    expected: str) -> dict[str, Any]:
+    """Manually resolve ONLY the matching historical AI note for one document.
+
+    This does not waive validation of missing required fields, bank settings,
+    seals, calculations or document approval. Stale button clicks do nothing.
+    """
+    if (kind not in {"PI", "PO", "CI", "PL"} or
+            category not in {"missing_fields", "conflicts"} or
+            not isinstance(index, int) or index < 0 or
+            not isinstance(candidates, Mapping)):
+        raise ValueError("확인 항목이 유효하지 않습니다.")
+    revised = deepcopy(dict(candidates))
+    doc = revised.get(kind)
+    if not isinstance(doc, dict):
+        raise ValueError("확인할 문서 후보가 없습니다.")
+    notes = doc.get(category)
+    if not isinstance(notes, list) or index >= len(notes):
+        raise ValueError("검토 항목이 변경되었습니다. 다시 확인하세요.")
+    if not isinstance(notes[index], str) or notes[index] != expected:
+        raise ValueError("검토 항목이 변경되었습니다. 다시 확인하세요.")
+    notes.pop(index)
+    return revised
