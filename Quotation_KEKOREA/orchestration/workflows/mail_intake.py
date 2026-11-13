@@ -43,6 +43,7 @@ def prepare_mail_request(subject, body):
     routing = re.sub(r'(?i)\b양해\s*\n\s*각서', '양해각서', routing)
     # Protect interior abbreviation dots, but preserve the FINAL full stop as
     # a sentence boundary. Otherwise "M.O.U. No need for PI" gets conflated.
+    routing = re.sub(r'(?i)\bM\s*\.?\s*O\s*\.?\s*U\.(?=[가-힣])', 'MOU', routing)
     routing = re.sub(r'(?i)\bM\s*\.?\s*O\s*\.?\s*U(?![A-Za-z0-9_])', 'MOU', routing)
     positive=[];denied=set()
     for sentence in re.split(r'[.!?;\n]',routing):
