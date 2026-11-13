@@ -82,3 +82,162 @@ def render_master_trade_draft(kind: str, source: Mapping, env: Mapping[str, str]
                 "sendable": False,
             }
     return result
+
+
+def render_incomplete_trade_pdf(kind: str, source: Mapping) -> dict:
+    """Generate an unsealed review PDF even with unknown commercial fields.
+
+    This is intentionally NOT a fallback for FINAL issue. The original
+    branded/sealed renderer, bank checks and strict validation are unchanged.
+    Never invent a legal name, shipping term, amount or bank detail.
+    """
+    from decimal import Decimal, InvalidOperation
+    from io import BytesIO
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+    from reportlab.pdfgen import canvas
+    from Quotation_KEKOREA.agent.trade_documents import current_issue_date
+
+    kind = str(kind).upper()
+    if kind not in TRADE_KINDS or not isinstance(source, Mapping):
+        raise ValueError("Unsupported trade review request")
+    if source.get("document_type") and str(source["document_type"]).upper() != kind:
+        raise ValueError("Document type mismatch")
+    doc = normalize_trade_values(source)
+    pdfmetrics.registerFont(UnicodeCIDFont("HYSMyeongJo-Medium"))
+    buffer = BytesIO()
+    paper = canvas.Canvas(buffer, pagesize=(595, 842), pageCompression=1)
+    paper.setTitle(kind + " - INCOMPLETE DRAFT / NOT FOR ISSUE")
+    navy = (0.055, 0.20, 0.35)
+    grey = (0.40, 0.47, 0.53)
+    y = 780
+    page = 1
+
+    def footer():
+        paper.setFillColorRGB(*grey)
+        paper.setFont("Helvetica", 8)
+        paper.drawString(40, 29, "INTERNAL REVIEW ONLY - NOT FOR ISSUE / NO SEAL / NOT APPROVED")
+        paper.drawRightString(555, 29, "PAGE " + str(page))
+
+    def next_page():
+        nonlocal y, page
+        footer()
+        paper.showPage()
+        page += 1
+        y = 788
+
+    def line(text, *, size=10, heading=False, spacing=7):
+        nonlocal y
+        value = str(text if text is not None else "").replace("\r", " ").replace("\t", " ")
+        # CID font can display Korean/Chinese, but no emoji or control glyphs.
+        value = "".join(ch if (ch == "\n" or 32 <= ord(ch) <= 0xFFFF) else "?" for ch in value)
+        font = "HYSMyeongJo-Medium" if any(ord(ch) > 127 for ch in value) else (
+            "Helvetica-Bold" if heading else "Helvetica")
+        chunks = []
+        for paragraph in value.split("\n"):
+            if not paragraph:
+                chunks.append("")
+                continue
+            segment = ""
+            for char in paragraph:
+                proposal = segment + char
+                if segment and pdfmetrics.stringWidth(proposal, font, size) > 510:
+                    chunks.append(segment)
+                    segment = char
+                else:
+                    segment = proposal
+            if segment:
+                chunks.append(segment)
+        for chunk in chunks or [""]:
+            if y < 65:
+                next_page()
+            paper.setFillColorRGB(*(navy if heading else grey if chunk == "NOT PROVIDED" else (0.13, 0.18, 0.23)))
+            paper.setFont(font, size)
+            paper.drawString(40, y, chunk)
+            y -= size + spacing
+
+    def stated(value):
+        text = str(value).strip() if value is not None else ""
+        return text if text else "NOT PROVIDED"
+
+    def amount(value):
+        try:
+            number = Decimal(str(value).replace(",", ""))
+            return number if number.is_finite() and number >= 0 else None
+        except (InvalidOperation, ValueError, TypeError):
+            return None
+
+    paper.setFillColorRGB(*navy)
+    paper.rect(0, 802, 595, 40, stroke=0, fill=1)
+    paper.setFillColorRGB(1, 1, 1)
+    paper.setFont("Helvetica-Bold", 14)
+    paper.drawString(40, 814, "KE KOREA  /  DOCUMENT REVIEW")
+    line(kind + " - DRAFT (UNCONFIRMED)", size=17, heading=True)
+    line("This is a generated PDF file for review, NOT a final issued document.")
+    line("Unknown and conflicting terms are not considered approved.", spacing=10)
+    line("Document No.: " + stated(doc.get("document_number")))
+    line("Prepared: " + current_issue_date())
+    for role in ("seller", "buyer"):
+        party = doc.get(role) or {}
+        line(role.upper(), size=12, heading=True)
+        line("Legal name: " + stated(party.get("legal_name")))
+        line("Address: " + stated(party.get("address")))
+    line("COMMERCIAL TERMS", size=12, heading=True)
+    for label, key in (("Currency", "currency"), ("Delivery", "incoterms"),
+                       ("Payment", "payment_terms"), ("Shipment reference", "shipment_reference"),
+                       ("Country of origin", "country_of_origin")):
+        if key == "payment_terms" and kind not in {"PI", "PO"}:
+            continue
+        line(label + ": " + stated(doc.get(key)))
+
+    line("PRODUCT / QUANTITY / PRICE", size=12, heading=True)
+    running = Decimal("0")
+    amounts_complete = bool(doc.get("items"))
+    for number, item in enumerate(doc.get("items") or [], 1):
+        if not isinstance(item, Mapping):
+            item = {}
+        line("Item " + str(number) + ": " + stated(item.get("product_name")), heading=True)
+        qty, unit_price = amount(item.get("quantity")), amount(item.get("unit_price"))
+        line("Quantity: " + stated(item.get("quantity")) + " " + stated(item.get("unit")))
+        if kind != "PL":
+            line("Unit price: " + stated(item.get("unit_price")) + " / " +
+                 stated(item.get("price_basis")))
+            if qty is None or unit_price is None or unit_price == 0:
+                amounts_complete = False
+                line("Line amount: NOT PROVIDED (price or quantity unconfirmed)")
+            else:
+                line("Indicative line amount: " + str(qty * unit_price))
+                running += qty * unit_price
+        else:
+            line("Packages: " + stated(item.get("package_count")) +
+                 "  Net/Gross (KG): " + stated(item.get("net_weight_kg")) +
+                 " / " + stated(item.get("gross_weight_kg")))
+    if kind != "PL":
+        if amounts_complete and str(doc.get("currency") or "").strip():
+            line("INDICATIVE TOTAL: " + stated(doc.get("currency")) + " " + str(running),
+                 size=12, heading=True)
+        else:
+            line("TOTAL: NOT PROVIDED - DO NOT ASSUME ZERO", size=12, heading=True)
+
+    concerns = list(doc.get("conflicts") or []) + list(doc.get("missing_fields") or [])
+    # Preserve uncertainty as a status, never a fictional populated value.
+    line("OPEN ITEMS / REVIEW", size=12, heading=True)
+    if concerns:
+        for item in concerns[:30]:
+            line("- " + str(item))
+    else:
+        line("Confirm counterparty, payment and other fields against originals.")
+    line("No company seal, bank authorization, SMTP sending or FINAL approval.")
+    footer()
+    paper.save()
+    payload = buffer.getvalue()
+    if not payload.startswith(b"%PDF") or len(payload) < 300:
+        raise ValueError("Draft PDF was not generated")
+    return {"pdf": {
+        "filename": kind + "-INCOMPLETE-DRAFT.pdf",
+        "content": payload,
+        "mime": "application/pdf",
+        "sha256": sha256(payload).hexdigest(),
+        "final": False, "sendable": False,
+        "review_only": True,
+    }}
