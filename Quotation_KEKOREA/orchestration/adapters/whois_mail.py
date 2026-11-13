@@ -6,6 +6,7 @@ from email.parser import BytesParser
 from html.parser import HTMLParser
 from pathlib import PurePosixPath
 from hashlib import sha256
+from Quotation_KEKOREA.observability.core import traced
 import poplib
 import re
 import socket
@@ -228,6 +229,7 @@ def parse_message(uid: str, raw: bytes) -> MailMessage:
                        body[:20000],str(msg.get('Date',''))[:100],tuple(attachments),' '.join(set(notices)))
 
 
+@traced('mail.collect')
 def fetch_messages(endpoint: Endpoint, limit: int=30) -> tuple[MailMessage,...]:
     if not 1 <= limit <= 30:
         raise ValueError('한 번에 1~30건을 가져올 수 있습니다.')

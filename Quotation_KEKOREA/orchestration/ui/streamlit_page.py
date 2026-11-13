@@ -27,6 +27,12 @@ st.set_page_config(page_title="KE KOREA | Orchestration Demo", page_icon="📑",
 from Quotation_KEKOREA.orchestration.security.auth_gate import require_authentication
 _authenticated_principal = require_authentication(st)
 
+# Explicitly enable metadata recording only after authorization, in Master.
+from Quotation_KEKOREA.observability.runtime import configure as configure_observability
+from Quotation_KEKOREA.orchestration.workflows.document_assets import document_export_env
+import os
+_telemetry_store = configure_observability(document_export_env(st.secrets, os.environ))
+
 
 from Quotation_KEKOREA.orchestration.ui.ke_theme import STYLE, logo_path, header_html
 st.markdown(STYLE, unsafe_allow_html=True)
@@ -45,7 +51,7 @@ with st.sidebar:
     st.markdown("### MASTER GRAPH")
     st.caption("KE KOREA CO. LTD · AI WORKSPACE")
     st.markdown("---")
-page = st.sidebar.radio("업무 메뉴", ["시장 뉴스", "업무 대시보드", "메일함", "AI 업무 요청", "통합 업무 흐름", "문서 검토", "발송 대기", "엔진 사전검증", "문서 초안 미리보기", "저장된 계약서", "실행 기록"], label_visibility="collapsed", key="master_page")
+page = st.sidebar.radio("업무 메뉴", ["시장 뉴스", "업무 대시보드", "메일함", "AI 업무 요청", "통합 업무 흐름", "문서 검토", "발송 대기", "엔진 사전검증", "문서 초안 미리보기", "저장된 계약서", "실행 기록", "관리자 모니터링"], label_visibility="collapsed", key="master_page")
 st.sidebar.divider()
 st.sidebar.caption("접속 계정: " + _authenticated_principal)
 if st.sidebar.button("로그아웃", key="master_logout"):
@@ -84,7 +90,11 @@ col_c.metric("문서 검토 대기", sum(r.status == "awaiting_document_approval
 col_d.metric("발송 대기(모의)", sum(r.status == "ready_for_future_integration" for r in runs))
 st.divider()
 
-if page == "시장 뉴스":
+if page == "관리자 모니터링":
+    from Quotation_KEKOREA.orchestration.ui.monitoring_page import render_monitoring
+    render_monitoring(_authenticated_principal, _telemetry_store)
+
+elif page == "시장 뉴스":
     from Quotation_KEKOREA.orchestration.ui.market_news_page import render_market_news
     render_market_news()
 

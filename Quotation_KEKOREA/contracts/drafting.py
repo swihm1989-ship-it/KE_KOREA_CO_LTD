@@ -3,6 +3,7 @@
 No UI, repository writes, automatic approval, or changes to existing contracts.
 Semantic checks assist drafting; they are not legal certification.
 """
+from Quotation_KEKOREA.observability.core import retry_attempt
 from copy import deepcopy
 from bisect import bisect_right
 import re
@@ -277,8 +278,9 @@ def _audit(snapshot, plan, references, *, env, client, timeout, progress_callbac
         if progress_callback is not None:
             progress_callback('AI 검토 인용 불일치 · 동일 초안으로 근거 재검증 (1회)')
         try:
-            return _audit_once(snapshot, plan, references, env=env, client=client,
-                               timeout=budget(), strict_quotes=True)
+            with retry_attempt(1):
+                return _audit_once(snapshot, plan, references, env=env, client=client,
+                                   timeout=budget(), strict_quotes=True)
         except AuditCitationMismatch:
             if progress_callback is not None:
                 progress_callback('AI 인용 재검증 실패 · 검토용 초안 보존 (최종 확정 차단)')

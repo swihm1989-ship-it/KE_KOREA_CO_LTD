@@ -5,6 +5,7 @@ validation, seal resolver, PDF pagination and XLSX layout are reused unchanged.
 """
 from __future__ import annotations
 
+from Quotation_KEKOREA.observability.core import traced
 from hashlib import sha256
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -23,6 +24,7 @@ MIMES = {"pdf": "application/pdf",
          "html": "text/html"}
 
 
+@traced('document.generate', kind_argument=True)
 def render_master_trade_draft(kind: str, source: Mapping, env: Mapping[str, str]) -> dict:
     """Generate PDF/XLSX/HTML via the legacy engine, fail closed on missing inputs.
 
