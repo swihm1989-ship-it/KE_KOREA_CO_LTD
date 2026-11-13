@@ -5,3 +5,7 @@ reportlab>=4,<5
 
 # Existing audited contract LangGraph generator (only invoked after explicit AI consent)
 langgraph>=1.0,<2
+
+# Existing shared trade extractor and explicit source PI attachments
+PyMuPDF>=2,<3
+Pillow>=10,<13

@@ -56,7 +56,8 @@ class LegacyExportsTests(unittest.TestCase):
               patch.object(module, "render_files", side_effect=fake_render)):
             for kind in ("PI", "PO", "CI", "PL"):
                 validate.return_value = {"blocking_issues": [], "ready_for_issue": True,
-                                         "document_type": kind}
+                                         "document_type": kind,
+                                         "_ci_from_pi": kind == 'CI', "source_document_type": 'PI'}
                 files = render_master_trade_draft(kind, {"document_type": kind}, env)
                 self.assertEqual(set(files), {"pdf", "xlsx", "html"})
                 self.assertTrue(all(not file["final"] and not file["sendable"]
@@ -70,6 +71,13 @@ class LegacyExportsTests(unittest.TestCase):
         validate.return_value = {"blocking_issues": [], "ready_for_issue": True}
         with self.assertRaisesRegex(ValueError, "은행정보"):
             render_master_trade_draft("PI", {}, {})
+
+    def test_ci_without_original_pi_is_blocked_before_seal_or_renderer(self):
+        from Quotation_KEKOREA.orchestration.workflows import legacy_document_exports as module
+        with patch.object(module,'validate_and_calculate',return_value={'document_type':'CI','blocking_issues':[],'ready_for_issue':True}),patch.object(module,'resolve_company_seal') as seal:
+            with self.assertRaisesRegex(ValueError,'attached PI'):
+                module.render_master_trade_draft('CI',{'document_type':'CI'}, {})
+            seal.assert_not_called()
 
 
 if __name__ == "__main__":

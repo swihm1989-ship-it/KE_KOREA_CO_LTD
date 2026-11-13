@@ -138,8 +138,13 @@ def apply_answer(candidates: Mapping[str, Any], key: str, value: str) -> dict[st
                 if not items:
                     items.append({})
                 items[0][field] = text
+                if field=='quantity':
+                    from .mail_trade_normalization import apply_quantity_edit
+                    apply_quantity_edit(items[0],text)
         else:
             doc[key] = text
+        from .mail_trade_normalization import resolve_notice_for_answer
+        resolve_notice_for_answer(doc,key)
     contract = revised.get("CONTRACT")
     if isinstance(contract, dict):
         # Cannot reuse a previously AI-drafted clause after business conditions change.

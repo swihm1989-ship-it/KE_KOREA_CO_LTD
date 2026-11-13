@@ -4,11 +4,11 @@ import re
 
 DOC_TYPES = ("PI", "PO", "CI", "PL", "CONTRACT")
 _PATTERNS = {
-    "PI": (r"\bpro\s*forma\s*invoice\b", r"\bPI(?![A-Za-z0-9_])", r"견적송장", r"견적\s*인보이스"),
-    "PO": (r"\bpurchase\s*order\b", r"\bPO(?![A-Za-z0-9_])", r"발주서"),
-    "CI": (r"\bcommercial\s*invoice\b", r"\bCI(?![A-Za-z0-9_])", r"상업송장"),
-    "PL": (r"\bpacking\s*list\b", r"\bPL(?![A-Za-z0-9_])", r"포장명세서", r"패킹리스트"),
-    "CONTRACT": (r"\bcontract\b", r"\bagreement\b", r"계약서", r"계약\s*초안"),
+    "PI": (r"\bpro\s*forma\s*invoice(?![A-Za-z0-9_])", r"\bPI(?![A-Za-z0-9_])", r"견적송장", r"견적\s*인보이스", r"견적서", r"\bquotation(?![A-Za-z0-9_])", r"\bquote(?![A-Za-z0-9_])"),
+    "PO": (r"\bpurchase\s*order(?![A-Za-z0-9_])", r"\bPO(?![A-Za-z0-9_])", r"발주서"),
+    "CI": (r"\bcommercial\s*invoice(?![A-Za-z0-9_])", r"\bCI(?![A-Za-z0-9_])", r"상업송장", r"\bCI\s*[/&+ -]?\s*PL\b"),
+    "PL": (r"\bpacking\s*list(?![A-Za-z0-9_])", r"\bPL(?![A-Za-z0-9_])", r"포장명세서", r"패킹리스트", r"\bCI\s*[/&+ -]?\s*PL\b"),
+    "CONTRACT": (r"\bcontract(?![A-Za-z0-9_])", r"\bagreement(?![A-Za-z0-9_])", r"계약서", r"계약\s*초안"),
 }
 
 def classify(subject: str, body: str, requested: list[str] | None = None) -> list[str]:
@@ -17,6 +17,10 @@ def classify(subject: str, body: str, requested: list[str] | None = None) -> lis
         output = []
         for kind in requested:
             normalized = str(kind).strip().upper()
+            if normalized == 'CIPL':
+                for alias in ('CI','PL'):
+                    if alias not in output: output.append(alias)
+                continue
             if normalized not in DOC_TYPES:
                 raise ValueError(f"Unsupported document kind: {kind!r}")
             if normalized not in output:

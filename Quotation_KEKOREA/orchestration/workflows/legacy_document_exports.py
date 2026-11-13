@@ -12,7 +12,7 @@ from tempfile import TemporaryDirectory
 from typing import Mapping
 
 from Quotation_KEKOREA.agent.branding import resolve_company_seal
-from Quotation_KEKOREA.agent.ci_import import ci_render_data
+from Quotation_KEKOREA.agent.ci_import import ci_render_data, ci_import_issues
 from Quotation_KEKOREA.agent.renderers import render_files
 from Quotation_KEKOREA.agent.trade_documents import validate_and_calculate
 from Quotation_KEKOREA.orchestration.workflows.commercial_values import normalize_trade_values
@@ -44,6 +44,8 @@ def render_master_trade_draft(kind: str, source: Mapping, env: Mapping[str, str]
     candidate.pop("status", None)
     checked = validate_and_calculate(candidate)
     blockers = list(checked.get("blocking_issues") or [])
+    if kind == "CI":
+        blockers.extend(ci_import_issues(checked))
     if blockers or not checked.get("ready_for_issue"):
         raise ValueError("거래조건을 먼저 보완하세요: " + "; ".join(map(str, blockers[:8])))
     bank = {key: str(env.get("KEKOREA_USD_" + key) or "").strip() for key in BANK_KEYS}
