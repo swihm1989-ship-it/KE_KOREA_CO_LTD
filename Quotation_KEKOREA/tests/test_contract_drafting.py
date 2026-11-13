@@ -87,6 +87,23 @@ class DraftingTests(unittest.TestCase):
         for paragraph in paragraphs:
             self.assertIn(paragraph, body)
 
+    def test_semantic_library_hit_survives_without_overlapping_topic_keywords(self):
+        original = {
+            'id': 'library:sample:unrelated-wording:v2',
+            'filename': 'Reviewed archive',
+            'extracted_text': (
+                'When funding is received by the designated recipient, '
+                'a defined remuneration obligation can become payable.'
+            ),
+        }
+        # This query intentionally avoids the source's words: the upstream
+        # vector search has already determined semantic relevance.
+        plan = {'topics': [{'key': 'sample', 'query': '정산 의무 지급 시점'}]}
+        selected = select_topic_references([original], plan)
+        self.assertEqual(len(selected), 1)
+        self.assertEqual(selected[0]['id'], original['id'])
+        self.assertEqual(selected[0]['extracted_text'], original['extracted_text'])
+
     def test_audit_must_cover_every_generated_clause(self):
         with self.assertRaisesRegex(ValueError, 'clause'):
             generate_reviewed_draft(self.snapshot, [], env=ENV,
