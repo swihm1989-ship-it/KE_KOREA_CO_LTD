@@ -175,6 +175,32 @@ class MasterContractFinalParityTests(TestCase):
                 "country": "",
             }, sort_keys=True, ensure_ascii=False))
 
+    def test_unconfirmed_ai_review_issue_blocks_until_user_action(self):
+        from Quotation_KEKOREA.orchestration.workflows.master_contract_final import (
+            confirm_contract_issue,
+        )
+        original = confirmed_sale()
+        original["issues"] = [
+            {"severity": "confirm", "code": "synthetic-review",
+             "message": "Confirm synthetic payment deadline", "confirmed": False},
+            {"severity": "block", "code": "synthetic-block",
+             "message": "Missing independent approval"},
+        ]
+        self.assertTrue(any("Confirm synthetic payment deadline" in m
+                            for m in contract_final_blockers(original, {})))
+        snapshot = deepcopy(original)
+        updated = confirm_contract_issue(
+            original, 0, "Confirm synthetic payment deadline")
+        self.assertTrue(updated["issues"][0]["confirmed"])
+        self.assertEqual(original, snapshot)
+        self.assertFalse(updated["issues"][1].get("confirmed"))
+        self.assertTrue(any("Missing independent approval" in m
+                            for m in contract_final_blockers(updated, {})))
+        with self.assertRaises(ValueError):
+            confirm_contract_issue(updated, 1, "Missing independent approval")
+        with self.assertRaises(ValueError):
+            confirm_contract_issue(original, 0, "Different old message")
+
     def test_non_master_contract_never_claims_to_be_new_master_final(self):
         original = confirmed_sale()
         original["contract_id"] = "saved-original-contract-id"
