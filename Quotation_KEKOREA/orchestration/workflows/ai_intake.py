@@ -151,11 +151,12 @@ def selected_contract_reference(repo, contract_id: str, revision: int) -> dict[s
 
 @traced('contract.generate')
 def generate_contract_draft(snapshot: Mapping[str, Any], env: Mapping[str, str],
-                            *, consent: bool) -> dict[str, Any]:
+                            *, consent: bool, use_library: bool = False) -> dict[str, Any]:
     """Call the existing reviewed drafting graph on a NEW in-memory candidate.
 
-    No saved contract content is passed. No Supabase reads/writes or sample
-    library use. Results still require manual review and separate approval.
+    No saved private contract content is passed. When explicitly opted in,
+    only approved anonymized library guidance is retrieved for drafting.
+    Results still require manual review and separate approval.
     """
     if not consent:
         raise PermissionError("명시적인 AI 계약서 생성 동의가 필요합니다.")
@@ -170,9 +171,13 @@ def generate_contract_draft(snapshot: Mapping[str, Any], env: Mapping[str, str],
         raise ValueError("기존 계약서를 자동 재작성할 수 없습니다. 새 초안만 지원합니다.")
     if candidate["clauses"]:
         raise ValueError("이미 작성된 계약 조항은 기존 수정·검토 절차를 사용하세요.")
+    repo = None
+    if use_library:
+        from Quotation_KEKOREA.contracts.repository import ContractRepository
+        repo = ContractRepository(env)
     generated = generate_contract_draft_graph(
         candidate, [], env=dict(env), reference_context=[],
-        transaction_messages=[], repo=None, use_library=False,
+        transaction_messages=[], repo=repo, use_library=bool(use_library),
     )
     reviewed = validate_snapshot(generated)
     if not reviewed["clauses"]:
