@@ -34,10 +34,26 @@ class MailDocumentUiTests(unittest.TestCase):
         self.assertFalse(app.exception,[e.message for e in app.exception])
         return app
 
-    def test_one_click_moves_and_extracts_once_then_preserves_multiple_rows(self):
+    def begin_mail(self, app):
+        app.button(key='whois_ai_'+self.mail.uid).click().run()
+        self.assertFalse(app.exception, [e.message for e in app.exception])
+        self.assertEqual(app.radio(key='master_page').value, 'AI 업무 요청')
+        self.assertFalse(app.checkbox(key='ai_intake_consent').value)
+        self.assertNotIn('ai_intake_mail_pending', app.session_state)
+        return app
+
+    def start_analysis(self, app):
+        self.begin_mail(app)
+        app.radio(key='ai_intake_mail_processing_mode').set_value('AI 자동 분석').run()
+        app.checkbox(key='ai_intake_consent').check().run()
+        app.button(key='ai_intake_extract').click().run()
+        self.assertFalse(app.exception, [e.message for e in app.exception])
+        return app
+
+    def test_explicit_auto_analysis_then_preserves_multiple_rows(self):
         with patch('Quotation_KEKOREA.orchestration.ui.ai_intake_page.extract_mail_candidates',return_value=self.ready_result()) as extract:
             app=self.mailbox()
-            app.button(key='whois_ai_extract_'+self.mail.uid).click().run()
+            self.start_analysis(app)
             self.assertFalse(app.exception,[e.message for e in app.exception])
             self.assertEqual(app.radio(key='master_page').value,'AI 업무 요청')
             self.assertEqual(app.multiselect(key='ai_intake_mail_kinds').value,['PI'])
@@ -56,7 +72,7 @@ class MailDocumentUiTests(unittest.TestCase):
         from Quotation_KEKOREA.agent.trade_documents import validate_and_calculate
         with patch('Quotation_KEKOREA.orchestration.ui.ai_intake_page.extract_mail_candidates',return_value=self.ready_result()):
             app=self.mailbox()
-            app.button(key='whois_ai_extract_'+self.mail.uid).click().run()
+            self.start_analysis(app)
             app.text_input(key='master_pdf_quantity').set_value('3000')
             next(b for b in app.button if b.label=='필수정보 적용 · PDF 생성 준비').click().run()
             data=app.session_state['ai_intake_candidates'][1]['PI']
@@ -66,7 +82,7 @@ class MailDocumentUiTests(unittest.TestCase):
     def test_failure_is_not_retried_on_rerun(self):
         with patch('Quotation_KEKOREA.orchestration.ui.ai_intake_page.extract_mail_candidates',side_effect=RuntimeError('synthetic failure')) as extract:
             app=self.mailbox()
-            app.button(key='whois_ai_extract_'+self.mail.uid).click().run()
+            self.start_analysis(app)
             self.assertFalse(app.exception,[e.message for e in app.exception])
             self.assertTrue(app.error)
             app.run()
@@ -76,16 +92,20 @@ class MailDocumentUiTests(unittest.TestCase):
     def test_review_only_button_still_makes_no_ai_call(self):
         with patch('Quotation_KEKOREA.orchestration.ui.ai_intake_page.extract_mail_candidates') as extract:
             app=self.mailbox()
-            app.button(key='whois_ai_'+self.mail.uid).click().run()
-            self.assertFalse(app.exception,[e.message for e in app.exception])
-            self.assertFalse(app.checkbox(key='ai_intake_consent').value)
+            self.begin_mail(app)
+            self.assertEqual(app.radio(key='ai_intake_mail_processing_mode').value,
+                             '직접 수정 후 분석')
+            self.assertTrue(app.button(key='ai_intake_extract').disabled)
             extract.assert_not_called()
 
-    def test_missing_model_config_consumes_pending_without_auto_retry(self):
+    def test_missing_model_config_blocks_analysis_without_auto_retry(self):
         with patch('Quotation_KEKOREA.orchestration.ui.ai_intake_page._model_config',return_value={}),patch(
                 'Quotation_KEKOREA.orchestration.ui.ai_intake_page.extract_mail_candidates') as extract:
             app=self.mailbox()
-            app.button(key='whois_ai_extract_'+self.mail.uid).click().run()
+            self.begin_mail(app)
+            app.radio(key='ai_intake_mail_processing_mode').set_value('AI 자동 분석').run()
+            app.checkbox(key='ai_intake_consent').check().run()
+            self.assertTrue(app.button(key='ai_intake_extract').disabled)
             self.assertFalse(app.exception,[e.message for e in app.exception])
             extract.assert_not_called()
             self.assertNotIn('ai_intake_mail_pending',app.session_state)
@@ -93,7 +113,7 @@ class MailDocumentUiTests(unittest.TestCase):
     def test_document_selection_changes_invalidate_previous_results(self):
         with patch('Quotation_KEKOREA.orchestration.ui.ai_intake_page.extract_mail_candidates',return_value=self.ready_result()) as extract:
             app=self.mailbox()
-            app.button(key='whois_ai_extract_'+self.mail.uid).click().run()
+            self.start_analysis(app)
             app.multiselect(key='ai_intake_mail_kinds').set_value(['CI','PL']).run()
             self.assertFalse(app.exception,[e.message for e in app.exception])
             self.assertTrue(any('변경' in e.value for e in app.warning))
