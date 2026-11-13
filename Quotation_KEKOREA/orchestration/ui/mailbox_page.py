@@ -63,11 +63,13 @@ def _ensure_smtp_adapter_current():
     global mail_config, probe_pop, probe_smtp, fetch_messages, MailConnectionError
     module = sys.modules.get(probe_smtp.__module__)
     expected = "smtp-starttls-20261112-v3"
-    pop_expected = "pop-health-20261113-v3"
+    pop_expected = "pop-health-20261113-v4"
+    fetch_expected = "pop-fetch-older-fallback-20261113-v1"
     if module is None:
         return False
     if (getattr(module, "SMTP_DIAGNOSTIC_REVISION", None) == expected
             and getattr(module, "POP_DIAGNOSTIC_REVISION", None) == pop_expected
+            and getattr(module, "POP_FETCH_REVISION", None) == fetch_expected
             and callable(getattr(module, "probe_pop_diagnostics", None))):
         return False
     try:
@@ -77,6 +79,7 @@ def _ensure_smtp_adapter_current():
         return False
     if (getattr(refreshed, "SMTP_DIAGNOSTIC_REVISION", None) != expected
             or getattr(refreshed, "POP_DIAGNOSTIC_REVISION", None) != pop_expected
+            or getattr(refreshed, "POP_FETCH_REVISION", None) != fetch_expected
             or not callable(getattr(refreshed, "probe_pop_diagnostics", None))):
         return False
     mail_config = refreshed.mail_config
@@ -109,7 +112,15 @@ def render_mailbox(principal):
     st.subheader('후이즈 회사 메일함')
     if refreshed_smtp_module:
         st.success("이전 메일 연결 모듈을 감지하여 최신 POP3/SMTP 코드로 다시 로딩했습니다.")
-    st.caption('메일 동기화 버전: 2026-11-12-LIVE · 화면 열림 중 60초마다 자동 갱신')
+    adapter_module = sys.modules.get(probe_pop.__module__)
+    running_pop_revision = getattr(adapter_module, "POP_DIAGNOSTIC_REVISION", "이전/미확인")
+    running_fetch_revision = getattr(adapter_module, "POP_FETCH_REVISION", "이전/미확인")
+    st.caption("실행 중 POP3 모듈: " + str(running_pop_revision) +
+               " · 수신 복구 코드: " + str(running_fetch_revision) +
+               " · 함수 연결: " +
+               ("일치" if getattr(adapter_module, "fetch_messages", None) is fetch_messages
+                else "불일치 · 앱 재시작 필요"))
+    st.caption('메일 동기화 버전: 2026-11-13-RECOVERY · 화면 열림 중 60초마다 자동 갱신')
     st.caption('화면이 열려 있는 동안 60초마다 새 메일을 확인합니다. 최근 메일은 현재 로그인 세션에서만 보관하며 원본은 서버에 보존합니다.')
     with st.expander('메일 연결 설정 안내'):
         st.write('후이즈 웹메일 환경설정에서 POP/SMTP 사용을 활성화하고 상품별 실제 서버·보안 설정을 확인하세요.')
