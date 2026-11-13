@@ -92,8 +92,9 @@ class FollowupTests(unittest.TestCase):
         updated = apply_answer(original, "buyer.address", "Unit 7, Wuxi, China")
         self.assertEqual(updated["CONTRACT"]["clauses"], [])
 
-    def test_missing_fields_excludes_irrelevant_ci_pl_requirements(self):
-        self.assertFalse(any(field.key == "shipment_reference" for field in missing_fields(candidates())))
+    def test_optional_shipment_reference_requires_explicit_na_like_original_app(self):
+        sample = apply_answer(candidates(), "shipment_reference", "N/A")
+        self.assertFalse(any(field.key == "shipment_reference" for field in missing_fields(sample)))
         self.assertNotIn("item.price_source", [x.key for x in missing_fields(candidates())])
         self.assertTrue(format_field_label("buyer.legal_name"))
 

@@ -11,6 +11,9 @@ from decimal import Decimal, InvalidOperation
 from dataclasses import dataclass
 from Quotation_KEKOREA.orchestration.workflows.commercial_values import normalize_trade_values
 from typing import Any, Mapping
+from Quotation_KEKOREA.agent.review_fields import missing_review_fields, _missing
+
+FOLLOWUP_REVISION = "visible-document-fields-20261113-v1"
 
 
 @dataclass(frozen=True)
@@ -26,6 +29,15 @@ LABELS = {
     "seller.legal_name": "Seller · 판매자 법인명(영문)",
     "seller.address": "Seller · 판매자 법인 주소(영문)",
     "seller.country": "Seller · 판매자 설립국",
+    "buyer.contact": "Buyer · 담당자 / 대표자(선택 · 해당 없으면 N/A)",
+    "buyer.phone": "Buyer · 전화번호(선택 · 해당 없으면 N/A)",
+    "buyer.email": "Buyer · 이메일(선택 · 해당 없으면 N/A)",
+    "seller.contact": "Seller · 담당자 / 대표자(선택 · 해당 없으면 N/A)",
+    "seller.phone": "Seller · 전화번호(선택 · 해당 없으면 N/A)",
+    "seller.email": "Seller · 이메일(선택 · 해당 없으면 N/A)",
+    "ship_to": "배송지(추정하지 않음 · 해당 없으면 N/A)",
+    "container_count": "컨테이너 수(컨테이너 운송이 아니면 0)",
+    "item.discount_percent": "할인율 %(할인이 없으면 0)",
     "item.product_name": "상품명 및 규격(영문)",
     "item.quantity": "수량(숫자)",
     "item.unit": "수량 단위(PCS, W 등)",
@@ -48,6 +60,9 @@ TERM_MAP = {
 
 
 def format_field_label(key: str) -> str:
+    if key.startswith("item.") and len(key.split(".")) == 3:
+        _, index, field = key.split(".")
+        return "상품 " + str(int(index) + 1) + " · " + LABELS.get("item." + field, field)
     return LABELS.get(key, key)
 
 
@@ -75,7 +90,7 @@ def missing_fields(candidates: Mapping[str, Any]) -> tuple[MissingField, ...]:
                 continue
             values = [str(item.get(field) or "").strip() for item in role_parties + trade_parties
                       if field != "country" or item in role_parties]
-            if not any(values):
+            if not values or any(_missing(value, True) for value in values):
                 keys.append(f"{role}.{field}")
     for key, field in (("item.product_name", "product_name"), ("item.quantity", "quantity"),
                        ("item.unit", "unit"), ("item.unit_price", "unit_price"),
@@ -100,8 +115,49 @@ def missing_fields(candidates: Mapping[str, Any]) -> tuple[MissingField, ...]:
             value = terms.get(TERM_MAP[key])
             if value is None or not str(value).strip():
                 keys.append(key)
-    # A required contract role can be missing even where no trade document exists.
-    return tuple(MissingField(key=key, label=format_field_label(key)) for key in keys)
+    # Use the original app's visible-field review, including optional values
+    # that require an explicit N/A. One completed document cannot hide another's gap.
+    for kind, data in trade:
+        data["document_type"] = kind
+        for field in missing_review_fields(data):
+            path = field.path
+            if path[0] == "items":
+                key = ("item." + str(path[1]) + "." + path[2]
+                       if path[1] else "item." + path[2])
+            else:
+                key = ".".join(path)
+            keys.append(key)
+    return tuple(MissingField(key=key, label=format_field_label(key))
+                 for key in dict.fromkeys(keys))
+
+
+def _apply_scoped_contact(candidates, kind, role, field, value, *, allow_blank):
+    """Update contacts for the same named company, even across PO/PI roles."""
+    if not isinstance(candidates, Mapping) or not isinstance(candidates.get(kind), Mapping):
+        raise ValueError("연락처를 수정할 문서가 없습니다.")
+    revised = deepcopy(dict(candidates))
+    selected = normalize_trade_values(revised[kind])[role]
+    identity = str(selected.get("legal_name") or "").strip().casefold()
+    identified = not _missing(identity, True)
+    for doc_kind, doc in list(revised.items()):
+        if doc_kind not in {"PI", "PO", "CI", "PL"} or not isinstance(doc, Mapping):
+            continue
+        doc = normalize_trade_values(doc)
+        for doc_role in ("buyer", "seller"):
+            name = str(doc[doc_role].get("legal_name") or "").strip().casefold()
+            if ((identified and name == identity) or (doc_kind == kind and doc_role == role)):
+                doc = apply_answer({doc_kind: doc}, doc_role + "." + field,
+                                   value, allow_blank=allow_blank)[doc_kind]
+        revised[doc_kind] = doc
+    contract = revised.get("CONTRACT")
+    if isinstance(contract, dict):
+        contract["clauses"] = []
+        for party in contract.get("parties") or []:
+            name = str(party.get("legal_name") or "").strip().casefold()
+            if identified and name == identity:
+                party["representative" if field == "contact" else field] = value.strip()
+                party["status"] = "suggested"
+    return revised
 
 
 def apply_answer(candidates: Mapping[str, Any], key: str, value: str, *, allow_blank: bool = False) -> dict[str, Any]:
@@ -110,18 +166,27 @@ def apply_answer(candidates: Mapping[str, Any], key: str, value: str, *, allow_b
     This is a user-supplied answer, not an automatic 'confirmed' status.
     Revoke any AI generated clauses whenever facts are revised.
     """
-    if key not in LABELS:
+    parts = key.split(".")
+    if (len(parts) == 3 and parts[0] in {"PI", "PO", "CI", "PL"}
+            and parts[1] in {"buyer", "seller"} and parts[2] in {"contact", "phone", "email"}):
+        return _apply_scoped_contact(candidates, *parts, value, allow_blank=allow_blank)
+    item_index = 0
+    base_key = key
+    if len(parts) == 3 and parts[0] == "item" and parts[1].isdigit():
+        item_index = int(parts[1])
+        base_key = "item." + parts[2]
+    if base_key not in LABELS:
         raise ValueError("지원하지 않는 거래조건입니다.")
     if not isinstance(value, str) or len(value) > 1500 or (not allow_blank and not value.strip()):
         raise ValueError("내용을 입력해 주세요 (1~1,500자).")
     text = value.strip()
-    if text and key in {"item.quantity", "item.unit_price"}:
+    if text and base_key in {"item.quantity", "item.unit_price", "item.discount_percent", "container_count"}:
         try:
             number = Decimal(text.replace(",", ""))
-            if not number.is_finite() or number < 0 or (key == "item.unit_price" and number == 0):
+            if not number.is_finite() or number < 0 or (base_key == "item.unit_price" and number == 0) or (base_key == "item.discount_percent" and number > 100):
                 raise InvalidOperation
         except (InvalidOperation, ValueError):
-            raise ValueError("수량에는 0 이상의 숫자, 단가에는 0보다 큰 숫자를 입력해 주세요.") from None
+            raise ValueError("수량·컨테이너 수는 0 이상, 단가는 0 초과, 할인율은 0~100의 숫자로 입력해 주세요.") from None
         text = format(number, "f")
     if not isinstance(candidates, Mapping):
         raise ValueError("거래조건이 없습니다.")
@@ -132,8 +197,8 @@ def apply_answer(candidates: Mapping[str, Any], key: str, value: str, *, allow_b
         # Keep legacy scalar party shapes from breaking the one-field editor.
         doc = normalize_trade_values(doc)
         revised[kind] = doc
-        if "." in key:
-            group, field = key.split(".", 1)
+        if "." in base_key:
+            group, field = base_key.split(".", 1)
             if group in {"buyer", "seller"}:
                 if field != "country":
                     doc.setdefault(group, {})[field] = text
@@ -141,16 +206,18 @@ def apply_answer(candidates: Mapping[str, Any], key: str, value: str, *, allow_b
                 items = doc.setdefault("items", [{}])
                 if not items:
                     items.append({})
-                items[0][field] = text
+                if item_index >= len(items):
+                    continue
+                items[item_index][field] = text
                 if field=='quantity':
                     if text:
                         from .mail_trade_normalization import apply_quantity_edit
-                        apply_quantity_edit(items[0],text)
+                        apply_quantity_edit(items[item_index],text)
                     else:
                         # A cleared source quantity must not leave a hidden,
                         # stale paid/shipped value that could price a draft.
                         for calculated in ("paid_quantity", "shipped_quantity", "display_quantity"):
-                            items[0].pop(calculated, None)
+                            items[item_index].pop(calculated, None)
         else:
             doc[key] = text
         from .mail_trade_normalization import resolve_notice_for_answer
@@ -168,7 +235,7 @@ def apply_answer(candidates: Mapping[str, Any], key: str, value: str, *, allow_b
                 party = {"roles": [role], "legal_name": "", "country": "", "address": "",
                          "status": "suggested", "source_refs": []}
                 parties.append(party)
-            party[field] = text
+            party["representative" if field == "contact" else field] = text
             party["status"] = "suggested"
         elif key in TERM_MAP:
             term_key = TERM_MAP[key]

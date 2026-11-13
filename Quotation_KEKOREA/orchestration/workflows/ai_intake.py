@@ -5,6 +5,8 @@ Old contract clauses are never copied to new drafts or transmitted to AI.
 No writing to repository, no automatic approval, finalization, or SMTP.
 """
 from __future__ import annotations
+
+AI_WORKFLOW_REVISION = "trade-party-contacts-20261113-v1"
 from Quotation_KEKOREA.observability.core import traced
 from copy import deepcopy
 from typing import Any, Mapping
@@ -118,6 +120,9 @@ def make_trade_candidate(kind: str, analysis: Mapping[str, Any],
         parties[role] = {
             "legal_name": str(p.get("legal_name") or ""),
             "address": str(p.get("address") or ""),
+            "contact": str(p.get("contact") or p.get("representative") or ""),
+            "phone": str(p.get("phone") or ""),
+            "email": str(p.get("email") or ""),
         }
     # Do not invent a document number, address, origin, price source, or payment terms.
     result = {

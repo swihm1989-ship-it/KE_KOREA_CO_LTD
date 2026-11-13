@@ -2,6 +2,7 @@
 import unittest
 from unittest.mock import patch
 from pathlib import Path
+from Quotation_KEKOREA.tests.test_review_fields import complete_draft
 
 from Quotation_KEKOREA.orchestration.workflows.legacy_document_exports import render_master_trade_draft
 
@@ -77,7 +78,7 @@ class LegacyExportsTests(unittest.TestCase):
         validate.return_value = {"blocking_issues": [], "ready_for_issue": True}
         seal.return_value = (Path("/nonexistent/company-seal.png"), None, "not configured")
         with self.assertRaisesRegex(ValueError, "직인"):
-            render_master_trade_draft("PO", {}, {})
+            render_master_trade_draft("PO", dict(complete_draft(), document_type="PO"), {})
 
     def test_master_all_four_documents_use_identical_legacy_renderer_and_assets(self):
         from Quotation_KEKOREA.orchestration.workflows import legacy_document_exports as module
@@ -108,7 +109,9 @@ class LegacyExportsTests(unittest.TestCase):
                 validate.return_value = {"blocking_issues": [], "ready_for_issue": True,
                                          "document_type": kind,
                                          "_ci_from_pi": kind == 'CI', "source_document_type": 'PI'}
-                files = render_master_trade_draft(kind, {"document_type": kind}, env)
+                source = dict(complete_draft(), document_type=kind,
+                              shipment_reference="SYNTHETIC-SHIPMENT", container_count="0")
+                files = render_master_trade_draft(kind, source, env)
                 self.assertEqual(set(files), {"pdf", "xlsx", "html"})
                 self.assertTrue(all(not file["final"] and not file["sendable"]
                                     for file in files.values()))
@@ -120,7 +123,7 @@ class LegacyExportsTests(unittest.TestCase):
     def test_pi_requires_complete_bank_profile(self, validate):
         validate.return_value = {"blocking_issues": [], "ready_for_issue": True}
         with self.assertRaisesRegex(ValueError, "은행정보"):
-            render_master_trade_draft("PI", {}, {})
+            render_master_trade_draft("PI", complete_draft(), {})
 
     def test_ci_without_original_pi_is_blocked_before_seal_or_renderer(self):
         from Quotation_KEKOREA.orchestration.workflows import legacy_document_exports as module
