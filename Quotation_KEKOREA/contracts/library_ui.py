@@ -112,6 +112,8 @@ def render_library_admin(repo, env):
             if st.button('원문 텍스트 SHA 검증 후 DB 복구',
                          disabled=not (previous_extraction and restore_confirm),
                          key='private_extraction_restore_execute'):
+                if previous_extraction.size > 512 * 1024:
+                    raise ValueError('복구 JSON은 512KB를 초과할 수 없습니다.')
                 bundle = json.loads(previous_extraction.getvalue().decode('utf-8'))
                 with st.spinner('원본 파일과 추출 결과를 비교하고 있습니다...'):
                     restored = restore_private_extraction_bundle(repo, bundle)
@@ -122,7 +124,6 @@ def render_library_admin(repo, env):
                 )
                 for reason in restored['reasons'][:8]:
                     st.warning(reason)
-                st.rerun()
         # Hierarchical source indexing is private until individual excerpts
         # are explicitly reviewed and approved; no raw originals reach the AI.
         with st.expander('원본 계약서 조항 인덱스 · 관리자 검증', expanded=False):
