@@ -63,7 +63,7 @@ def _ensure_smtp_adapter_current():
     global mail_config, probe_pop, probe_smtp, fetch_messages, MailConnectionError
     module = sys.modules.get(probe_smtp.__module__)
     expected = "smtp-starttls-20261112-v3"
-    pop_expected = "pop-health-20261113-v2"
+    pop_expected = "pop-health-20261113-v3"
     if module is None:
         return False
     if (getattr(module, "SMTP_DIAGNOSTIC_REVISION", None) == expected
