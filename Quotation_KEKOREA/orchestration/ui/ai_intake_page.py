@@ -1245,6 +1245,11 @@ def render_ai_intake(principal: str):
             st.warning("실제 AI 문서 생성에는 API 요금이 발생할 수 있으며, 수정한 계약서 조건이 AI 모델로 전송됩니다.")
             draft_consent = st.checkbox("현재 계약서 조건을 AI에 전송해 검토용 조항을 생성하는 데 동의합니다.",
                                        key="ai_intake_contract_consent")
+            use_approved_rag = st.checkbox(
+                "승인된 공통 RAG 참고 메모를 검색하여 초안 작성에 활용",
+                value=True, key="ai_intake_use_approved_rag",
+                help="현재 계약의 조건이 우선합니다. 기존 계약서 원문이나 개별 계약 자료는 자동 전송하지 않습니다.",
+            )
             if st.button("AI 계약서 초안 작성", disabled=not (draft_consent and ready),
                          key="ai_intake_contract_draft"):
                 try:
@@ -1253,7 +1258,16 @@ def render_ai_intake(principal: str):
                     if not isinstance(current, dict):
                         raise ValueError("현재 계약서 데이터를 입력해 주세요.")
                     with st.spinner("기존 계약서 LangGraph가 검토용 조항을 생성합니다."):
-                        generated = generate_contract_draft(current, config, consent=draft_consent)
+                        draft_config = dict(config)
+                        if use_approved_rag:
+                            draft_config.update({key: _server_value(key) for key in (
+                                "SUPABASE_URL", "SUPABASE_SECRET_KEY",
+                                "CONTRACT_LIBRARY_EMBEDDING_MODEL",
+                            )})
+                        generated = generate_contract_draft(
+                            current, draft_config, consent=draft_consent,
+                            use_library=use_approved_rag,
+                        )
                     # Use an explicit callback state, never modify saved contract.
                     updated = deepcopy(edited)
                     updated["CONTRACT"] = generated

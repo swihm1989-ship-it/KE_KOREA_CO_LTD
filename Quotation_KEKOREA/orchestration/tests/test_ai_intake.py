@@ -103,6 +103,27 @@ class AiIntakeTests(unittest.TestCase):
             self.assertTrue(draft.call_args.kwargs["use_library"] is False)
             self.assertIsNone(draft.call_args.kwargs["repo"])
 
+    def test_integrated_draft_retrieves_approved_shared_guidance_only_when_opted_in(self):
+        candidate = make_contract_candidate(self.ai, "ko")
+        fake = copy.deepcopy(candidate)
+        fake["clauses"] = [{"title": "DRAFT", "sentences": [{"text": "review only"}]}]
+        env = {
+            "OPENAI_API_KEY": "fake", "OPENAI_MODEL": "test",
+            "SUPABASE_URL": "https://example.supabase.co",
+            "SUPABASE_SECRET_KEY": "test-private",
+        }
+        with (patch("Quotation_KEKOREA.contracts.repository.ContractRepository") as repository,
+              patch("Quotation_KEKOREA.contracts.ai_graph.generate_contract_draft_graph",
+                    return_value=fake) as draft):
+            result = generate_contract_draft(candidate, env, consent=True, use_library=True)
+            repository.assert_called_once_with(env)
+            self.assertIs(draft.call_args.kwargs["repo"], repository.return_value)
+            self.assertTrue(draft.call_args.kwargs["use_library"])
+            self.assertEqual(draft.call_args.kwargs["reference_context"], [])
+            self.assertEqual(result["clauses"][0]["title"], "DRAFT")
+            repository.return_value.commit_revision.assert_not_called()
+            repository.return_value.save_reference.assert_not_called()
+
     def test_recovery_does_not_change_strict_ai_confirmation_guard(self):
         bad = copy.deepcopy(self.ai)
         bad["terms"][0]["status"] = "confirmed"
