@@ -1,5 +1,6 @@
 """Contract-specific OpenAI Responses API calls with explicit response validation."""
 import json
+from Quotation_KEKOREA.observability.core import operation
 import re
 import urllib.error
 import urllib.request
@@ -138,40 +139,46 @@ def _call(instructions, user_data, *, env, opener=urllib.request.urlopen, timeou
         headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
         method="POST",
     )
-    try:
-        with opener(request, timeout=timeout) as response:
-            raw = response.read(2 * 1024 * 1024 + 1)
-            if len(raw) > 2 * 1024 * 1024:
-                raise RuntimeError("Contract AI response exceeded the size limit; the existing draft was not changed.")
-            result = json.loads(raw.decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        detail = _http_error_detail(exc, api_key)
-        raise RuntimeError(
-            f"Contract AI request failed (HTTP {exc.code}){detail}; "
-            "the existing draft was not changed."
-        ) from None
-    except (urllib.error.URLError, TimeoutError) as exc:
-        if isinstance(exc, TimeoutError) or isinstance(getattr(exc, "reason", None), TimeoutError):
+    with operation('ai.request', model=model) as observation:
+        try:
+            with opener(request, timeout=timeout) as response:
+                raw = response.read(2 * 1024 * 1024 + 1)
+                if len(raw) > 2 * 1024 * 1024:
+                    raise RuntimeError("Contract AI response exceeded the size limit; the existing draft was not changed.")
+                result = json.loads(raw.decode("utf-8"))
+                observation.usage(result)
+        except urllib.error.HTTPError as exc:
+            observation.failure(exc)
+            detail = _http_error_detail(exc, api_key)
             raise RuntimeError(
-                f"Contract AI timed out after {timeout} seconds; "
-                "the existing draft was not changed. Please try again."
+                f"Contract AI request failed (HTTP {exc.code}){detail}; "
+                "the existing draft was not changed."
             ) from None
-        raise RuntimeError("Contract AI could not be reached; the existing draft was not changed.") from None
-    except (UnicodeDecodeError, json.JSONDecodeError):
-        raise RuntimeError("Contract AI returned an invalid response; the existing draft was not changed.") from None
-    if not isinstance(result, dict) or result.get("status") == "incomplete":
-        raise RuntimeError("Contract AI returned an incomplete response; the existing draft was not changed.")
-    if result.get("error"):
-        raise RuntimeError("Contract AI could not complete the request; the existing draft was not changed.")
-    texts = [part.get("text", "") for output in result.get("output", [])
-             for part in output.get("content", []) if part.get("type") == "output_text"]
-    try:
-        data = json.loads("".join(texts))
-    except (json.JSONDecodeError, TypeError):
-        raise RuntimeError("Contract AI returned invalid structured data; the existing draft was not changed.") from None
-    if not isinstance(data, dict):
-        raise RuntimeError("Contract AI returned an unexpected response shape.")
-    return data
+        except (urllib.error.URLError, TimeoutError) as exc:
+            observation.failure(exc)
+            if isinstance(exc, TimeoutError) or isinstance(getattr(exc, "reason", None), TimeoutError):
+                raise RuntimeError(
+                    f"Contract AI timed out after {timeout} seconds; "
+                    "the existing draft was not changed. Please try again."
+                ) from None
+            raise RuntimeError("Contract AI could not be reached; the existing draft was not changed.") from None
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            observation.failure(exc)
+            raise RuntimeError("Contract AI returned an invalid response; the existing draft was not changed.") from None
+        if not isinstance(result, dict) or result.get("status") == "incomplete":
+            raise RuntimeError("Contract AI returned an incomplete response; the existing draft was not changed.")
+        if result.get("error"):
+            raise RuntimeError("Contract AI could not complete the request; the existing draft was not changed.")
+        texts = [part.get("text", "") for output in result.get("output", [])
+                 for part in output.get("content", []) if part.get("type") == "output_text"]
+        try:
+            data = json.loads("".join(texts))
+        except (json.JSONDecodeError, TypeError):
+            observation.fail_code('invalid_response')
+            raise RuntimeError("Contract AI returned invalid structured data; the existing draft was not changed.") from None
+        if not isinstance(data, dict):
+            raise RuntimeError("Contract AI returned an unexpected response shape.")
+        return data
 
 
 def _localize_contract_followups(data, language, *, env, opener):

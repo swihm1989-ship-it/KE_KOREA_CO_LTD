@@ -5,6 +5,7 @@ Old contract clauses are never copied to new drafts or transmitted to AI.
 No writing to repository, no automatic approval, finalization, or SMTP.
 """
 from __future__ import annotations
+from Quotation_KEKOREA.observability.core import traced
 from copy import deepcopy
 from typing import Any, Mapping
 from uuid import uuid4
@@ -20,6 +21,7 @@ _TERM_KEYS = {"products", "quantity", "unit", "unit_price", "currency", "deliver
 _FAMILIES = {"polysilicon", "wafer", "solar_cell", "solar_module", "cosmetics"}
 
 
+@traced('contract.analyze')
 def extract_candidate(instruction: str, env: Mapping[str, str], *, consent: bool) -> dict[str, Any]:
     """Send only the user-typed instruction; explicit consent is mandatory.
 
@@ -147,6 +149,7 @@ def selected_contract_reference(repo, contract_id: str, revision: int) -> dict[s
     raise ValueError("선택한 계약서 리비전을 찾지 못했습니다.")
 
 
+@traced('contract.generate')
 def generate_contract_draft(snapshot: Mapping[str, Any], env: Mapping[str, str],
                             *, consent: bool) -> dict[str, Any]:
     """Call the existing reviewed drafting graph on a NEW in-memory candidate.

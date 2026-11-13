@@ -1,0 +1,35 @@
+name: Private observability regression
+on:
+  pull_request:
+    paths:
+      - 'Quotation_KEKOREA/observability/**'
+      - 'Quotation_KEKOREA/orchestration/**'
+      - 'Quotation_KEKOREA/tests/test_observability*.py'
+      - 'Quotation_KEKOREA/contracts/**'
+      - 'Quotation_KEKOREA/agent/extractor.py'
+      - 'scripts/run_offline_regressions.py'
+      - '.github/workflows/observability.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'Quotation_KEKOREA/observability/**'
+      - 'Quotation_KEKOREA/orchestration/ui/monitoring_page.py'
+      - 'scripts/run_offline_regressions.py'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  observability:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install existing runtime and test dependencies
+        run: python -m pip install -r Quotation_KEKOREA/requirements.txt 'streamlit[auth]>=1.48,<2'
+      - name: Privacy, storage and provider integration regressions (network disabled)
+        run: python scripts/run_offline_regressions.py --pattern 'test_observability*.py' Quotation_KEKOREA/tests
+      - name: Master integration and Streamlit UI regressions (network disabled)
+        run: python scripts/run_offline_regressions.py Quotation_KEKOREA/orchestration/tests

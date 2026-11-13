@@ -1,4 +1,5 @@
 """Natural-language draft extraction using the OpenAI Responses API."""
+from Quotation_KEKOREA.observability.core import operation, traced
 import json
 import os
 from pathlib import Path
@@ -72,6 +73,7 @@ def _schema():
     return {"type": "object", "additionalProperties": False, "properties": props, "required": list(props)}
 
 
+@traced('trade.extract')
 def extract_trade_data(prompt, *, images=None, env=None, opener=urllib.request.urlopen,
                        requested_document_type=None, packing_source=False):
     config = env or load_env()
@@ -109,44 +111,49 @@ def extract_trade_data(prompt, *, images=None, env=None, opener=urllib.request.u
         data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"}, method="POST")
     pdf_attached = any(item.get("mime_type") == "application/pdf" for item in images or [])
-    try:
-        with opener(request, timeout=90) as response:
-            result = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        detail = ""
+    with operation('ai.request', model=model) as observation:
         try:
-            body = json.loads(exc.read().decode("utf-8"))
-            error = body.get("error") if isinstance(body, dict) else None
-            if isinstance(error, dict) and error.get("message"):
-                detail = f": {error['message']}"
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            pass
-        source = "attached PDF" if pdf_attached else "request"
-        raise RuntimeError(f"OpenAI could not process the {source} (HTTP {exc.code}){detail}") from None
-    except (urllib.error.URLError, TimeoutError):
-        raise RuntimeError("OpenAI API could not be reached; check your network connection") from None
-    if not isinstance(result, dict):
-        raise RuntimeError("OpenAI returned an invalid response; no document was created")
-    if result.get("status") == "incomplete":
-        details = result.get("incomplete_details")
-        reason = details.get("reason") if isinstance(details, dict) else None
-        if reason == "max_output_tokens" and pdf_attached:
-            raise RuntimeError(
-                "The PDF was received, but extraction exceeded the response limit. "
-                "Split the PDF into fewer pages and upload the parts separately."
-            )
-        raise RuntimeError(f"OpenAI extraction was incomplete{f' ({reason})' if reason else ''}; no document was created")
-    api_error = result.get("error")
-    if isinstance(api_error, dict) and api_error.get("message"):
-        raise RuntimeError(f"OpenAI could not complete extraction: {api_error['message']}")
-    texts = [part.get("text", "") for output in result.get("output", [])
-             for part in output.get("content", []) if part.get("type") == "output_text"]
-    if not texts:
-        raise RuntimeError("OpenAI returned no structured draft; no document was created")
-    try:
-        return json.loads("".join(texts))
-    except json.JSONDecodeError:
-        raise RuntimeError("OpenAI returned an invalid structured draft; no document was created") from None
+            with opener(request, timeout=90) as response:
+                result = json.loads(response.read().decode("utf-8"))
+                observation.usage(result)
+        except urllib.error.HTTPError as exc:
+            observation.failure(exc)
+            detail = ""
+            try:
+                body = json.loads(exc.read().decode("utf-8"))
+                error = body.get("error") if isinstance(body, dict) else None
+                if isinstance(error, dict) and error.get("message"):
+                    detail = f": {error['message']}"
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                pass
+            source = "attached PDF" if pdf_attached else "request"
+            raise RuntimeError(f"OpenAI could not process the {source} (HTTP {exc.code}){detail}") from None
+        except (urllib.error.URLError, TimeoutError) as exc:
+            observation.failure(exc)
+            raise RuntimeError("OpenAI API could not be reached; check your network connection") from None
+        if not isinstance(result, dict):
+            raise RuntimeError("OpenAI returned an invalid response; no document was created")
+        if result.get("status") == "incomplete":
+            details = result.get("incomplete_details")
+            reason = details.get("reason") if isinstance(details, dict) else None
+            if reason == "max_output_tokens" and pdf_attached:
+                raise RuntimeError(
+                    "The PDF was received, but extraction exceeded the response limit. "
+                    "Split the PDF into fewer pages and upload the parts separately."
+                )
+            raise RuntimeError(f"OpenAI extraction was incomplete{f' ({reason})' if reason else ''}; no document was created")
+        api_error = result.get("error")
+        if isinstance(api_error, dict) and api_error.get("message"):
+            raise RuntimeError(f"OpenAI could not complete extraction: {api_error['message']}")
+        texts = [part.get("text", "") for output in result.get("output", [])
+                 for part in output.get("content", []) if part.get("type") == "output_text"]
+        if not texts:
+            raise RuntimeError("OpenAI returned no structured draft; no document was created")
+        try:
+            return json.loads("".join(texts))
+        except json.JSONDecodeError:
+            observation.fail_code('invalid_response')
+            raise RuntimeError("OpenAI returned an invalid structured draft; no document was created") from None
 
 
 def verify_item_quotes(draft, prompt, *, image_context=False):
