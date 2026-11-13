@@ -694,10 +694,15 @@ def render_ai_intake(principal: str):
                     st.success(explanation)
                 else:
                     st.warning(explanation)
-            if st.button("기존 양식으로 무역서류 PDF·Excel 생성", key="master_legacy_export"):
+            st.caption("확인된 거래조건은 기존 KE KOREA 양식과 회사 직인을 사용합니다. "
+                       "미확정 항목이 있거나 발행 검증이 통과하지 않으면, 같은 입력값으로 "
+                       "직인 없는 '검토용 PDF' 파일을 생성합니다.")
+            if st.button("현재 거래정보로 PDF 생성", key="master_legacy_export", type="primary"):
                 st.session_state.pop("master_legacy_files", None)
                 try:
-                    from Quotation_KEKOREA.orchestration.workflows.legacy_document_exports import render_master_trade_draft
+                    from Quotation_KEKOREA.orchestration.workflows.legacy_document_exports import (
+                        render_master_trade_draft, render_incomplete_trade_pdf,
+                    )
                     updated = json.loads(raw)
                     if not isinstance(updated, dict):
                         raise ValueError("문서 데이터는 JSON 객체여야 합니다.")
@@ -708,10 +713,17 @@ def render_ai_intake(principal: str):
                         try:
                             results[kind] = render_master_trade_draft(kind, updated[kind], env)
                         except (ValueError, TypeError, KeyError, RuntimeError, OSError) as exc:
-                            errors[kind] = str(exc)[:450]
+                            # Do not weaken the original sealed PDF issuance rules.
+                            # Produce a visibly unapproved PDF using exactly the
+                            # user's still-unconfirmed facts (no fake bank data).
+                            try:
+                                results[kind] = render_incomplete_trade_pdf(kind, updated[kind])
+                                errors[kind] = "기존 정식 양식의 검증은 통과하지 않았습니다. 아래 PDF는 미확정 항목을 명시한 내부 검토용입니다."
+                            except (ValueError, TypeError, KeyError, RuntimeError, OSError) as fallback:
+                                errors[kind] = ("PDF 생성 오류: " + str(fallback))[:400]
                     st.session_state["master_legacy_files"] = (edited_key, results, errors)
                 except (ValueError, TypeError, KeyError) as exc:
-                    st.error("PDF·Excel 생성 실패: " + str(exc)[:450])
+                    st.error("PDF 생성 실패: " + str(exc)[:400])
             export_bundle = st.session_state.get("master_legacy_files")
             if export_bundle and export_bundle[0] != edited_key:
                 st.warning("거래조건이 변경되어 이전 PDF·Excel 파일을 무효화했습니다. 다시 생성하세요.")
@@ -725,7 +737,7 @@ def render_ai_intake(principal: str):
                             st.download_button(kind + " " + fmt.upper() + " DRAFT 다운로드",
                                                data=file["content"], file_name=file["filename"],
                                                mime=file["mime"], key="master_legacy_" + kind + "_" + fmt)
-            st.caption("기존 회사 직인 및 필수 정보 검증을 통과해야 생성됩니다. 생성물은 DRAFT이며 최종 발행·전송되지 않습니다.")
+            st.caption("미확정 항목이 있더라도 검토용 PDF 파일은 생성 가능합니다. 정식 발행·직인·전송에는 기존 검증과 승인이 필요합니다.")
         if "CONTRACT" in candidates[1]:
             st.caption("계약서 PDF·DOCX는 아래 기존 계약서 DRAFT 엔진으로 생성합니다. FINAL 계약서의 법률·계좌·승인 검증은 우회하지 않습니다.")
         doc = candidates[1].get("CONTRACT")
