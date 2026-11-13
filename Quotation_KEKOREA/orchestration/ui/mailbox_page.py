@@ -122,6 +122,35 @@ def render_mailbox(principal):
         st.session_state.pop('whois_mail_bundle',None)
         st.error(str(exc));return
     account=config.pop.account_id if config.pop else None
+    if config.pop:
+        # Owner-only view, after mail_config authorization. This is the
+        # configured POP3 login, not a claim that RETR succeeded.
+        st.caption('설정된 POP3 수신 계정: ' + config.pop.username)
+        if config.pop.username.strip().casefold() != 'david.ihm@ke-korea.com':
+            st.warning('현재 POP3 설정 계정은 david.ihm@ke-korea.com과 다릅니다. Streamlit Secrets의 WHOIS_POP_USERNAME을 확인하세요.')
+        else:
+            st.info('POP3 수신 계정 설정은 david.ihm@ke-korea.com입니다. 실제 본문 조회 가능 여부는 아래 POP3 상세 진단으로 확인하세요.')
+        if st.button('POP3 상세 진단 · 메일 발송/삭제 없음', key='whois_pop_diagnostics'):
+            from Quotation_KEKOREA.orchestration.adapters.whois_mail import probe_pop_diagnostics
+            try:
+                report = probe_pop_diagnostics(config.pop)
+                st.session_state['whois_pop_diagnostic_result'] = (account, report)
+            except MailConnectionError as exc:
+                st.session_state['whois_pop_diagnostic_result'] = None
+                st.error(str(exc))
+        diagnostic = st.session_state.get('whois_pop_diagnostic_result')
+        if diagnostic and diagnostic[0] == account:
+            report = diagnostic[1]
+            st.caption('POP3 진단 · UIDL 메일 수: ' + str(report['message_count']) +
+                       ' · LIST 항목 수: ' + str(report['list_count']) +
+                       ' · 본문 RETR: ' + report['retr'] +
+                       ' · 크기 검사: ' + str(report['size']))
+            if report['stage'] == 'empty':
+                st.warning('POP3 서버가 현재 수신 계정의 메일을 0건으로 보고합니다. 웹메일의 실제 수신함과 POP3 제공 범위·설정을 비교하세요.')
+            elif report['retr'] != 'success':
+                st.warning('POP3 본문 조회가 정상 완료되지 않았습니다. UIDL/LIST와 RETR 단계를 구분해 확인하세요. 서버 원문은 출력하지 않습니다.')
+            else:
+                st.success('POP3 UIDL/LIST와 최근 메일 1건의 RETR 조회에 성공했습니다. 본문 내용은 출력하거나 저장하지 않았습니다.')
     bundle=st.session_state.get('whois_mail_bundle')
     if bundle and bundle[0]!=account:
         st.session_state.pop('whois_mail_bundle',None);bundle=None
@@ -218,7 +247,10 @@ def _live_mailbox(pop, account):
     if not bundle:
         st.info("초기 동기화가 완료되지 않았습니다. 다음 자동 확인 또는 지금 동기화를 이용하세요.")
         return
-    st.caption("마지막 조회 성공: " + bundle[2])
+    st.caption("마지막 POP3 동기화 완료: " + bundle[2] +
+               " · 표시 가능한 메일 " + str(len(bundle[1])) + "건")
+    if not bundle[1] and not st.session_state.get("whois_refresh_failed"):
+        st.info("이번 동기화에서 표시 가능한 메일이 0건입니다. POP3 서버에 실제 메일이 0건인지, 본문 조회가 차단됐는지는 위 'POP3 상세 진단'에서 구분해 확인하세요.")
     if st.session_state.get("whois_refresh_failed"):
         st.warning("최근 동기화에 실패해 마지막 성공 메일을 유지합니다.")
     render_inbox(bundle[1], account)

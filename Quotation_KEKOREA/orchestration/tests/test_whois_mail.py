@@ -109,6 +109,43 @@ class WhoisMailTests(unittest.TestCase):
         initial.dele.assert_not_called()
         retry.dele.assert_not_called()
 
+    def test_pop_diagnostics_displays_only_safe_metadata(self):
+        endpoint=mail.mail_config(CONFIG,'owner@example.com').pop
+        client=Mock()
+        client.uidl.return_value=(b'+OK',[b'1 private-uid-999'],0)
+        client.list.return_value=(b'+OK',[b'1 200'],0)
+        client.retr.return_value=(b'+OK',[b'PRIVATE MESSAGE',b'private-test-password'],200)
+        with patch.object(mail.poplib,'POP3_SSL',return_value=client):
+            report=mail.probe_pop_diagnostics(endpoint)
+        self.assertEqual(report['stage'],'completed')
+        self.assertEqual(report['retr'],'success')
+        self.assertEqual(report['message_count'],1)
+        self.assertNotIn('PRIVATE MESSAGE',repr(report))
+        self.assertNotIn('private-uid-999',repr(report))
+        self.assertNotIn('private-test-password',repr(report))
+        client.dele.assert_not_called()
+
+    def test_pop_diagnostics_distinguishes_empty_mailbox_from_retr_rejection(self):
+        endpoint=mail.mail_config(CONFIG,'owner@example.com').pop
+        empty=Mock()
+        empty.uidl.return_value=(b'+OK',[],0)
+        empty.list.return_value=(b'+OK',[],0)
+        with patch.object(mail.poplib,'POP3_SSL',return_value=empty):
+            report=mail.probe_pop_diagnostics(endpoint)
+        self.assertEqual(report['stage'],'empty')
+        self.assertEqual(report['message_count'],0)
+        empty.retr.assert_not_called()
+
+        rejected=Mock()
+        rejected.uidl.return_value=(b'+OK',[b'1 private-uid'],0)
+        rejected.list.return_value=(b'+OK',[b'1 200'],0)
+        rejected.retr.side_effect=mail.poplib.error_proto('-ERR private-test-password')
+        with patch.object(mail.poplib,'POP3_SSL',return_value=rejected):
+            report=mail.probe_pop_diagnostics(endpoint)
+        self.assertEqual(report['retr'],'server_rejected')
+        self.assertNotIn('private-test-password',repr(report))
+        rejected.dele.assert_not_called()
+
     def test_smtp_authentication_error_is_classified_without_secret(self):
         client=Mock()
         client.login.side_effect=mail.smtplib.SMTPAuthenticationError(535,b'private-test-password')
