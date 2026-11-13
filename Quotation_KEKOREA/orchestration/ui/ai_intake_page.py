@@ -251,9 +251,10 @@ def _render_single_editor(digest: str, candidates: dict) -> None:
             st.caption("최근 반영: " + str(last) + " · 이전 PDF 및 검토 상태 무효화")
         for field, label in fields:
             widget = "ai_intake_shared_" + digest[:12] + "_" + field.replace(".", "_")
-            st.text_input(label, value=_shared_current(candidates, field),
-                          key=widget, on_change=_apply_shared_input,
-                          args=(digest, field, widget))
+            kwargs = {} if widget in st.session_state else {
+                "value": _shared_current(candidates, field)}
+            st.text_input(label, key=widget, on_change=_apply_shared_input,
+                          args=(digest, field, widget), **kwargs)
         extra = (trade.get("items") or [])[1:]
         for index, row in enumerate(extra, 1):
             st.markdown("**상품 " + str(index + 1) + "**")
@@ -261,8 +262,10 @@ def _render_single_editor(digest: str, candidates: dict) -> None:
                                  ("unit", "단위"), ("unit_price", "단가"),
                                  ("price_basis", "단가 기준")):
                 widget = "ai_intake_shared_" + digest[:12] + "_item_" + str(index) + "_" + field
-                st.text_input(label, value=str(row.get(field) or ""), key=widget,
-                              on_change=_apply_extra_item, args=(digest, index, field, widget))
+                kwargs = {} if widget in st.session_state else {
+                    "value": str(row.get(field) or "")}
+                st.text_input(label, key=widget, on_change=_apply_extra_item,
+                              args=(digest, index, field, widget), **kwargs)
         gaps = missing_fields(candidates)
         if gaps:
             st.warning("미확정 항목 " + str(len(gaps)) + "개 · 비어 있어도 검토용 PDF 생성 가능")
@@ -541,6 +544,10 @@ def render_ai_intake(principal: str):
     if consume_pending(st.session_state, instruction):
         st.info("기존 메일 요청을 가져왔습니다. 처리 방식과 거래조건을 확인하고 AI 분석을 실행해 주세요.")
     if manual_extract and consent and ready and requested and attachments is not None:
+        # A new extraction must not inherit prior editable widget values.
+        for key in list(st.session_state):
+            if str(key).startswith("ai_intake_shared_"):
+                st.session_state.pop(key, None)
         st.session_state.pop("ai_intake_result", None)
         st.session_state.pop("ai_intake_candidates", None)
         st.session_state.pop("ai_intake_drafts", None)
