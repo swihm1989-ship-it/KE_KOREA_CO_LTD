@@ -34,8 +34,18 @@ def prepare_mail_request(subject, body):
     # Old mail may contain facts but must not choose a new document request.
     latest=re.split(r'(?im)^\s*(?:On .+wrote:|[- ]*Original Message[- ]*|[- ]*Forwarded message[- ]*|보낸 사람:)',body,maxsplit=1)[0]
     latest='\n'.join(line for line in latest.splitlines() if not line.lstrip().startswith('>'))
+    # Join line-wrapped MoU titles for routing only. The AI instruction retains
+    # the unmodified original source text (including every newline).
+    routing = re.sub(r'(?i)\bmemorandum\s*\n\s*of\s*\n\s*understanding\b',
+                     'Memorandum of Understanding', latest)
+    routing = re.sub(r'(?i)\bmemorandum\s+of\s*\n\s*understanding\b',
+                     'Memorandum of Understanding', routing)
+    routing = re.sub(r'(?i)\b양해\s*\n\s*각서', '양해각서', routing)
+    # Protect interior abbreviation dots, but preserve the FINAL full stop as
+    # a sentence boundary. Otherwise "M.O.U. No need for PI" gets conflated.
+    routing = re.sub(r'(?i)\bM\s*\.\s*O\s*\.\s*U(?=\.)', 'MOU', routing)
     positive=[];denied=set()
-    for sentence in re.split(r'[.!?;\n]',latest):
+    for sentence in re.split(r'[.!?;\n]',routing):
         if re.search(r"\b(?:no need for|do not (?:prepare|send|create|provide)|don.t (?:prepare|send|create|provide)|without)\b|(?:작성|발행|생성)하지\s*마|필요\s*없",sentence,re.I):
             denied.update(classify('',sentence))
         else:
@@ -47,7 +57,7 @@ def prepare_mail_request(subject, body):
     return MailRequest(instruction,tuple(k for k in DOC_TYPES if k in kinds),fingerprint(instruction))
 
 
-def queue_handoff(state, message, *, extract=False, attachments=()):
+def queue_handoff(state, message, *, extract=False, attachments=(), requested=None):
     # Old in-memory render and consent state must not cross transactions.
     for key in list(state):
         if ((key.startswith('ai_intake_') and key not in {'ai_intake_language','ai_intake_family'})
@@ -55,6 +65,9 @@ def queue_handoff(state, message, *, extract=False, attachments=()):
             state.pop(key,None)
     try:
         request=prepare_mail_request(message.subject,message.body)
+        if requested is not None:
+            selected=tuple(classify('', '', list(requested)))
+            request=MailRequest(request.instruction, selected, request.fingerprint)
     except ValueError as error:
         state['ai_intake_instruction']='메일 제목: '+message.subject+'\n\n'+message.body
         state['ai_intake_mail_notice']=str(error)
