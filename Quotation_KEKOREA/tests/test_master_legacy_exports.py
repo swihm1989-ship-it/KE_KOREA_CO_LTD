@@ -36,6 +36,20 @@ class LegacyExportsTests(unittest.TestCase):
         self.assertIn("TOTAL: NOT PROVIDED", text)
         self.assertNotIn("0.00", text)
 
+    def test_review_pdf_does_not_invent_discounted_total(self):
+        from Quotation_KEKOREA.orchestration.workflows.legacy_document_exports import render_incomplete_trade_pdf
+        import pymupdf
+        data = {"document_type": "PI", "currency": "USD",
+                "product_family": "solar_cell",
+                "items": [{"product_name": "Test Cell", "quantity": "100",
+                           "unit": "PCS", "unit_price": "1",
+                           "discount_percent": "10"}]}
+        draft = render_incomplete_trade_pdf("PI", data)["pdf"]
+        with pymupdf.open(stream=draft["content"], filetype="pdf") as file:
+            text = "\n".join(page.get_text() for page in file)
+        self.assertIn("TOTAL: NOT PROVIDED", text)
+        self.assertNotIn("INDICATIVE TOTAL: USD 100", text)
+
     def test_incomplete_pdf_rejects_wrong_document_type_without_seal(self):
         from Quotation_KEKOREA.orchestration.workflows.legacy_document_exports import render_incomplete_trade_pdf
         with self.assertRaisesRegex(ValueError, "mismatch"):
