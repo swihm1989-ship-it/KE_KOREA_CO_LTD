@@ -15,6 +15,68 @@ def analysis(quantity='2325860', price='$0.2/pc', unit='', currency=''):
 
 
 class CommercialIntakeTests(unittest.TestCase):
+    def test_old_ai_notes_stay_blocking_until_explicitly_checked(self):
+        from Quotation_KEKOREA.orchestration.workflows.intake_followups import (
+            acknowledge_prior_source_notice,
+        )
+        original = {
+            "PI": {
+                "document_type": "PI", "product_family": "solar_cell",
+                "document_number": "DRAFT",
+                "buyer": {"legal_name": "SYNTHETIC BUYER LTD",
+                          "address": "Seoul, Korea"},
+                "seller": {"legal_name": "KE KOREA CO. LTD",
+                           "address": "Seoul, Korea"},
+                "currency": "USD", "incoterms": "EXW Seoul",
+                "payment_terms": "T/T in advance",
+                "items": [{"product_name": "TEST CELL", "quantity": "100",
+                           "unit": "PCS", "unit_price": "0.2",
+                           "price_basis": "PCS"}],
+                "conflicts": ["Confirm payment date in synthetic email"],
+                "missing_fields": ["Buyer and seller names and addresses"],
+            },
+        }
+        snapshot = copy.deepcopy(original)
+        self.assertTrue(any(
+            "Resolve conflicting" in item
+            for item in validate_and_calculate(original["PI"])["blocking_issues"]
+        ))
+        cleared = acknowledge_prior_source_notice(
+            original, "PI", "missing_fields", 0,
+            "Buyer and seller names and addresses",
+        )
+        self.assertEqual(original, snapshot)
+        self.assertEqual(cleared["PI"]["missing_fields"], [])
+        self.assertEqual(cleared["PI"]["conflicts"],
+                         ["Confirm payment date in synthetic email"])
+        self.assertFalse(validate_and_calculate(cleared["PI"])["ready_for_issue"])
+        resolved = acknowledge_prior_source_notice(
+            cleared, "PI", "conflicts", 0,
+            "Confirm payment date in synthetic email",
+        )
+        self.assertFalse(resolved["PI"]["conflicts"])
+        self.assertTrue(validate_and_calculate(resolved["PI"])["ready_for_issue"])
+
+    def test_acknowledging_notes_never_overrides_real_required_fields(self):
+        from Quotation_KEKOREA.orchestration.workflows.intake_followups import (
+            acknowledge_prior_source_notice,
+        )
+        sample = {"PI": {"document_type": "PI", "product_family": "solar_cell",
+                         "seller": {"legal_name": "KE KOREA CO. LTD"},
+                         "buyer": {"legal_name": "TEST BUYER"},
+                         "missing_fields": ["historical AI memo"], "items": []}}
+        changed = acknowledge_prior_source_notice(
+            sample, "PI", "missing_fields", 0, "historical AI memo",
+        )
+        blockers = validate_and_calculate(changed["PI"])["blocking_issues"]
+        self.assertIn("Buyer address is required", blockers)
+        self.assertIn("Seller address is required", blockers)
+        with self.assertRaisesRegex(ValueError, "변경"):
+            acknowledge_prior_source_notice(
+                sample, "PI", "missing_fields", 0, "old mismatched message",
+            )
+        self.assertEqual(sample["PI"]["missing_fields"], ["historical AI memo"])
+
     def test_scalar_seller_and_buyer_do_not_crash_existing_trade_validation(self):
         from Quotation_KEKOREA.orchestration.workflows.commercial_values import normalize_trade_values
         source = {"document_type": "PI", "product_family": "solar_cell",
