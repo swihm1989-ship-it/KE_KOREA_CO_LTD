@@ -128,6 +128,16 @@ class MailboxUiTests(unittest.TestCase):
             app.run()
             fetch.assert_called_once()
 
+    def test_retr_placeholders_never_displace_previous_good_mail(self):
+        from Quotation_KEKOREA.orchestration.ui.mailbox_page import _merge_messages
+        from Quotation_KEKOREA.orchestration.adapters.whois_mail import MailMessage
+        good = parse_message('uid1', message())
+        placeholder = MailMessage('uid1', notice='이 메일의 POP3 본문(RETR) 조회에 실패했습니다.')
+        orphan = MailMessage('uid2', notice='이 메일의 POP3 본문(RETR) 조회에 실패했습니다.')
+        merged = _merge_messages((good, orphan), (placeholder, orphan))
+        self.assertEqual([m.uid for m in merged], ['uid1'])
+        self.assertIn('100 PCS', merged[0].body)
+
     def test_non_owner_cannot_display_previous_mail_session(self):
         config=CONFIG|{'WHOIS_MAIL_OWNER_EMAILS':'another@example.com'}
         with patch('Quotation_KEKOREA.orchestration.ui.mailbox_page._settings',return_value=config):
