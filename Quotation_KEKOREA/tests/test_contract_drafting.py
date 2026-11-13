@@ -104,6 +104,55 @@ class DraftingTests(unittest.TestCase):
         self.assertEqual(selected[0]['id'], original['id'])
         self.assertEqual(selected[0]['extracted_text'], original['extracted_text'])
 
+    def test_draft_rechecks_multi_document_choice_and_excludes_rejected_excerpt(self):
+        from unittest.mock import Mock
+        a = 'library:source-a:section-1:v2'
+        b = 'library:source-b:section-5:v2'
+        excerpt = 'The parties shall specify a transaction-linked payment trigger.'
+        selected = {'id': a, 'filename': 'Reviewed A', 'extracted_text': excerpt}
+        rejected = {'id': b, 'filename': 'Reviewed B', 'extracted_text': excerpt}
+        source = lambda rid: {
+            'id': rid, 'title': rid, 'locator': 'Article payment',
+            'text': excerpt, 'score': 0.8, 'source_section_id': 'section-1',
+            'record_id': rid, 'matched_topics': ['payment'],
+            'revision': 2,
+        }
+        group = {'topic_key': 'payment', 'candidates': [
+            {'reference_id': a, 'neighbors': [
+                {'relation': 'before', 'locator': 'Article definitions',
+                 'text': 'Approved adjacent definitions shall be checked for consistency.'}
+            ]},
+            {'reference_id': b, 'neighbors': []}
+        ]}
+        verdict = {'status': 'compared', 'decisions': [
+            {'topic_key': 'payment', 'selected_id': a,
+             'reason': 'The source was closer to confirmed terms.',
+             'conflicts': ['Check payment timing against termination provisions.'],
+             'alternatives': [b]},
+        ], 'issues': []}
+        repo = Mock()
+        repo.list_library_records.return_value = []
+        with (patch('Quotation_KEKOREA.contracts.library.search_library_topics',
+                    return_value={'references': [selected, rejected],
+                                  'sources': [source(a), source(b)]}),
+              patch('Quotation_KEKOREA.contracts.contextual_rag.build_comparison_candidates',
+                    return_value=[group]),
+              patch('Quotation_KEKOREA.contracts.contextual_rag.compare_approved_clauses',
+                    return_value=verdict) as compare):
+            result = generate_reviewed_draft(
+                self.snapshot, [], env=ENV, repo=repo,
+                client=self.opener(complete=True),
+            )
+        compare.assert_called_once()
+        used = result['library_sources']
+        self.assertEqual([r['id'] for r in used], [a])
+        self.assertEqual(used[0]['selected_reason'], verdict['decisions'][0]['reason'])
+        self.assertEqual(result['draft_quality']['source_comparison']['status'], 'compared')
+        self.assertTrue(any(i['code'] == 'rag_cross_document_review'
+                            for i in result['issues']))
+        self.assertNotIn(b, json.dumps(self.calls[0]['reference_context']))
+        self.assertIn('Approved adjacent definitions', json.dumps(self.calls))
+
     def test_audit_must_cover_every_generated_clause(self):
         with self.assertRaisesRegex(ValueError, 'clause'):
             generate_reviewed_draft(self.snapshot, [], env=ENV,

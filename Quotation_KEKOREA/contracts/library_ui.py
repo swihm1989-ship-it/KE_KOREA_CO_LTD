@@ -11,9 +11,13 @@ from Quotation_KEKOREA.contracts.library import (
 )
 from Quotation_KEKOREA.contracts.repository import ContractRepositoryError
 from Quotation_KEKOREA.contracts.promote_reference import promote_contract_reference
+from Quotation_KEKOREA.contracts.contextual_rag import (
+    approve_source_excerpts, index_private_original, private_index, _SENSITIVE,
+    restore_private_extraction_bundle,
+)
 
 
-def show_library_sources(sources):
+def show_library_sources(sources, source_comparison=None):
     if not sources:
         return
     with st.expander('이번 계약에 참고한 공통 샘플', expanded=False):
@@ -22,6 +26,22 @@ def show_library_sources(sources):
             st.write(f"{source['title']} · {source['locator']} · v{source['revision']}")
             st.caption(source['topic'])
             st.write(source['text'])
+            if source.get('selected_reason'):
+                st.caption('여러 계약서 비교 후 선택한 이유: ' + source['selected_reason'])
+            if source.get('source_section_id'):
+                st.caption('원본 조항과 SHA-256을 검증한 승인 참고 문구')
+        decisions = (source_comparison or {}).get('decisions') or []
+        if decisions:
+            st.markdown('##### 여러 계약서 조항 비교 및 선택 근거')
+            st.dataframe([
+                {
+                    '검토 주제': d['topic_key'],
+                    '선택한 근거 ID': d['selected_id'],
+                    '선택 이유': d['reason'],
+                    '제외한 후보': len(d.get('alternatives') or []),
+                    '재검토할 충돌': ' / '.join(d.get('conflicts') or []) or '없음',
+                } for d in decisions
+            ], hide_index=True)
 
 
 def render_library_admin(repo, env):
@@ -46,6 +66,26 @@ def render_library_admin(repo, env):
             st.session_state.pop('_sample_admin_session', None)
             st.rerun()
         st.caption('원본과 추출 내용은 관리자 전용입니다. 검색에는 승인한 익명화 참고 메모만 사용됩니다.')
+        try:
+            all_samples = repo.list_library_records()
+            approved_samples = [
+                r for r in all_samples
+                if r.get('extraction_status') == 'library_approved'
+            ]
+            ready_text = sum(bool(str(r.get('extracted_text') or '').strip())
+                             for r in approved_samples)
+            indexed_samples = [
+                private_index(r) for r in approved_samples if private_index(r)
+            ]
+            indexed_clauses = sum(len(idx.get('sections') or [])
+                                  for idx in indexed_samples)
+            st.caption(
+                f"승인 문서 원문 저장 {ready_text}/{len(approved_samples)}개 · "
+                f"비공개 조항 인덱스 {len(indexed_samples)}/{len(approved_samples)}개 · "
+                f"조항 {indexed_clauses}개"
+            )
+        except ContractRepositoryError as exc:
+            st.warning('원문 복구 상태 확인 실패: ' + str(exc)[:160])
         try:
             stats = library_embedding_status(
                 repo.list_library_records(approved_only=True),
@@ -75,6 +115,73 @@ def render_library_admin(repo, env):
                     )
         except (ValueError, RuntimeError, ContractRepositoryError) as exc:
             st.warning('RAG 임베딩 상태 확인 또는 생성 실패: ' + str(exc)[:220])
+        with st.expander('기존 ZIP에서 추출했던 원문 텍스트 복구', expanded=False):
+            st.caption(
+                '대화에서 전달된 계약서 ZIP의 이전 텍스트 추출 결과(JSON)를 업로드해 '
+                '원본 SHA-256을 확인한 후 비공개 extracted_text에 저장합니다. '
+                '기존 본문을 덮어쓰지 않으며 이 작업은 RAG 재사용 승인과 별개입니다.'
+            )
+            previous_extraction = st.file_uploader(
+                '개인정보가 포함될 수 있는 원문 복구 JSON · 관리자 전용',
+                type=['json'], key='private_extraction_restore_json',
+            )
+            restore_confirm = st.checkbox(
+                '모든 자료가 본인 소유이며 기존 저장 원본과 대조해 비공개 복원하는 데 동의합니다.',
+                key='private_extraction_restore_confirm',
+            )
+            if st.button('원문 텍스트 SHA 검증 후 DB 복구',
+                         disabled=not (previous_extraction and restore_confirm),
+                         key='private_extraction_restore_execute'):
+                if previous_extraction.size > 512 * 1024:
+                    raise ValueError('복구 JSON은 512KB를 초과할 수 없습니다.')
+                bundle = json.loads(previous_extraction.getvalue().decode('utf-8'))
+                with st.spinner('원본 파일과 추출 결과를 비교하고 있습니다...'):
+                    restored = restore_private_extraction_bundle(repo, bundle)
+                st.success(
+                    f"본문 복구 {restored['restored']}개 · "
+                    f"이미 저장됨 {restored['unchanged']}개 · "
+                    f"확인 필요 {restored['skipped']}개"
+                )
+                for reason in restored['reasons'][:8]:
+                    st.warning(reason)
+        # Hierarchical source indexing is private until individual excerpts
+        # are explicitly reviewed and approved; no raw originals reach the AI.
+        with st.expander('원본 계약서 조항 인덱스 · 관리자 검증', expanded=False):
+            records_for_index = repo.list_library_records()
+            failed_ids = st.session_state.setdefault('_private_index_skipped', [])
+            candidates = [
+                r for r in records_for_index
+                if not private_index(r)
+                and str(r.get('filename') or '').lower().endswith(('.pdf', '.docx', '.hwp', '.xlsx'))
+                and str(r['id']) not in failed_ids
+            ]
+            completed = sum(bool(private_index(r)) for r in records_for_index)
+            st.caption(
+                f"검증된 원문 조항 색인 {completed}개 / 공통 원본 {len(records_for_index)}개 · "
+                f"이번 실행 대상 {len(candidates)}개"
+            )
+            if st.button('기존 원본 조항 추출 및 위치 기록 (최대 5개)',
+                         disabled=not candidates, key='private_context_index_batch'):
+                ok, failures = [], []
+                for candidate in candidates[:5]:
+                    try:
+                        result = index_private_original(repo, str(candidate['id']))
+                        ok.append((candidate['filename'], result['sections']))
+                    except (ValueError, RuntimeError, ContractRepositoryError) as exc:
+                        failures.append((candidate['filename'], str(exc)[:160]))
+                        failed_ids.append(str(candidate['id']))
+                if ok:
+                    st.success(f"원본 검증·비공개 조항 인덱싱: {len(ok)}개 완료")
+                for name, reason in failures:
+                    st.warning(f"{name}: {reason}")
+                st.rerun()
+            if failed_ids and st.button('미완료 문서 다시 확인', key='private_index_retry'):
+                st.session_state['_private_index_skipped'] = []
+                st.rerun()
+            st.caption(
+                '서명·거래금액이 포함된 원문은 서버의 비공개 인덱스에만 저장됩니다. '
+                '다른 계약서의 AI 검색에 넣기 전에 아래에서 익명화 문구를 직접 검토·승인해야 합니다.'
+            )
         # Explicitly promote a previously saved per-contract reference. Admin-only.
         # No source deletion and no AI retrieval before reviewed guidance approval.
         current_contract_id = st.session_state.get('contract_active_id')
@@ -147,6 +254,83 @@ def render_library_admin(repo, env):
             record = repo.get_library_record(selected)
             manifest = read_manifest(record)
             st.write(f"승인: {manifest.approved} · 활성: {manifest.active} · 버전: {manifest.revision}")
+            index = private_index(record)
+            with st.expander('원본 조항 문맥 확인 및 개별 승인', expanded=False):
+                if not index:
+                    st.info('위의 원본 조항 인덱스를 먼저 생성해 주세요.')
+                    if st.button('선택한 문서의 원본 조항 인덱스 만들기',
+                                 key=f'index_selected_{selected}'):
+                        result = index_private_original(repo, selected)
+                        st.success(f"조항 {result['sections']}개 추출: {result['extraction_status']}")
+                        st.rerun()
+                else:
+                    sections = index.get('sections') or []
+                    st.caption(
+                        f"원문 검증: SHA-256 일치 · 추출 상태: "
+                        f"{index.get('extraction_status')} · "
+                        f"조항 수: {len(sections)} · "
+                        f"미추출 페이지: {len(index.get('unread_pages') or [])}"
+                    )
+                    by_section = {sec['id']: sec for sec in sections}
+                    selected_ids = st.multiselect(
+                        '승인할 원문 조항 (최대 4개씩)',
+                        list(by_section),
+                        format_func=lambda sid: (
+                            by_section[sid]['locator'] + ' · '
+                            + (by_section[sid]['heading'] or by_section[sid]['text'][:35])
+                        ),
+                        max_selections=4,
+                        key=f'source_section_choose_{selected}',
+                    )
+                    if selected_ids:
+                        first = next(i for i, sec in enumerate(sections)
+                                     if sec['id'] == selected_ids[0])
+                        st.caption('선택한 첫 조항의 원문 앞뒤 문맥 · 관리자만 열람')
+                        for pos in range(max(0, first-1), min(len(sections), first+2)):
+                            sec = sections[pos]
+                            st.text_area(
+                                f"{'선택 조항' if pos == first else '인접 조항'} · {sec['locator']}",
+                                value=sec['text'], height=145, disabled=True,
+                                key=f'raw_hierarchy_{selected}_{manifest.revision}_{pos}',
+                            )
+                        review_rows = [{
+                            'section_id': sid,
+                            'topic': (by_section[sid]['heading'] or
+                                      '계약서 원문 조항 구조 검토')[:150],
+                            'text': _SENSITIVE.sub('[비공개 정보 제거]', by_section[sid]['text'])[:2500],
+                        } for sid in selected_ids]
+                        fingerprint = hashlib.sha256(
+                            (selected + ':'.join(selected_ids)).encode()
+                        ).hexdigest()[:14]
+                        with st.form(f'contextual_approve_{selected}_{fingerprint}'):
+                            edited = st.text_area(
+                                '원문에 근거한 익명화 조항 JSON · 각 text에서 당사자명·직책·주소·'
+                                '계좌·서명·개별 금액과 비율을 제거하세요.',
+                                value=json.dumps(review_rows, ensure_ascii=False, indent=2),
+                                height=300,
+                            )
+                            confirmed = st.checkbox(
+                                '원문 전체 문맥 및 다른 조항과의 관계를 확인했고, '
+                                '거래처·개인정보·금액·비율이 제거된 문구만 공통 AI 참고로 승인합니다.'
+                            )
+                            publish_context = st.form_submit_button(
+                                '원문 근거 조항을 RAG에 승인 등록'
+                            )
+                        if publish_context:
+                            if not confirmed:
+                                raise ValueError('원문·익명화 검토 확인을 먼저 체크해 주세요.')
+                            rows = json.loads(edited)
+                            if (not isinstance(rows, list) or
+                                    {row.get('section_id') for row in rows} != set(selected_ids)):
+                                raise ValueError('선택한 원문 조항만 승인할 수 있습니다.')
+                            result = approve_source_excerpts(
+                                repo, selected, rows, explicit_approval=True, env=env,
+                            )
+                            st.success(
+                                f"원본 근거 조항 {result['chunks_added']}개 RAG 승인 · "
+                                f"즉시 임베딩 {result['embedded']}개"
+                            )
+                            st.rerun()
             with st.expander('관리자용 원문 텍스트와 출처'):
                 st.text(record.get('extracted_text') or '텍스트 추출 결과가 없습니다.')
                 st.dataframe([{'location': loc.get('locator'), 'text': loc.get('text')}

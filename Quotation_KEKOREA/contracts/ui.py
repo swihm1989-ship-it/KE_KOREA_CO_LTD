@@ -1807,7 +1807,10 @@ def render_contract_page(page, env):
     with st.container(border=True, key='contract_box_1'):
         st.markdown("### BOX 1 · 계약조건 입력 및 AI 대화")
         _contract_chat(repo, snapshot, state_key, env)
-        show_library_sources(snapshot.get('library_sources', []))
+        show_library_sources(
+            snapshot.get('library_sources', []),
+            (snapshot.get('draft_quality') or {}).get('source_comparison'),
+        )
         refs = repo.contract_references(active_id)
         preferred = [clause for clause in repo.list_preferred_clauses()
                      if clause.get("active") and snapshot["contract_type"] in clause.get("contract_types", [])
