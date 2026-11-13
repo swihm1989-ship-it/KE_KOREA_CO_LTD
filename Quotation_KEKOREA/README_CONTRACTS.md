@@ -538,3 +538,5 @@ Master 관리자 모니터링 메뉴에 JSON 실행 로그, 모델별 호출/응
 - FINAL 발행 시 원본 `contracts.final_policy.final_document_blockers`, `contracts.rules.validate_snapshot(for_export=True)`, `contracts.models.validate_snapshot`을 실행하고, 미확정 AI 제안/조항/당사자 및 거래조건을 차단합니다. 모든 조항의 현재 해시와 연결된 명시적 사용자 승인 및 기존 관리자 로그인 또는 `CONTRACT_FINAL_SEAL_PASSWORD` 검증이 필요합니다. 기존 `contracts.ui._verified_contract_seal`의 PNG 및 SHA-256 검증을 거친 회사 직인만 사용하며, 실제 출력 바이트는 기존 `contracts.exports.export_contract`에서 생성됩니다.
 - 서명된 계약 체결, 이메일 자동 발송, 최종 계약서의 Supabase 영구 저장은 수행하지 않습니다. 출력은 로그인 세션에서 직접 다운로드합니다. 고급 JSON 편집으로 조건이 바뀌면 후보에 명시적으로 반영하고 모든 당사자/조건을 다시 확인해야 합니다.
 - 합성 당사자와 임시 합성 PNG로 PDF/Word 원본 엔진 출력 일치, 승인·직인 권한 미확보 차단, 거래조건 변경 시 이전 승인 무효화, 기존 UI 흐름을 테스트합니다. 실제 계약서·메일·직인·Secrets를 CI/GitHub에 업로드하지 않습니다. 운영 두 앱의 실출력 PDF 시각 비교는 별도 검증 사항입니다.
+
+- 최종 검토 보완: AI 분석이 남긴 `severity=confirm` 미확인 이슈도 FINAL을 차단합니다. Master의 동일 계약정보 입력 영역에서 원문과 대조한 개별 확인 이슈만 사용자가 '확인 완료' 할 수 있으며, `severity=block` 이슈는 확인 버튼만으로 해제할 수 없습니다. 모든 상태 변경은 계약서 FINAL 승인 해시를 변경합니다.
