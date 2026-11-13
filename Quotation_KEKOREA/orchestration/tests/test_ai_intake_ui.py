@@ -128,6 +128,70 @@ class AiIntakeUiTests(unittest.TestCase):
         self.assertFalse(pdf["final"])
         self.assertFalse(pdf["sendable"])
 
+    def test_cached_legacy_apply_answer_reloads_and_preserves_user_edit(self):
+        from Quotation_KEKOREA.orchestration.ui import ai_intake_page
+        from Quotation_KEKOREA.orchestration.workflows import intake_followups
+
+        # This is the old cached function signature reported in production.
+        def legacy_apply_answer(candidates, key, value):
+            raise AssertionError("stale function must never be called")
+
+        digest = "synthetic-legacy-digest"
+        widget = "synthetic-buyer-name"
+        state = {
+            "ai_intake_candidates": (digest, {
+                "PI": {"document_type": "PI", "product_family": "solar_cell",
+                       "buyer": {"legal_name": "", "address": ""},
+                       "seller": {"legal_name": "KE KOREA CO. LTD", "address": ""},
+                       "items": [{"product_name": "Synthetic Cell",
+                                  "quantity": "10", "unit_price": "0.2"}]}}),
+            widget: "New Synthetic Buyer Co. Ltd",
+        }
+        with (patch.object(intake_followups, "apply_answer", legacy_apply_answer),
+              patch.object(ai_intake_page.st, "session_state", state)):
+            ai_intake_page._apply_shared_input(
+                digest, "buyer.legal_name", widget)
+            self.assertNotIn("ai_intake_followup_error", state)
+            self.assertEqual(state["ai_intake_candidates"][1]["PI"]
+                             ["buyer"]["legal_name"],
+                             "New Synthetic Buyer Co. Ltd")
+            state[widget] = ""
+            ai_intake_page._apply_shared_input(
+                digest, "buyer.legal_name", widget)
+            self.assertEqual(state["ai_intake_candidates"][1]["PI"]
+                             ["buyer"]["legal_name"], "")
+            self.assertNotIn("ai_intake_followup_error", state)
+
+    def test_cached_pdf_module_without_review_function_is_reloaded(self):
+        from Quotation_KEKOREA.orchestration.ui import ai_intake_page
+        from Quotation_KEKOREA.orchestration.workflows import legacy_document_exports
+
+        with patch.object(legacy_document_exports, "render_incomplete_trade_pdf", None):
+            old_renderer, review_renderer = (
+                ai_intake_page._current_pdf_export_renderers())
+            self.assertTrue(callable(old_renderer))
+            self.assertTrue(callable(review_renderer))
+            document = review_renderer("PI", {
+                "document_type": "PI", "product_family": "solar_cell",
+                "buyer": {"legal_name": "Synthetic Buyer Ltd"},
+                "seller": {"legal_name": "KE KOREA CO. LTD"},
+                "items": [{"product_name": "Synthetic Cells", "quantity": ""}],
+            })
+            self.assertTrue(document["pdf"]["content"].startswith(b"%PDF"))
+            self.assertFalse(document["pdf"]["final"])
+            self.assertFalse(document["pdf"]["sendable"])
+
+    def test_broken_reload_returns_safe_message_without_original_data(self):
+        from Quotation_KEKOREA.orchestration.ui import ai_intake_page
+        from Quotation_KEKOREA.orchestration.workflows import legacy_document_exports
+        with (patch.object(legacy_document_exports, "render_incomplete_trade_pdf", None),
+              patch.object(ai_intake_page.importlib, "reload",
+                           side_effect=ImportError("SECRET private-message-content"))):
+            with self.assertRaises(RuntimeError) as exc:
+                ai_intake_page._current_pdf_export_renderers()
+        self.assertIn("앱을 재시작", str(exc.exception))
+        self.assertNotIn("SECRET", str(exc.exception))
+
     def test_real_ai_request_shows_fillable_buyer_and_seller_and_syncs_both(self):
         analysis = {
             "contract_type": "sale", "parties": [], "questions": [],
