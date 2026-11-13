@@ -33,7 +33,7 @@ from Quotation_KEKOREA.orchestration.workflows.document_assets import (
 FOLLOWUP_MODULE = "Quotation_KEKOREA.orchestration.workflows.intake_followups"
 PDF_EXPORT_MODULE = "Quotation_KEKOREA.orchestration.workflows.legacy_document_exports"
 PDF_EXPORT_REVISION = "review-pdf-safe-loader-20261113-v1"
-AI_INTAKE_REVISION = "ai-intake-hot-reload-20261113-v3"
+AI_INTAKE_REVISION = "ai-intake-hot-reload-20261113-v4"
 
 
 def _current_intake_followups():
@@ -579,6 +579,103 @@ def _render_single_editor(digest: str, candidates: dict) -> None:
 
 
 
+def _render_original_contract_final(principal: str, snapshot: dict,
+                                    edited_matches: bool) -> None:
+    """FINAL documents are rendered ONLY with the existing KE KOREA engine."""
+    try:
+        from Quotation_KEKOREA.orchestration.workflows.master_contract_final import (
+            contract_fingerprint, contract_final_blockers, render_original_final,
+        )
+    except ImportError:
+        st.error("기존 계약서 FINAL 연결 모듈을 불러오지 못했습니다. 앱을 재시작하세요.")
+        return
+    st.divider()
+    st.markdown("#### 기존 KE KOREA 계약서 FINAL 양식 · PDF / Word")
+    st.caption("기존 ke-korea.streamlit.app의 contracts.exports.export_contract()를 "
+               "그대로 사용합니다. 제목 18pt·소제목 12pt·본문 10pt, "
+               "서명란과 검증된 회사 직인은 기존 렌더러가 처리합니다.")
+    if not snapshot.get("clauses"):
+        st.info("최종 계약서 발행 전 AI 계약서 초안을 작성하고 각 조항을 검토하세요.")
+        return
+    with st.expander("현재 계약서 조항 · FINAL 출력 전 전체 검토", expanded=True):
+        for clause in sorted(snapshot.get("clauses") or [],
+                             key=lambda value: value.get("order", 0)):
+            st.markdown("**" + str(clause.get("title") or "계약 조항") + "**")
+            for sentence in clause.get("sentences") or []:
+                st.write(str(sentence.get("text") or ""))
+    if not edited_matches:
+        st.error("고급 JSON에서 수정한 내용이 아직 단일 입력창의 문서 후보에 저장되지 "
+                 "않았습니다. 먼저 '고급 JSON 변경값 후보에 반영'을 클릭하세요.")
+        return
+    env = document_export_env(st.secrets, os.environ)
+    try:
+        fingerprint = contract_fingerprint(snapshot)
+        blockers = contract_final_blockers(snapshot, env)
+    except (TypeError, ValueError, KeyError):
+        st.error("최종 계약서 형식 검증에 실패했습니다. 현재 조건을 확인하세요.")
+        return
+    if blockers:
+        st.warning("FINAL 발행 전 미확정 조건 " + str(len(blockers)) + "건")
+        with st.expander("발행 전 확인 및 보완 사항", expanded=True):
+            for reason in blockers[:50]:
+                st.write("• " + str(reason))
+    else:
+        st.success("계약조건과 원본 FINAL 엔진의 발행 검증을 통과했습니다.")
+    approval_key = "master_contract_final_approved_" + fingerprint[:20]
+    approved = st.checkbox(
+        "현재 계약서의 모든 조항·당사자·거래조건을 원문과 확인하고 이 버전의 FINAL 생성을 승인합니다.",
+        key=approval_key)
+    # Identical authorization standard as the original contract workspace:
+    # an existing administrator login OR its separately configured seal password.
+    try:
+        from Auth.gate import is_authenticated
+        admin_authorized = bool(is_authenticated(st))
+    except (ImportError, AttributeError, TypeError, ValueError):
+        admin_authorized = False
+    if admin_authorized:
+        st.caption("기존 KE KOREA 관리자 로그인으로 직인 사용 권한 확인")
+        authorized = True
+    else:
+        password = st.text_input(
+            "기존 계약서 FINAL 직인 사용 암호", type="password",
+            key="master_contract_seal_access_" + fingerprint[:20])
+        configured = _server_value("CONTRACT_FINAL_SEAL_PASSWORD")
+        authorized = bool(configured) and hmac.compare_digest(
+            str(password), str(configured))
+        if not configured:
+            st.caption("기존 관리자 로그인 또는 동일한 CONTRACT_FINAL_SEAL_PASSWORD "
+                       "서버 설정이 필요합니다. 비밀번호는 저장하거나 출력하지 않습니다.")
+    disabled = bool(blockers) or not approved or not authorized
+    if st.button("기존 KE KOREA FINAL 양식으로 PDF·Word 생성",
+                 disabled=disabled, key="master_contract_final_export_" +
+                 fingerprint[:20], type="primary"):
+        try:
+            results = render_original_final(
+                snapshot, env, principal=principal, approved=approved,
+                authorized=authorized, expected_fingerprint=fingerprint)
+        except (ImportError, ValueError, RuntimeError, TypeError,
+                PermissionError, OSError) as exc:
+            # Raw third-party errors must not expose secret PNGs or account data.
+            st.error("계약서 FINAL 생성 실패: 승인 상태·직인 설정·서버 로그를 확인하세요.")
+        else:
+            st.session_state["master_contract_final_files"] = (
+                fingerprint, results)
+            st.success("기존 계약서 FINAL 양식으로 PDF와 Word를 생성했습니다. "
+                       "메일 전송은 하지 않았습니다.")
+    result = st.session_state.get("master_contract_final_files")
+    if result and result[0] == fingerprint and not disabled:
+        for ext, mime in (
+                ("pdf", "application/pdf"),
+                ("docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document")):
+            output = result[1].get(ext)
+            if output:
+                st.download_button(
+                    "기존 양식 FINAL 계약서 " + ext.upper() + " 다운로드",
+                    data=output["content"], file_name=output["filename"],
+                    mime=mime, key="master_contract_final_download_" +
+                    fingerprint[:20] + "_" + ext)
+
+
 def _reference_panel():
     st.markdown("#### 기존 계약서 참고 (서버 내 조회 전용)")
     st.caption("기존 계약서는 모델에 전송하거나 새 계약서에 자동 복사하지 않습니다. 사용자가 직접 비교하기 위한 별도 읽기 전용 화면입니다.")
@@ -1072,7 +1169,15 @@ def render_ai_intake(principal: str):
                                                mime=file["mime"], key="master_legacy_" + kind + "_" + fmt)
             st.caption("미확정 항목이 있더라도 검토용 PDF 파일은 생성 가능합니다. 정식 발행·직인·전송에는 기존 검증과 승인이 필요합니다.")
         if "CONTRACT" in candidates[1]:
-            st.caption("계약서 PDF·DOCX는 아래 기존 계약서 DRAFT 엔진으로 생성합니다. FINAL 계약서의 법률·계좌·승인 검증은 우회하지 않습니다.")
+            st.caption("계약서 DRAFT는 기존 초안 엔진, FINAL은 기존 원본 계약서 "
+                       "출력 엔진을 사용합니다. 두 방식 모두 별도 검토·승인 정책을 유지합니다.")
+            try:
+                raw_snapshot = json.loads(raw).get("CONTRACT")
+            except (TypeError, ValueError, AttributeError):
+                raw_snapshot = None
+            _render_original_contract_final(
+                principal, candidates[1]["CONTRACT"],
+                edited_matches=(raw_snapshot == candidates[1]["CONTRACT"]))
         doc = candidates[1].get("CONTRACT")
         if doc and not doc.get("clauses"):
             st.divider()
