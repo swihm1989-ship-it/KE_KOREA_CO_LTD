@@ -77,10 +77,9 @@ class AiIntakeUiTests(unittest.TestCase):
         app.session_state["ai_intake_result"] = (digest, {"parties": [], "terms": []})
         app.run()
         self.assertFalse(app.exception, [x.message for x in app.exception])
-        self.assertEqual(app.text_input(key="master_pdf_unit").value, "")
-        self.assertTrue(app.text_input(key="ai_intake_answer_item_unit"))
-        self.assertFalse(any(x.key in {"master_pdf_price_source", "ai_intake_answer_item_price_source"}
-                             for x in app.text_input))
+        self.assertEqual(next(x for x in app.text_input if x.label == "수량 단위").value, "")
+        self.assertEqual(len([x for x in app.text_input if x.label == "수량 단위"]), 1)
+        self.assertFalse(any(x.key and x.key.startswith("master_pdf_") for x in app.text_input))
 
     def test_real_ai_request_shows_fillable_buyer_and_seller_and_syncs_both(self):
         analysis = {
@@ -110,10 +109,10 @@ class AiIntakeUiTests(unittest.TestCase):
             api.assert_called_once()
             self.assertIn("CONTRACT", app.session_state["ai_intake_candidates"][1])
             self.assertIn("PI", app.session_state["ai_intake_candidates"][1])
-            self.assertTrue(app.text_input(key="ai_intake_answer_buyer_legal_name"))
-            self.assertTrue(app.text_input(key="ai_intake_answer_seller_legal_name"))
-            self.assertTrue(any(x.label == "Buyer · 구매자 법인명" for x in app.text_input))
-            app.text_input(key="ai_intake_answer_buyer_legal_name").set_value("TENGYAO TECHNOLOGY CO. LTD").run()
+            self.assertEqual(len([x for x in app.text_input if x.label == "Buyer · 구매자 법인명"]), 1)
+            self.assertEqual(len([x for x in app.text_input if x.label == "Seller · 판매자 법인명"]), 1)
+            next(x for x in app.text_input if x.label == "Buyer · 구매자 법인명").set_value(
+                "TENGYAO TECHNOLOGY CO. LTD").run()
             self.assertFalse(app.exception, [x.message for x in app.exception])
             result = app.session_state["ai_intake_candidates"][1]
             self.assertEqual(result["PI"]["buyer"]["legal_name"], "TENGYAO TECHNOLOGY CO. LTD")
