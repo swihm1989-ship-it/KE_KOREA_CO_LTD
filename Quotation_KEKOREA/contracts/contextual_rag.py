@@ -113,6 +113,45 @@ def sections_from_extraction(extracted, *, max_sections=MAX_SECTIONS):
     return sections
 
 
+def _restored_private_extraction(record, verified_sha):
+    """Reuse user-provided extracted text only if bound to a verified original SHA.
+
+    The data is untrusted/OCR-review-required even after verifying its source.
+    A matching SHA proves identity of the ORIGINAL file, not OCR correctness.
+    """
+    marker = next((
+        loc for loc in (record.get('source_locations') or [])
+        if loc.get('kind') == 'private_text_extraction_v1'
+        and loc.get('sha256') == verified_sha
+    ), None)
+    if not marker:
+        return None
+    source = str(record.get('extracted_text') or '')
+    if not source.strip() or len(source) > MAX_SOURCE_TEXT:
+        return None
+    pattern = re.compile(r'(?m)^\[(page|document|sheet)\s+(\d+)\]\s*\n')
+    matches = list(pattern.finditer(source))
+    if not matches:
+        return None
+    locations = []
+    for i, match in enumerate(matches):
+        start = match.end()
+        end = matches[i+1].start() if i+1 < len(matches) else len(source)
+        text = source[start:end].strip()
+        if text:
+            locations.append({
+                'locator': match.group(1) + ' ' + match.group(2),
+                'text': text,
+            })
+    if not locations:
+        return None
+    return {
+        'source_locations': locations, 'extracted_text': source,
+        'extraction_status': 'restored_requires_review',
+        'scanned_pages': list(marker.get('unread_pages') or []),
+    }
+
+
 def index_private_original(repo, reference_id):
     """Extract and persist private parent sections only after SHA-256 verification.
 
@@ -131,13 +170,18 @@ def index_private_original(repo, reference_id):
     if not path.startswith('library/sources/') or '..' in path.split('/'):
         raise ValueError('공통 원본 저장 경로가 올바르지 않습니다.')
     filename = str(record.get('filename') or '')
-    if not filename.lower().endswith(('.pdf', '.docx', '.hwp')):
-        raise ValueError('이 파일 형식은 조항 인덱싱 대상이 아닙니다. PDF/DOCX/HWP5만 지원합니다.')
+    if not filename.lower().endswith(('.pdf', '.docx', '.hwp', '.xlsx')):
+        raise ValueError('이 파일 형식은 조항 인덱싱 대상이 아닙니다. PDF/DOCX/HWP5/XLSX만 지원합니다.')
     data = repo.download_private_file('kekorea-contracts', path)
     digest = sha256(data).hexdigest()
     if digest != record.get('content_hash'):
         raise ValueError('원본 SHA-256 불일치: 색인을 중단하고 파일을 보존했습니다.')
-    extracted = extract_reference(data, filename)
+    # An earlier ZIP extraction may already include OCR'd pages that are
+    # otherwise unreadable by PyMuPDF. It is never trusted without verifying
+    # both the original SHA and its private extraction provenance marker.
+    extracted = _restored_private_extraction(record, digest)
+    if extracted is None:
+        extracted = extract_reference(data, filename)
     sections = sections_from_extraction(extracted)
     if not sections:
         raise ValueError('추출 가능한 조항이 없습니다. 스캔본은 OCR과 원문 확인 후 등록해 주세요.')
