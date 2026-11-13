@@ -132,8 +132,23 @@ elif page == "업무 대시보드":
             st.write(f"**{run.subject}** · {run.status} · {', '.join(t.kind for t in run.tasks) or '분류 필요'}")
 
 elif page == "AI 업무 요청":
-    from Quotation_KEKOREA.orchestration.ui.ai_intake_page import render_ai_intake
-    render_ai_intake(_authenticated_principal)
+    # Streamlit can reuse a previous ai_intake_page module while rerunning this
+    # entrypoint after GitHub auto-deploy. Verify it BEFORE rendering widgets.
+    import importlib
+    try:
+        ai_page = importlib.import_module(
+            "Quotation_KEKOREA.orchestration.ui.ai_intake_page")
+        if getattr(ai_page, "AI_INTAKE_REVISION", None) != (
+                "ai-intake-hot-reload-20261113-v1"):
+            importlib.invalidate_caches()
+            ai_page = importlib.reload(ai_page)
+        if getattr(ai_page, "AI_INTAKE_REVISION", None) != (
+                "ai-intake-hot-reload-20261113-v1"):
+            raise RuntimeError("AI page module version mismatch")
+    except (ImportError, OSError, AttributeError, TypeError, RuntimeError):
+        st.error("AI 업무 화면을 최신 버전으로 불러오지 못했습니다. 입력 내용을 보존한 후 Manage app에서 Reboot를 실행하세요.")
+    else:
+        ai_page.render_ai_intake(_authenticated_principal)
 
 elif page == "통합 업무 흐름":
     st.subheader("요청부터 문서·이메일 초안 검토까지")
