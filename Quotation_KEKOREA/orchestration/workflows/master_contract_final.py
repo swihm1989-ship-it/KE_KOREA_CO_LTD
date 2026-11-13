@@ -36,7 +36,10 @@ def contract_final_blockers(snapshot: Mapping[str, Any], env: Mapping[str, str])
     blockers = list(policy)
     blockers.extend(str(issue.get("message") or issue.get("code") or "확인 필요")
                     for issue in checked_issues
-                    if isinstance(issue, dict) and issue.get("severity") == "block")
+                    if isinstance(issue, dict) and (
+                        issue.get("severity") == "block" or (
+                            issue.get("severity") == "confirm" and
+                            not issue.get("confirmed"))))
     # Even optional AI suggestions must be consciously confirmed for FINAL.
     for party in checked.get("parties") or []:
         if party.get("status") != "confirmed":
@@ -113,3 +116,24 @@ def confirm_contract_record(snapshot: Mapping[str, Any], section: str,
         raise ValueError("비어 있는 계약조건은 확정할 수 없습니다.")
     record["status"] = "confirmed"
     return result
+
+
+def confirm_contract_issue(snapshot: Mapping[str, Any], index: int,
+                           expected_message: str) -> dict[str, Any]:
+    """Explicitly acknowledge ONE unchanged AI confirmation issue.
+
+    Block-level findings cannot be silently dismissed by this action.
+    """
+    if not isinstance(index, int) or index < 0:
+        raise ValueError("확인할 검토 항목이 없습니다.")
+    revised = validate_snapshot(deepcopy(dict(snapshot)))
+    issues = revised.get("issues", [])
+    if not isinstance(issues, list) or index >= len(issues):
+        raise ValueError("검토 항목이 변경되었습니다. 다시 확인하세요.")
+    item = issues[index]
+    if (not isinstance(item, dict)
+            or item.get("severity") != "confirm"
+            or str(item.get("message") or "") != expected_message):
+        raise ValueError("승인할 수 없는 검토 항목입니다. 조건을 다시 확인하세요.")
+    item["confirmed"] = True
+    return revised
