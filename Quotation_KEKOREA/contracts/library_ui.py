@@ -67,6 +67,26 @@ def render_library_admin(repo, env):
             st.rerun()
         st.caption('원본과 추출 내용은 관리자 전용입니다. 검색에는 승인한 익명화 참고 메모만 사용됩니다.')
         try:
+            all_samples = repo.list_library_records()
+            approved_samples = [
+                r for r in all_samples
+                if r.get('extraction_status') == 'library_approved'
+            ]
+            ready_text = sum(bool(str(r.get('extracted_text') or '').strip())
+                             for r in approved_samples)
+            indexed_samples = [
+                private_index(r) for r in approved_samples if private_index(r)
+            ]
+            indexed_clauses = sum(len(idx.get('sections') or [])
+                                  for idx in indexed_samples)
+            st.caption(
+                f"승인 문서 원문 저장 {ready_text}/{len(approved_samples)}개 · "
+                f"비공개 조항 인덱스 {len(indexed_samples)}/{len(approved_samples)}개 · "
+                f"조항 {indexed_clauses}개"
+            )
+        except ContractRepositoryError as exc:
+            st.warning('원문 복구 상태 확인 실패: ' + str(exc)[:160])
+        try:
             stats = library_embedding_status(
                 repo.list_library_records(approved_only=True),
                 model=env.get('CONTRACT_LIBRARY_EMBEDDING_MODEL') or 'text-embedding-3-small',
