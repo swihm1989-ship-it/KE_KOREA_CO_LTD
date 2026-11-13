@@ -28,6 +28,8 @@ class LibraryChunk(BaseModel):
     locator: str = Field(min_length=1, max_length=200)
     topic: str = Field(min_length=1, max_length=160)
     text: str = Field(min_length=20, max_length=2500)
+    # Present only when an administrator explicitly reviewed this original clause.
+    source_section_id: str = Field(default='', max_length=100)
     embedding: list[float] = Field(default_factory=list, max_length=3072)
 
     @field_validator('embedding')
@@ -257,7 +259,7 @@ def search_library(repo, snapshot, query, *, env, embedder=None, limit=6,
     ranked.sort(key=lambda item: (-item[0], item[1], item[3].id))
     references, sources, seen = [], [], set()
     for score, reference_id, manifest, chunk in ranked:
-        signature = chunk.text.casefold().strip()
+        signature = (reference_id, chunk.text.casefold().strip())
         if signature in seen:
             continue
         seen.add(signature)
@@ -266,6 +268,8 @@ def search_library(repo, snapshot, query, *, env, embedder=None, limit=6,
                            'extracted_text': chunk.text})
         sources.append({'id': context_id, 'title': manifest.title, 'locator': chunk.locator,
                         'topic': chunk.topic, 'text': chunk.text, 'revision': manifest.revision,
+                        'record_id': reference_id, 'source_section_id': chunk.source_section_id,
+                        'score': round(score, 5), 'matched_topics': [],
                         'language': manifest.language, 'jurisdictions': manifest.jurisdictions})
         if len(references) >= min(8, max(1, limit)):
             break
@@ -317,11 +321,16 @@ def search_library_topics(repo, snapshot, topics, *, env, embedder=None):
         query = str(topic['query'])[:6000]
         vector = vectors.get(query)
         result = search_library(repo, snapshot, query, env=env, records=records,
-                                keyword_only=vector is None, query_vector=vector, limit=3)
+                                keyword_only=vector is None, query_vector=vector, limit=4)
         for reference in result['references']:
             references[reference['id']] = reference
         for source in result['sources']:
-            sources[source['id']] = source
+            source_id = source['id']
+            if source_id not in sources:
+                sources[source_id] = source
+            topic_key = str(topic.get('key') or '')
+            if topic_key and topic_key not in sources[source_id]['matched_topics']:
+                sources[source_id]['matched_topics'].append(topic_key)
     return {'references': list(references.values()), 'sources': list(sources.values()),
             'mode': 'hybrid' if vectors else 'keyword', 'notices': notices}
 
