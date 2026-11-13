@@ -179,6 +179,88 @@ def probe_pop_diagnostics(endpoint: Endpoint) -> dict:
         _finish(client)
 
 
+
+def probe_pop_cross_diagnostics(endpoint: Endpoint) -> dict:
+    """Read-only 3-point diagnostic; returns no UID, header, body, or server text.
+
+    Explicit button only. Each sample opens a fresh TLS connection and resolves
+    its message number again by UIDL, so one rejected RETR cannot poison the
+    following sample. No writes, send, mail parsing or telemetry payloads.
+    """
+    client = _pop(endpoint)
+    try:
+        entries = _uidl(client)
+        count = len(entries)
+    except Exception:
+        raise MailConnectionError("POP3 교차 진단 UIDL 조회 실패") from None
+    finally:
+        _finish(client)
+    if not count:
+        return {"message_count": 0, "samples": []}
+    offsets = list(dict.fromkeys((0, count // 2, count - 1)))
+    labels = ("newest", "middle", "oldest")
+    samples = []
+    for index, offset in enumerate(offsets):
+        session = None
+        record = {"position": labels[index] if count >= 3 else
+                  ("newest" if offset == 0 else "oldest"),
+                  "retr": "not_attempted", "top": "not_attempted",
+                  "size": "unknown"}
+        try:
+            session = _pop(endpoint)
+            current = _uidl(session)
+            if offset >= len(current):
+                record["retr"] = "missing"
+            else:
+                number, _ = current[offset]
+                sizes = {}
+                for line in session.list()[1]:
+                    values = line.split()
+                    if len(values) >= 2:
+                        sizes[int(values[0])] = int(values[1])
+                size = sizes.get(number)
+                if size is None or size < 0:
+                    record["size"] = "missing"
+                elif size > MAX_MESSAGE_BYTES:
+                    record["size"] = "too_large"
+                else:
+                    record["size"] = "valid"
+                    try:
+                        # POP3 RETR is read-only. Discard all returned bytes.
+                        session.retr(number)
+                        record["retr"] = "success"
+                    except poplib.error_proto:
+                        record["retr"] = "server_rejected"
+                    except (socket.timeout, TimeoutError):
+                        record["retr"] = "timeout"
+                    except (OSError, EOFError, ssl.SSLError):
+                        record["retr"] = "connection_error"
+                    except Exception:
+                        record["retr"] = "failed"
+                    # TOP is optional, and its rejection does not imply RETR
+                    # rejection. Request only headers and discard the result.
+                    try:
+                        session.top(number, 0)
+                        record["top"] = "success"
+                    except poplib.error_proto:
+                        record["top"] = "server_rejected_or_unsupported"
+                    except (socket.timeout, TimeoutError):
+                        record["top"] = "timeout"
+                    except (OSError, EOFError, ssl.SSLError):
+                        record["top"] = "connection_error"
+                    except Exception:
+                        record["top"] = "failed"
+        except MailConnectionError:
+            record["retr"] = "connection_error"
+        except Exception:
+            record["retr"] = "diagnostic_failed"
+        finally:
+            if session is not None:
+                _finish(session)
+        samples.append(record)
+    return {"message_count": count, "samples": samples}
+
+
 def probe_smtp(endpoint: Endpoint) -> None:
     """Verify SMTP over TLS without sending mail or exposing server responses."""
     client = None
