@@ -140,22 +140,85 @@ class MailboxUiTests(unittest.TestCase):
                              else '메일함', '메일함')
             self.assertTrue(mailbox_page.st.session_state['ai_intake_consent'])
 
-    def test_extract_button_leaves_fragment_and_preserves_document_choice(self):
+    def test_unified_button_handoff_requires_new_consent_and_preserves_choice(self):
         from Quotation_KEKOREA.orchestration.ui import mailbox_page
         mail = parse_message('synthetic-pi-uid', message())
         with (patch.object(mailbox_page, '_settings', return_value=CONFIG),
               patch.object(mailbox_page, 'fetch_messages', return_value=(mail,))):
             app = AppTest.from_file(str(PAGE), default_timeout=25).run()
             app.radio(key='master_page').set_value('메일함').run()
-            self.assertFalse(app.button(key='whois_ai_extract_synthetic-pi-uid').disabled)
-            app.button(key='whois_ai_extract_synthetic-pi-uid').click().run()
+            action = app.button(key='whois_ai_synthetic-pi-uid')
+            self.assertEqual(action.label, 'AI 업무 요청으로 이동')
+            self.assertFalse(action.disabled)
+            self.assertFalse(any(b.key == 'whois_ai_extract_synthetic-pi-uid' for b in app.button))
+            action.click().run()
             self.assertFalse(app.exception, [x.message for x in app.exception])
             self.assertEqual(app.radio(key='master_page').value, 'AI 업무 요청')
             self.assertIn('100 PCS', app.text_area(key='ai_intake_instruction').value)
             self.assertEqual(app.session_state['ai_intake_mail_source']['kinds'], ['PI'])
-            self.assertTrue(app.checkbox(key='ai_intake_consent').value)
+            self.assertFalse(app.checkbox(key='ai_intake_consent').value)
+            self.assertEqual(app.radio(key='ai_intake_mail_processing_mode').value,
+                             '직접 수정 후 분석')
+            self.assertEqual(app.button(key='ai_intake_extract').label,
+                             '수정한 내용으로 AI 분석')
+            self.assertTrue(app.button(key='ai_intake_extract').disabled)
             self.assertNotIn('master_mail_navigation_pending', app.session_state)
             self.assertNotIn('ai_intake_mail_pending', app.session_state)
+
+    def test_unified_auto_mode_never_calls_provider_without_explicit_run(self):
+        from Quotation_KEKOREA.orchestration.ui import mailbox_page
+        from Quotation_KEKOREA.orchestration.ui import ai_intake_page
+        mail = parse_message('synthetic-pi-uid', message())
+        synthetic_analysis = {'parties': [], 'terms': [], 'questions': [], 'issues': []}
+        with (patch.object(mailbox_page, '_settings', return_value=CONFIG),
+              patch.object(mailbox_page, 'fetch_messages', return_value=(mail,)),
+              patch.object(ai_intake_page, '_model_config',
+                           return_value={'OPENAI_API_KEY': 'synthetic-only', 'OPENAI_MODEL': 'mock'}),
+              patch.object(ai_intake_page, 'extract_mail_candidates',
+                           return_value={'analysis': synthetic_analysis, 'candidates': {}}) as provider):
+            app = AppTest.from_file(str(PAGE), default_timeout=25).run()
+            app.radio(key='master_page').set_value('메일함').run()
+            app.button(key='whois_ai_synthetic-pi-uid').click().run()
+            provider.assert_not_called()
+            app.radio(key='ai_intake_mail_processing_mode').set_value('AI 자동 분석').run()
+            provider.assert_not_called()
+            self.assertTrue(app.text_area(key='ai_intake_instruction').disabled)
+            self.assertEqual(app.button(key='ai_intake_extract').label, 'AI 자동 분석 실행')
+            self.assertTrue(app.button(key='ai_intake_extract').disabled)
+            app.checkbox(key='ai_intake_consent').check().run()
+            provider.assert_not_called()
+            self.assertFalse(app.button(key='ai_intake_extract').disabled)
+            app.button(key='ai_intake_extract').click().run()
+            provider.assert_called_once()
+            self.assertFalse(app.exception, [x.message for x in app.exception])
+            self.assertEqual(app.session_state['ai_intake_result'][1], synthetic_analysis)
+            self.assertFalse(app.session_state.get('ai_intake_mail_pending'))
+
+    def test_unified_mou_handoff_keeps_contract_and_edit_mode(self):
+        from Quotation_KEKOREA.orchestration.adapters.whois_mail import MailMessage
+        from Quotation_KEKOREA.orchestration.ui import mailbox_page
+        synthetic_mou = MailMessage(
+            'synthetic-mou-uid', sender='Sender <synthetic@example.test>',
+            subject='BIPV MoU 요청',
+            body='BIPV 설치 관련 MoU 작성 수정안 부탁드립니다.',
+        )
+        with (patch.object(mailbox_page, '_settings', return_value=CONFIG),
+              patch.object(mailbox_page, 'fetch_messages', return_value=(synthetic_mou,))):
+            app = AppTest.from_file(str(PAGE), default_timeout=25).run()
+            app.radio(key='master_page').set_value('메일함').run()
+            app.button(key='whois_ai_synthetic-mou-uid').click().run()
+            self.assertFalse(app.exception, [x.message for x in app.exception])
+            self.assertEqual(app.session_state['ai_intake_mail_source']['kinds'],
+                             ['CONTRACT'])
+            self.assertEqual(app.radio(key='ai_intake_mail_processing_mode').value,
+                             '직접 수정 후 분석')
+            self.assertFalse(app.checkbox(key='ai_intake_consent').value)
+            self.assertIn('MoU', app.text_area(key='ai_intake_instruction').value)
+            app.text_area(key='ai_intake_instruction').set_value(
+                'BIPV 설치 MoU 수정 요청. 계약 당사자 확인 필요').run()
+            self.assertFalse(app.exception, [x.message for x in app.exception])
+            self.assertEqual(app.button(key='ai_intake_extract').label,
+                             '수정한 내용으로 AI 분석')
 
     def test_inbox_list_selection_search_and_selected_mail_ai_handoff(self):
         from email.message import EmailMessage
