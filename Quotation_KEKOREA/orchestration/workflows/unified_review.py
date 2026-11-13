@@ -68,10 +68,10 @@ def _file_digest(files: Mapping[str, Mapping[str, Any]]) -> str:
     return _hash(rows)
 
 
-def new_request(instruction: str, candidates: Mapping[str, Any]) -> ReviewRun:
+def new_request(instruction: str, candidates: Mapping[str, Any], *, requested=None) -> ReviewRun:
     if not isinstance(candidates, Mapping):
         raise ValueError("Document inputs must be a kind-to-JSON mapping")
-    kinds = tuple(classify("", instruction))
+    kinds = tuple(classify("", instruction, requested))
     # Untrusted natural-language text only chooses kinds. Data is supplied separately.
     sources = deepcopy(dict(candidates))
     return ReviewRun(run_id=str(uuid4()), instruction=instruction, kinds=kinds,

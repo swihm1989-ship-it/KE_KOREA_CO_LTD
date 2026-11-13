@@ -21,7 +21,7 @@ jobs:
           python-version: '3.11'
       - name: Install minimal isolated test dependencies
         run: |
-          python -m pip install 'streamlit[auth]>=1.48,<2' 'langgraph>=1.0,<2' 'python-docx>=1.1,<2' 'reportlab>=4,<5'
+          python -m pip install 'streamlit[auth]>=1.48,<2' 'langgraph>=1.0,<2' 'python-docx>=1.1,<2' 'reportlab>=4,<5' 'PyMuPDF>=2,<3' 'Pillow>=10,<13'
       - name: Compile isolated modules
         run: python -m compileall -q Quotation_KEKOREA/orchestration
       - name: Run mock workflow and Streamlit AppTest smoke tests

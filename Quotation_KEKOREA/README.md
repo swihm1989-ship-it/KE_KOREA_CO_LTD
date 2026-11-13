@@ -160,7 +160,7 @@ KE KOREA CO. LTD의 실제 거래 정보를 받아 제품군에 맞는 Purchase 
 - 코드 `73568`은 서로 다른 Toner와 Cream에 중복된다. 코드·제품명·용량·본품/샘플 구분으로 별도 제품 ID를 생성했다. 코드만으로 병합하지 않는다.
 - `MK-2`의 포장 중량·박스 크기에는 비정상 계산값이 있어 `needs_review`로 표시했다. 가격표 포장 정보는 참고값이며 실제 선적·포장 정보로 자동 확정하지 않는다.
 - [SQL 적용 순서·테이블 설명·검증 안내](supabase/README.md), [스키마 SQL](supabase/migrations/202610300001_eclado_catalog.sql), [비공개 실제 가격 데이터 SQL](private/eclado/002_eclado_catalog_seed.sql).
-- 실제 가격 seed와 원본 분석 보고서는 Git에서 제외했다. 목표 프로젝트는 `jusozufdsnpdxezxptfp`이며 아직 연결·적용하지 않았다.
+- 실제 가격 seed와 원본 분석 보고서는 Git에서 제외했다. 목표 프로젝트는 `YOUR_PROJECT_REF`이며 아직 연결·적용하지 않았다.
 
 ## 2. 현재 확인한 프로젝트
 
@@ -392,7 +392,7 @@ API 기반 판독을 선택하면 어떤 자료가 외부로 전송되는지 표
 - `app.py`: Streamlit screen for typed transaction details and buyer order-image uploads. Users review extracted JSON, resolve blocking issues, and download PDF/XLSX/HTML drafts.
 - `agent/extractor.py`: OpenAI Responses API structured extraction from transaction text and attached order screenshots. Prompt and images are sent only after the user clicks Extract.
 - 입력 언어: 중국어·인도네시아어·한국어를 GPT가 해석해 영문 필드로 정리한다. 중국어 회사명·주소는 중국어 원문 뒤에 영문 번역을 괄호로 병기하고, 나머지 중국어는 영문만 남긴다. PDF는 중국어 글리프용 CID 폰트 인코딩으로 병기 이름·주소를 보존한다.
-- KE Korea default profile for PI, PO, CI, and PL documents: `KE Korea Co. LTD`, `#1510, 157 Yangpyung Ro, Yungdeungpo Gu, Seoul, South Korea`, `Representative: DAVID, SEOKWON IHM`, phone `+82 10 9823 0029`, and email `david.ihm@ke-korea.com`. The profile is seller by default and buyer on PO; transaction-specific company details take priority. Documents use `assets/company_logo.png` in the header and the complete private seal image from `assets/image.png` in the signature area.
+- KE Korea default profile for PI, PO, CI, and PL documents: `KE Korea Co. LTD`, `#1510, 157 Yangpyung Ro, Yungdeungpo Gu, Seoul, South Korea`, `Representative: DAVID, SEOKWON IHM`, phone `CONTACT_PHONE_CONFIGURED_IN_SERVER`, and email `CONTACT_EMAIL_CONFIGURED_IN_SERVER`. The profile is seller by default and buyer on PO; transaction-specific company details take priority. Documents use `assets/company_logo.png` in the header and the complete private seal image from `assets/image.png` in the signature area.
 - `agent/pricing.py`: Supabase REST API에서 최신 `kekorea_catalog_imports` ID, ECLADO 제품, 해당 import의 매입가·판매가를 서버에서 조회한다. ECLADO 공급 PO에는 매입가만, Dear Glow 판매 PI/CI에는 해당 구매처 판매가만 exact match로 적용한다. 구매처·공급처/통화가 다르면 해당 가격을 쓰지 않는다.
 - Supabase 신형 `SUPABASE_SECRET_KEY`는 HTTPS REST 요청의 `apikey` 헤더로만 전달한다. 브라우저 코드, URL, 로그에 키를 노출하지 않는다. Secret key는 전체 DB 접근 권한이 있으므로 Streamlit 앱 공개 범위를 반드시 비공개로 설정한다.
 - Supabase 연결 설정이 없으면 개발용 로컬 seed를 사용할 수 있으나, Cloud에서는 seed를 Git에서 제외하므로 Supabase 비밀 키가 필요하다. Supabase 조회 실패 시 오래된 로컬 가격으로 조용히 대체하지 않는다.
@@ -438,7 +438,7 @@ uv run --with-requirements .\Quotation_KEKOREA\requirements.txt streamlit run .\
 ```toml
 OPENAI_API_KEY = "새로 발급한 OpenAI 키"
 OPENAI_MODEL = "gpt-6-luna"
-SUPABASE_URL = "https://jusozufdsnpdxezxptfp.supabase.co"
+SUPABASE_URL = "https://YOUR_PROJECT.supabase.co"
 SUPABASE_SECRET_KEY = "새로 발급한 Supabase Secret key"
 ```
 
@@ -879,3 +879,12 @@ Master 관리자 모니터링 메뉴에 JSON 실행 로그, 모델별 호출/응
 구현/검증/배포 범위는 [운영 안내](../docs/master-observability-20261113.md)를 참조하세요. 운영 로그인 화면은 확인했으며 배포 후 관리자 실화면 확인은 인증 만료로 아직 미확인입니다.
 
 검증: 외부 통신을 차단한 전체 851개 테스트(계약/무역문서 677 + Master 174) 통과, 신규 모니터링 27개 포함. 비공개 자료는 커밋에서 제외했습니다.
+
+
+## 2026-11-13 · 선택 메일에서 문서 준비
+
+메일함의 **AI로 거래조건 추출·문서 준비** 버튼으로 선택 메일 제목·본문과 직접 선택한 첨부를 처리하고 AI 업무 요청으로 이동해 문서 후보를 채웁니다. 기존 복사 전용 버튼도 유지합니다. PI/견적서·PO·계약서·CIPL(CI+PL)을 인식하고 전체 품목·포장 데이터를 보존하며 누락 사실을 보완할 수 있습니다. 원본 PI·수량·출하·배송지·검토 규칙과 기존 서식/직인을 유지합니다. 열람·동기화만으로 AI 실행이나 실제 발송/최종 발행을 하지 않습니다.
+
+160개 가상 메일과 가상 AI HTTP 응답으로 연결/원문/금액 검증 테스트를 추가했습니다. 실제 모델 정확도 시험과 운영 실화면 확인은 구분하며, Google 인증이 차단된 운영 검증은 미확인입니다. 상세 내용: `docs/master-mail-document-intake-20261113.md` (저장소 루트 기준).
+
+검증: 외부 통신을 차단한 전체 1,030개 테스트 통과(계약/문서 678 + Master 352, 실패/스킵 0). 160개 가상 메일은 가상 AI HTTP 응답으로 전달·원문·계산·보호 규칙을 검증한 것이며 실제 모델 성능 수치를 뜻하지 않습니다.

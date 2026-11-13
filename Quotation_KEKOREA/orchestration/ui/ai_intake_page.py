@@ -8,7 +8,10 @@ import os
 
 import streamlit as st
 
-from Quotation_KEKOREA.orchestration.router import classify
+from Quotation_KEKOREA.orchestration.workflows.mail_intake import (
+    extract_mail_candidates, consume_pending, fingerprint as mail_fingerprint,
+)
+from Quotation_KEKOREA.orchestration.router import DOC_TYPES, classify
 from Quotation_KEKOREA.orchestration.workflows.commercial_values import normalize_trade_values
 from Quotation_KEKOREA.orchestration.workflows.label_typos import canonical_label
 from Quotation_KEKOREA.orchestration.workflows.ai_intake import (
@@ -91,7 +94,16 @@ def _apply_pdf_required_fields(digest: str) -> None:
         items[0] = {**items[0], "product_name": fields["product"],
                     "quantity": fields["quantity"], "unit": fields["unit"].upper(),
                     "unit_price": fields["price"], "price_basis": fields["basis"].upper()}
+        if st.session_state.get('ai_intake_mail_source'):
+            from Quotation_KEKOREA.orchestration.workflows.mail_trade_normalization import apply_quantity_edit
+            apply_quantity_edit(items[0],fields['quantity'])
         trade["items"] = items
+        if st.session_state.get('ai_intake_mail_source'):
+            from Quotation_KEKOREA.orchestration.workflows.mail_trade_normalization import resolve_notice_for_answer
+            for key in ('buyer.legal_name','buyer.address','seller.legal_name','seller.address',
+                        'currency','incoterms','payment_terms','shipment_reference','country_of_origin',
+                        'item.product_name','item.quantity','item.unit','item.unit_price','item.price_basis'):
+                resolve_notice_for_answer(trade,key)
     _remember_candidate_bundle(digest, changed)
     st.session_state.pop("master_legacy_files", None)
     st.session_state["master_pdf_applied"] = True
@@ -278,6 +290,13 @@ def _render_recovery_inputs(digest: str, analysis: dict, requested: list[str]) -
             else:
                 bundle[kind] = make_trade_candidate(kind, revised,
                     product_family=st.session_state.get("ai_intake_family", "solar_cell"))
+        current=st.session_state.get('ai_intake_candidates')
+        if st.session_state.get('ai_intake_mail_source') and current and current[0]==digest:
+            bundle=deepcopy(current[1])
+            for role,value,address in (('buyer',buyer,buyer_address),('seller',seller,seller_address)):
+                if value.strip():bundle=apply_answer(bundle,role+'.legal_name',value.strip())
+                if address.strip():bundle=apply_answer(bundle,role+'.address',address.strip())
+            if currency_value.strip():bundle=apply_answer(bundle,'currency',currency_value.strip())
         if bundle:
             _remember_candidate_bundle(digest, bundle)
         st.session_state.pop("ai_intake_recovery_error", None)
@@ -294,11 +313,34 @@ def render_ai_intake(principal: str):
     st.subheader("AI 거래조건 추출 · 기존 문서 엔진 연결")
     st.caption("문서 작업은 이 화면에서 진행합니다. 검토용 초안과 최종 발행 문서는 기존 검증·승인 규칙에 따라 구분합니다.")
     st.caption("기존 계약서 분석 AI를 사용해 자연어에서 거래조건을 제안합니다. 확정·발행·전송은 자동으로 하지 않습니다.")
-    st.info("AI 요청에는 아래 입력창에서 직접 작성한 내용만 전송합니다. 저장된 계약서는 모델에 전달되지 않습니다.")
+    st.info("AI 요청에는 아래 입력 내용과 직접 선택한 참고파일만 전송합니다. 저장된 계약서는 모델에 전달되지 않습니다.")
     instruction = st.text_area("업무 요청 및 거래조건", height=185,
         placeholder="예: 한화 M10 solar cell 100 PCS, USD 0.20/pc, EXW Seoul 조건으로 PI와 계약서 초안을 만들어줘.",
         key="ai_intake_instruction")
+    mail_source = st.session_state.get('ai_intake_mail_source')
+    mail_mode = bool(mail_source)
+    if st.session_state.get('ai_intake_mail_notice'):
+        st.warning(st.session_state['ai_intake_mail_notice'])
     requested = classify("", instruction)
+    attachments = []
+    if mail_mode:
+        st.caption('선택한 메일에서 가져온 요청입니다. 문서 종류를 수정할 수 있습니다. CIPL = CI + PL.')
+        requested = st.multiselect('준비할 문서', list(DOC_TYPES),
+            default=mail_source.get('kinds', []), key='ai_intake_mail_kinds')
+        attachments = st.session_state.get('ai_intake_mail_attachments', [])
+        if attachments:
+            st.caption('선택한 첨부: ' + ', '.join(a['name'] for a in attachments))
+        if 'CI' in requested:
+            st.caption('CI 출력에는 기존 정책에 따라 원본 PI 첨부가 필요합니다. 메일에서 선택하지 않았다면 여기서 추가하세요.')
+            uploads=st.file_uploader('원본 PI 등 추가 참고파일',type=['pdf','png','jpg','jpeg','webp'],
+                accept_multiple_files=True,key='ai_intake_mail_pi_uploads')
+            if uploads:
+                from Quotation_KEKOREA.agent.attachments import prepare_uploads
+                try:
+                    attachments = attachments + prepare_uploads(uploads)
+                except ValueError as exc:
+                    st.error(str(exc))
+                    attachments = None
     st.caption("감지된 문서 종류: " + (", ".join(requested) if requested else "없음 · PI/PO/CI/PL/계약서를 명시하세요"))
     language = st.radio("계약서 언어", ["한국어", "English"], horizontal=True,
                         key="ai_intake_language")
@@ -309,26 +351,39 @@ def render_ai_intake(principal: str):
                  (config.get("OPENAI_MODEL") or config.get("CONTRACT_OPENAI_MODEL")))
     if not ready:
         st.warning("AI 모델 연결을 위해 별도 MASTER GRAPH 앱의 Secrets에 OPENAI_API_KEY와 OPENAI_MODEL이 필요합니다.")
-    consent = st.checkbox("위 입력 내용만 외부 AI API에 전송하는 데 동의합니다. 저장된 계약서는 전송하지 않습니다.",
-                          value=False, key="ai_intake_consent")
-    digest = _fingerprint(instruction + "|" + language + "|" + family)
-    if st.button("AI 거래조건 추출", key="ai_intake_extract", type="primary",
-                 disabled=not (consent and ready and requested and instruction.strip())):
+    consent = st.checkbox("입력 내용과 직접 선택한 참고파일만 외부 AI API에 전송하는 데 동의합니다. 저장된 계약서는 전송하지 않습니다.",
+                          key="ai_intake_consent")
+    digest_source = instruction + "|" + language + "|" + family
+    if mail_mode:
+        digest_source += '|' + ','.join(requested) + '|' + _fingerprint(''.join(
+            _fingerprint(a['name']) + sha256(a['data']).hexdigest() for a in attachments or []))
+    digest = _fingerprint(digest_source)
+    manual_extract = st.button("AI 거래조건 추출", key="ai_intake_extract", type="primary",
+                 disabled=not (consent and ready and requested and instruction.strip() and attachments is not None))
+    automatic = consume_pending(st.session_state, instruction)
+    if automatic and not ready:
+        st.warning('AI 모델 설정 후 거래조건 추출 버튼으로 다시 실행해 주세요. 자동 재시도는 하지 않습니다.')
+    if (manual_extract or automatic) and consent and ready and requested and attachments is not None:
         st.session_state.pop("ai_intake_result", None)
         st.session_state.pop("ai_intake_candidates", None)
         st.session_state.pop("ai_intake_drafts", None)
         try:
             with st.spinner("거래조건을 분석합니다."):
-                extracted = extract_candidate(instruction, config, consent=consent)
-            st.session_state["ai_intake_result"] = (digest, extracted)
-            candidate_map = {}
-            for kind in requested:
-                if kind == "CONTRACT":
-                    candidate_map[kind] = make_contract_candidate(
-                        extracted, "ko" if language == "한국어" else "en")
+                if mail_mode:
+                    bundle=extract_mail_candidates(instruction,requested,config,consent=consent,
+                        language='ko' if language=='한국어' else 'en',family=family,attachments=attachments)
+                    extracted,candidate_map=bundle['analysis'],bundle['candidates']
                 else:
-                    candidate_map[kind] = make_trade_candidate(
-                        kind, extracted, product_family=family)
+                    extracted = extract_candidate(instruction, config, consent=consent)
+                    candidate_map = {}
+                    for kind in requested:
+                        if kind == "CONTRACT":
+                            candidate_map[kind] = make_contract_candidate(
+                                extracted, "ko" if language == "한국어" else "en")
+                        else:
+                            candidate_map[kind] = make_trade_candidate(
+                                kind, extracted, product_family=family)
+            st.session_state["ai_intake_result"] = (digest, extracted)
             _remember_candidate_bundle(digest, candidate_map)
         except (PermissionError, ValueError, RuntimeError, TypeError) as exc:
             st.error("AI 거래조건 추출 실패: " + str(exc)[:400])
@@ -375,6 +430,11 @@ def render_ai_intake(principal: str):
                     else:
                         candidate_map[kind] = make_trade_candidate(kind, analysis,
                                                                   product_family=family)
+                if mail_mode:
+                    original = st.session_state.get('ai_intake_candidates')
+                    if not original or original[0] != digest:
+                        raise ValueError('메일 조건을 다시 추출해 주세요.')
+                    candidate_map = deepcopy(original[1])
                 _remember_candidate_bundle(digest, candidate_map)
             except (ValueError, TypeError) as exc:
                 st.error("초안 입력 구성 실패: " + str(exc))
@@ -388,6 +448,9 @@ def render_ai_intake(principal: str):
                     st.markdown("**" + kind + " · 현재 거래정보**")
                     st.write("Buyer:", (data.get("buyer") or {}).get("legal_name") or "미입력")
                     st.write("Seller:", (data.get("seller") or {}).get("legal_name") or "미입력")
+                    if mail_mode and data.get('items'):
+                        st.dataframe([{k:row.get(k) for k in ('product_name','quantity','unit','unit_price','price_basis','package_count','net_weight_kg','gross_weight_kg')}
+                                      for row in data['items']],hide_index=True,width='stretch')
                     if (data.get("items") or [{}])[0].get("price_source"):
                         st.write("가격 출처 (참고):", data["items"][0]["price_source"])
             elif kind == "CONTRACT":
@@ -408,7 +471,7 @@ def render_ai_intake(principal: str):
                 data = {kind: normalize_trade_values(source)
                         if kind in {"PI", "PO", "CI", "PL"} and isinstance(source, dict) else source
                         for kind, source in data.items()}
-                run = prepare_documents(new_request(instruction, data))
+                run = prepare_documents(new_request(instruction, data, requested=requested if mail_mode else None))
                 st.session_state["ai_intake_drafts"] = (edited_key, run)
             except (ValueError, TypeError, KeyError) as exc:
                 st.error("문서 생성 실패: " + str(exc))

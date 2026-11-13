@@ -48,14 +48,9 @@ def _settings():
     return values
 
 
-def _use_for_ai(message):
-    # Callback runs before the sidebar/AI widgets are instantiated.
-    for key in list(st.session_state):
-        if (key.startswith('ai_intake_') and key not in {'ai_intake_language','ai_intake_family'}) or key.startswith('master_pdf_') or key=='master_legacy_files':
-            st.session_state.pop(key,None)
-    st.session_state['ai_intake_instruction']=('메일 제목: '+message.subject+'\n\n'+message.body)[:20000]
-    st.session_state['ai_intake_consent']=False
-    st.session_state['master_page']='AI 업무 요청'
+def _use_for_ai(message, extract=False, attachments=()):
+    from Quotation_KEKOREA.orchestration.workflows.mail_intake import queue_handoff
+    queue_handoff(st.session_state, message, extract=extract, attachments=attachments)
 
 
 def _ensure_smtp_adapter_current():
@@ -300,6 +295,29 @@ def render_inbox(messages, account):
                         key=f"whois_attachment_{selected.uid}_{i}"
                     )
             st.divider()
+            from Quotation_KEKOREA.orchestration.workflows.mail_intake import prepare_mail_request
+            try:
+                detected = prepare_mail_request(selected.subject, selected.body)
+                detected_kinds = detected.kinds
+                st.caption("문서 요청 인식: " + (", ".join(detected_kinds) or "문서 종류를 AI 업무 요청에서 선택하세요"))
+            except ValueError as exc:
+                detected_kinds = ()
+                st.warning(str(exc))
+            available = [(i,a) for i,a in enumerate(selected.attachments)
+                         if a.mime in {'application/pdf','image/png','image/jpeg','image/webp'}]
+            chosen = []
+            if available:
+                indexes = st.multiselect("AI에 함께 보낼 첨부파일 (선택)", [i for i,a in available],
+                    format_func=lambda i:selected.attachments[i].filename,
+                    key='whois_ai_attachments_'+selected.uid)
+                chosen = [{'name':selected.attachments[i].filename,
+                           'mime_type':selected.attachments[i].mime,
+                           'data':selected.attachments[i].content} for i in indexes]
+            st.caption("아래 추출 버튼을 누르면 선택한 메일 제목·본문과 직접 선택한 첨부만 외부 AI에 전송합니다. "
+                       "CIPL은 CI·PL을 각각 준비하며 CI 출력에는 원본 PI가 필요합니다.")
+            st.button("AI로 거래조건 추출·문서 준비", key='whois_ai_extract_'+selected.uid,
+                      disabled=not bool(detected_kinds), type='primary', width='stretch',
+                      on_click=_use_for_ai, args=(selected,True,chosen))
             st.button(
                 "이 메일로 AI 업무 요청 작성",
                 key="whois_ai_" + selected.uid,
@@ -309,6 +327,4 @@ def render_inbox(messages, account):
                 on_click=_use_for_ai,
                 args=(selected,),
             )
-            st.caption("메일을 선택해도 AI가 자동 실행되지 않습니다. "
-                       "요청을 검토하고 별도로 전송 동의해야 합니다. "
-                       "첨부파일은 AI에 자동 전송하지 않습니다.")
+            st.caption("위 ‘요청 작성’ 버튼은 입력창으로만 이동합니다. 메일 열람·동기화만으로는 AI를 실행하지 않습니다.")
