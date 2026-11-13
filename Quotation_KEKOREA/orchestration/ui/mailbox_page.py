@@ -63,14 +63,23 @@ def _ensure_smtp_adapter_current():
     global mail_config, probe_pop, probe_smtp, fetch_messages, MailConnectionError
     module = sys.modules.get(probe_smtp.__module__)
     expected = "smtp-starttls-20261112-v3"
-    if module is None or getattr(module, "SMTP_DIAGNOSTIC_REVISION", None) == expected:
+    pop_expected = "pop-health-20261113-v2"
+    if module is None:
+        return False
+    if (getattr(module, "SMTP_DIAGNOSTIC_REVISION", None) == expected
+            and getattr(module, "POP_DIAGNOSTIC_REVISION", None) == pop_expected
+            and callable(getattr(module, "probe_pop_diagnostics", None))
+            and getattr(module, "probe_smtp", None) is probe_smtp
+            and getattr(module, "fetch_messages", None) is fetch_messages):
         return False
     try:
         importlib.invalidate_caches()
         refreshed = importlib.reload(module)
     except (ImportError, OSError, SyntaxError):
         return False
-    if getattr(refreshed, "SMTP_DIAGNOSTIC_REVISION", None) != expected:
+    if (getattr(refreshed, "SMTP_DIAGNOSTIC_REVISION", None) != expected
+            or getattr(refreshed, "POP_DIAGNOSTIC_REVISION", None) != pop_expected
+            or not callable(getattr(refreshed, "probe_pop_diagnostics", None))):
         return False
     mail_config = refreshed.mail_config
     probe_pop = refreshed.probe_pop
@@ -101,7 +110,7 @@ def render_mailbox(principal):
     refreshed_smtp_module = _ensure_smtp_adapter_current()
     st.subheader('후이즈 회사 메일함')
     if refreshed_smtp_module:
-        st.success("이전 SMTP 모듈을 감지하여 최신 코드로 다시 로딩했습니다.")
+        st.success("이전 메일 연결 모듈을 감지하여 최신 POP3/SMTP 코드로 다시 로딩했습니다.")
     st.caption('메일 동기화 버전: 2026-11-12-LIVE · 화면 열림 중 60초마다 자동 갱신')
     st.caption('화면이 열려 있는 동안 60초마다 새 메일을 확인합니다. 최근 메일은 현재 로그인 세션에서만 보관하며 원본은 서버에 보존합니다.')
     with st.expander('메일 연결 설정 안내'):
@@ -131,10 +140,20 @@ def render_mailbox(principal):
         else:
             st.info('POP3 수신 계정 설정은 david.ihm@ke-korea.com입니다. 실제 본문 조회 가능 여부는 아래 POP3 상세 진단으로 확인하세요.')
         if st.button('POP3 상세 진단 · 메일 발송/삭제 없음', key='whois_pop_diagnostics'):
-            from Quotation_KEKOREA.orchestration.adapters.whois_mail import probe_pop_diagnostics
+            # Streamlit hot deployment can keep an older adapter in sys.modules.
+            # Never let a missing diagnostic callable crash the owner's mailbox.
+            module = sys.modules.get(probe_pop.__module__)
+            diagnostic_callable = getattr(module, 'probe_pop_diagnostics', None)
             try:
-                report = probe_pop_diagnostics(config.pop)
-                st.session_state['whois_pop_diagnostic_result'] = (account, report)
+                if not callable(diagnostic_callable):
+                    if _ensure_smtp_adapter_current():
+                        module = sys.modules.get(probe_pop.__module__)
+                        diagnostic_callable = getattr(module, 'probe_pop_diagnostics', None)
+                if not callable(diagnostic_callable):
+                    st.warning('POP3 진단 모듈이 이전 버전입니다. 앱 Manage app에서 Reboot 후 다시 시도하세요.')
+                else:
+                    report = diagnostic_callable(config.pop)
+                    st.session_state['whois_pop_diagnostic_result'] = (account, report)
             except MailConnectionError as exc:
                 st.session_state['whois_pop_diagnostic_result'] = None
                 st.error(str(exc))
