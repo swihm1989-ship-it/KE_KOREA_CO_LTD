@@ -79,6 +79,61 @@ class MailDocumentUiTests(unittest.TestCase):
             self.assertEqual(validate_and_calculate(data)['items'][0]['quantity'],'3000')
             self.assertEqual(len(data['items']),2)
 
+    def test_single_editor_syncs_buyer_address_and_produces_incomplete_pdf(self):
+        from Quotation_KEKOREA.orchestration.workflows import legacy_document_exports
+        with (patch('Quotation_KEKOREA.orchestration.ui.ai_intake_page.extract_mail_candidates',
+                    return_value=self.ready_result()),
+              patch.object(legacy_document_exports, 'render_master_trade_draft',
+                           side_effect=ValueError('synthetic missing terms'))):
+            app = self.mailbox()
+            self.start_analysis(app)
+            self.assertEqual(len([x for x in app.text_input
+                                  if x.label == 'Buyer · 구매자 법인 주소']), 1)
+            self.assertFalse(any(x.key and x.key.startswith('master_pdf_') for x in app.text_input))
+            next(x for x in app.text_input
+                 if x.label == 'Buyer · 구매자 법인 주소').set_value(
+                     'New verified test address, Korea').run()
+            candidate = app.session_state['ai_intake_candidates'][1]['PI']
+            self.assertEqual(candidate['buyer']['address'], 'New verified test address, Korea')
+            self.assertFalse(app.exception, [x.message for x in app.exception])
+            app.button(key='master_legacy_export').click().run()
+            self.assertFalse(app.exception, [x.message for x in app.exception])
+            exported = app.session_state['master_legacy_files'][1]['PI']['pdf']
+            self.assertTrue(exported['content'].startswith(b'%PDF'))
+            self.assertFalse(exported['final'])
+            self.assertTrue(exported['review_only'])
+            import pymupdf
+            with pymupdf.open(stream=exported['content'], filetype='pdf') as file:
+                page_text = '\n'.join(page.get_text() for page in file)
+            self.assertIn('New verified test address, Korea', page_text)
+            self.assertIn('NOT FOR ISSUE', page_text)
+            next(x for x in app.text_input
+                 if x.label == 'Buyer · 구매자 법인 주소').set_value('Changed again').run()
+            self.assertNotIn('master_legacy_files', app.session_state)
+            self.assertEqual(app.session_state['ai_intake_candidates'][1]['PI']
+                             ['buyer']['address'], 'Changed again')
+
+    def test_clearing_quantity_never_uses_old_paid_quantity_in_preview(self):
+        from Quotation_KEKOREA.orchestration.workflows import legacy_document_exports
+        with (patch('Quotation_KEKOREA.orchestration.ui.ai_intake_page.extract_mail_candidates',
+                    return_value=self.ready_result()),
+              patch.object(legacy_document_exports, 'render_master_trade_draft',
+                           side_effect=ValueError('missing quantity'))):
+            app = self.mailbox()
+            self.start_analysis(app)
+            next(x for x in app.text_input if x.label == '수량').set_value('').run()
+            row = app.session_state['ai_intake_candidates'][1]['PI']['items'][0]
+            self.assertEqual(row['quantity'], '')
+            self.assertNotIn('paid_quantity', row)
+            app.button(key='master_legacy_export').click().run()
+            self.assertFalse(app.exception, [x.message for x in app.exception])
+            pdf = app.session_state['master_legacy_files'][1]['PI']['pdf']['content']
+            import pymupdf
+            with pymupdf.open(stream=pdf, filetype='pdf') as file:
+                text = '\n'.join(page.get_text() for page in file)
+            self.assertIn('TOTAL: NOT PROVIDED', text)
+            self.assertNotIn('0.00', text)
+
     def test_failure_is_not_retried_on_rerun(self):
         with patch('Quotation_KEKOREA.orchestration.ui.ai_intake_page.extract_mail_candidates',side_effect=RuntimeError('synthetic failure')) as extract:
             app=self.mailbox()
