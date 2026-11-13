@@ -9,6 +9,7 @@ from unittest.mock import patch
 from Quotation_KEKOREA.contracts.contextual_rag import (
     approve_source_excerpts, approved_neighbor_context, build_comparison_candidates,
     compare_approved_clauses, index_private_original, private_index,
+    restore_private_extraction_bundle,
 )
 from Quotation_KEKOREA.contracts.library import (
     read_manifest, register_sample, search_library_topics,
@@ -62,6 +63,45 @@ class ContextualRagTests(unittest.TestCase):
         before = deepcopy(self.repo.rows[self.source['id']])
         with self.assertRaisesRegex(ValueError, 'SHA-256'):
             index_private_original(self.repo, self.source['id'])
+        self.assertEqual(self.repo.rows[self.source['id']], before)
+
+    def test_restore_previous_extraction_is_private_verified_and_idempotent(self):
+        text = (
+            '[document 1]\nArticle 1 Scope. The parties shall define the '
+            'scope of their obligations in writing.\n\n'
+            '[document 2]\nArticle 2 Commission. Payment requires '
+            'documented conditions without inheriting historic rates.'
+        )
+        payload = [{
+            'sha': self.source['content_hash'], 'text': text,
+            'pages': 2, 'extracted_pages': 2, 'missing_pages': [],
+        }]
+        first = restore_private_extraction_bundle(self.repo, payload)
+        self.assertEqual(first['restored'], 1)
+        again = restore_private_extraction_bundle(self.repo, payload)
+        self.assertEqual(again['unchanged'], 1)
+        row = self.repo.get_library_record(self.source['id'])
+        self.assertEqual(row['extracted_text'], text)
+        self.assertFalse(read_manifest(row).approved)
+        indexed = index_private_original(self.repo, self.source['id'])
+        self.assertEqual(indexed['status'], 'indexed')
+        self.assertEqual(indexed['extraction_status'], 'restored_requires_review')
+        references = search_library_topics(
+            self.repo, {'contract_type': 'trade_commission'},
+            [{'key': 'payment', 'query': 'commission payment'}], env={},
+        )
+        self.assertEqual(references['references'], [])
+
+    def test_restore_bad_sha_does_not_modify_original(self):
+        payload = [{
+            'sha': self.source['content_hash'], 'text':
+                '[document 1]\nArticle 1 Scope. Parties agree conditions.',
+            'pages': 1, 'extracted_pages': 1, 'missing_pages': [],
+        }]
+        self.repo.files[self.source['storage_path']] = b'tampered source'
+        before = deepcopy(self.repo.rows[self.source['id']])
+        with self.assertRaisesRegex(ValueError, 'SHA-256'):
+            restore_private_extraction_bundle(self.repo, payload)
         self.assertEqual(self.repo.rows[self.source['id']], before)
 
     def test_sha_attested_previous_pdf_text_can_be_reused_without_ocr_reprocessing(self):
