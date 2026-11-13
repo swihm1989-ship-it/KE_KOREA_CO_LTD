@@ -63,18 +63,18 @@ class MailDocumentUiTests(unittest.TestCase):
             self.assertEqual(extract.call_count,1)
             app.button(key='ai_intake_build_candidates').click().run()
             self.assertEqual(len(app.session_state['ai_intake_candidates'][1]['PI']['items']),2)
-            next(x for x in app.text_input if x.label=='Buyer · 구매자 법인 주소').set_value('NEW SYNTHETIC ADDRESS')
-            next(b for b in app.button if b.label=='거래조건 저장 및 문서정보 다시 만들기').click().run()
+            next(x for x in app.text_input if x.label=='Buyer · 구매자 법인 주소').set_value(
+                'NEW SYNTHETIC ADDRESS').run()
             self.assertEqual(app.session_state['ai_intake_candidates'][1]['PI']['buyer']['address'],'NEW SYNTHETIC ADDRESS')
             self.assertEqual(len(app.session_state['ai_intake_candidates'][1]['PI']['items']),2)
 
-    def test_required_quantity_form_updates_actual_export_quantity_and_keeps_second_row(self):
+    def test_single_editor_quantity_updates_export_and_keeps_second_row(self):
         from Quotation_KEKOREA.agent.trade_documents import validate_and_calculate
         with patch('Quotation_KEKOREA.orchestration.ui.ai_intake_page.extract_mail_candidates',return_value=self.ready_result()):
             app=self.mailbox()
             self.start_analysis(app)
-            app.text_input(key='master_pdf_quantity').set_value('3000')
-            next(b for b in app.button if b.label=='필수정보 적용 · PDF 생성 준비').click().run()
+            next(x for x in app.text_input if x.label=='수량').set_value('3000').run()
+            self.assertFalse(any(b.label == '필수정보 적용 · PDF 생성 준비' for b in app.button))
             data=app.session_state['ai_intake_candidates'][1]['PI']
             self.assertEqual(validate_and_calculate(data)['items'][0]['quantity'],'3000')
             self.assertEqual(len(data['items']),2)
