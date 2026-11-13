@@ -58,7 +58,7 @@ def prepare_mail_request(subject, body):
     return MailRequest(instruction,tuple(k for k in DOC_TYPES if k in kinds),fingerprint(instruction))
 
 
-def queue_handoff(state, message, *, extract=False, attachments=(), requested=None):
+def queue_handoff(state, message, *, extract=False, attachments=(), requested=None, navigate=True):
     # Old in-memory render and consent state must not cross transactions.
     for key in list(state):
         if ((key.startswith('ai_intake_') and key not in {'ai_intake_language','ai_intake_family'})
@@ -75,13 +75,27 @@ def queue_handoff(state, message, *, extract=False, attachments=(), requested=No
         extract=False
         request=None
     state['ai_intake_consent']=bool(extract)
-    state['master_page']='AI 업무 요청'
+    if navigate:
+        state['master_page']='AI 업무 요청'
     if request:
         state['ai_intake_instruction']=request.instruction
         state['ai_intake_mail_source']={'fingerprint':request.fingerprint,'kinds':list(request.kinds)}
         state['ai_intake_mail_attachments']=deepcopy(list(attachments))
         if extract:
             state['ai_intake_mail_pending']={'token':str(uuid4()),'fingerprint':request.fingerprint}
+
+
+
+def consume_mail_navigation(state):
+    """Apply fragment-initiated page navigation BEFORE the sidebar radio exists.
+
+    A Streamlit fragment reruns separately from the full application. Never
+    mutate the already-instantiated sidebar radio directly from that fragment.
+    """
+    if not state.pop('master_mail_navigation_pending', False):
+        return False
+    state['master_page'] = 'AI 업무 요청'
+    return True
 
 
 def consume_pending(state, instruction):
