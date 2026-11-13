@@ -68,9 +68,7 @@ def _ensure_smtp_adapter_current():
         return False
     if (getattr(module, "SMTP_DIAGNOSTIC_REVISION", None) == expected
             and getattr(module, "POP_DIAGNOSTIC_REVISION", None) == pop_expected
-            and callable(getattr(module, "probe_pop_diagnostics", None))
-            and getattr(module, "probe_smtp", None) is probe_smtp
-            and getattr(module, "fetch_messages", None) is fetch_messages):
+            and callable(getattr(module, "probe_pop_diagnostics", None))):
         return False
     try:
         importlib.invalidate_caches()
