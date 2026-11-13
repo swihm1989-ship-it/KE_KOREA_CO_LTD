@@ -44,8 +44,19 @@ class MailboxUiTests(unittest.TestCase):
               patch.object(mailbox_page.st, "session_state", {})):
             self.assertTrue(mailbox_page._ensure_smtp_adapter_current())
             self.assertEqual(whois_mail.POP_DIAGNOSTIC_REVISION,
-                             "pop-health-20261113-v3")
+                             "pop-health-20261113-v4")
             self.assertTrue(callable(whois_mail.probe_pop_diagnostics))
+            self.assertFalse(mailbox_page._ensure_smtp_adapter_current())
+
+    def test_stale_pop_fetch_revision_triggers_reload_and_rebind(self):
+        from Quotation_KEKOREA.orchestration.ui import mailbox_page
+        from Quotation_KEKOREA.orchestration.adapters import whois_mail
+        with (patch.object(whois_mail, "POP_FETCH_REVISION", "legacy-before-older-mail-recovery"),
+              patch.object(mailbox_page.st, "session_state", {})):
+            self.assertTrue(mailbox_page._ensure_smtp_adapter_current())
+            self.assertEqual(whois_mail.POP_FETCH_REVISION,
+                             "pop-fetch-older-fallback-20261113-v1")
+            self.assertIs(mailbox_page.fetch_messages, whois_mail.fetch_messages)
             self.assertFalse(mailbox_page._ensure_smtp_adapter_current())
 
     def test_missing_pop_diagnostic_symbol_triggers_reload(self):
