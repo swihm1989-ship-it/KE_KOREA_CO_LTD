@@ -49,12 +49,29 @@ def _settings():
 
 
 def _use_for_ai(message, extract=False, attachments=(), requested=None):
-    from Quotation_KEKOREA.orchestration.workflows.mail_intake import queue_handoff
-    # This runs from inside the 60-second inbox fragment. Defer sidebar
-    # navigation until a FULL app rerun before the radio widget is created.
-    queue_handoff(st.session_state, message, extract=extract,
-                  attachments=attachments, requested=requested, navigate=False)
+    """Queue a mailbox handoff without crashing on a cached legacy workflow."""
+    from inspect import signature
+    from Quotation_KEKOREA.orchestration.workflows import mail_intake
+    # A hot deployment can keep an older mail_intake module in sys.modules.
+    # Check the actual call signature only when the user clicks either button.
+    try:
+        handoff = getattr(mail_intake, "queue_handoff", None)
+        if not callable(handoff) or "navigate" not in signature(handoff).parameters:
+            importlib.invalidate_caches()
+            mail_intake = importlib.reload(mail_intake)
+            handoff = getattr(mail_intake, "queue_handoff", None)
+        if not callable(handoff) or "navigate" not in signature(handoff).parameters:
+            st.error("메일 연결 코드가 이전 버전입니다. Manage app에서 Reboot 후 다시 시도하세요.")
+            return False
+        # Defer navigation until a full rerun, BEFORE the sidebar widget exists.
+        handoff(st.session_state, message, extract=extract,
+                attachments=attachments, requested=requested, navigate=False)
+    except (ImportError, OSError, SyntaxError, TypeError, ValueError):
+        # Never echo mail content or exception text into diagnostics.
+        st.error("메일 AI 업무 연결 모듈을 새로 불러오지 못했습니다. 앱을 재시작한 뒤 다시 시도하세요.")
+        return False
     st.session_state['master_mail_navigation_pending'] = True
+    return True
 
 
 def _ensure_smtp_adapter_current():
@@ -432,8 +449,8 @@ def render_inbox(messages, account):
             if st.button("AI로 거래조건 추출·문서 준비", key='whois_ai_extract_'+selected.uid,
                          disabled=not bool(chosen_kinds) or not bool(selected.body and selected.body.strip()),
                          type='primary', width='stretch'):
-                _use_for_ai(selected, extract=True, attachments=chosen, requested=chosen_kinds)
-                st.rerun(scope="app")
+                if _use_for_ai(selected, extract=True, attachments=chosen, requested=chosen_kinds):
+                    st.rerun(scope="app")
             if st.button(
                 "이 메일로 AI 업무 요청 작성",
                 key="whois_ai_" + selected.uid,
@@ -441,6 +458,6 @@ def render_inbox(messages, account):
                 type="primary",
                 use_container_width=True,
             ):
-                _use_for_ai(selected)
-                st.rerun(scope="app")
+                if _use_for_ai(selected):
+                    st.rerun(scope="app")
             st.caption("위 ‘요청 작성’ 버튼은 입력창으로만 이동합니다. 메일 열람·동기화만으로는 AI를 실행하지 않습니다.")
