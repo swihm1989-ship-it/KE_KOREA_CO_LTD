@@ -63,6 +63,45 @@ class MailIntakePolicyTests(unittest.TestCase):
         queue_handoff(state,mail,extract=True)
         self.assertFalse(consume_pending(state,text+'CHANGED'))
 
+    def test_fragment_handoff_defers_sidebar_navigation_until_full_app_rerun(self):
+        from Quotation_KEKOREA.orchestration.workflows.mail_intake import (
+            queue_handoff, consume_mail_navigation, consume_pending,
+        )
+        from Quotation_KEKOREA.orchestration.adapters.whois_mail import parse_message
+        case = cases()[0]
+        mail = parse_message(case['id'], case['raw'])
+        state = {'master_page': '메일함', 'master_pdf_quantity': 'old',
+                 'ai_intake_consent': False}
+        queue_handoff(state, mail, extract=True, requested=['PI'], navigate=False)
+        # The sidebar radio already exists during a fragment-only rerun.
+        self.assertEqual(state['master_page'], '메일함')
+        self.assertEqual(state['ai_intake_mail_source']['kinds'], ['PI'])
+        self.assertTrue(state['ai_intake_consent'])
+        self.assertNotIn('master_pdf_quantity', state)
+        state['master_mail_navigation_pending'] = True
+        self.assertTrue(consume_mail_navigation(state))
+        self.assertEqual(state['master_page'], 'AI 업무 요청')
+        self.assertFalse(consume_mail_navigation(state))
+        self.assertTrue(consume_pending(state, state['ai_intake_instruction']))
+        self.assertFalse(consume_pending(state, state['ai_intake_instruction']))
+
+    def test_draft_handoff_defers_navigation_without_external_ai_consent(self):
+        from Quotation_KEKOREA.orchestration.workflows.mail_intake import (
+            queue_handoff, consume_mail_navigation,
+        )
+        from Quotation_KEKOREA.orchestration.adapters.whois_mail import MailMessage
+        mail = MailMessage('synthetic-mou-uid', subject='BIPV MoU 작성',
+                           body='BIPV 설치 관련 MoU 작성 수정안 부탁드립니다')
+        state = {'master_page': '메일함'}
+        queue_handoff(state, mail, extract=False, navigate=False)
+        self.assertEqual(state['master_page'], '메일함')
+        self.assertEqual(state['ai_intake_mail_source']['kinds'], ['CONTRACT'])
+        self.assertFalse(state['ai_intake_consent'])
+        self.assertNotIn('ai_intake_mail_pending', state)
+        state['master_mail_navigation_pending'] = True
+        self.assertTrue(consume_mail_navigation(state))
+        self.assertEqual(state['master_page'], 'AI 업무 요청')
+
     def test_ci_without_original_pi_remains_blocked_by_existing_validator(self):
         from Quotation_KEKOREA.orchestration.workflows.mail_intake import extract_mail_candidates
         from Quotation_KEKOREA.agent.trade_documents import validate_and_calculate
