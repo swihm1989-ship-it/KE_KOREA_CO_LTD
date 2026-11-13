@@ -144,6 +144,7 @@ def _remember_candidate_bundle(digest: str, candidate_map: dict) -> None:
                      for kind, data in candidate_map.items()}
     st.session_state["ai_intake_candidates"] = (digest, candidate_map)
     st.session_state.pop("ai_intake_drafts", None)
+    st.session_state.pop("master_contract_final_files", None)
 
 
 def _handle_missing_answer(digest: str, key: str, widget_key: str) -> None:
@@ -1052,6 +1053,34 @@ def render_ai_intake(principal: str):
             raw = st.text_area("문서별 JSON 조건 (고급 편집)",
                 value=json.dumps(candidates[1], ensure_ascii=False, indent=2),
                 height=310, key="ai_intake_editable_" + editor_revision)
+            try:
+                pending_json = json.loads(raw)
+                json_changed = pending_json != candidates[1]
+            except (ValueError, TypeError):
+                pending_json = None
+                json_changed = True
+                st.warning("고급 JSON 문법을 확인해 주세요. 저장 전에는 FINAL 발행에 사용되지 않습니다.")
+            if json_changed and st.button("고급 JSON 변경값 후보에 반영",
+                                          key="ai_intake_commit_json"):
+                try:
+                    if not isinstance(pending_json, dict):
+                        raise ValueError("문서별 JSON 객체여야 합니다.")
+                    from Quotation_KEKOREA.contracts.models import validate_snapshot
+                    if "CONTRACT" in pending_json:
+                        pending_json["CONTRACT"] = validate_snapshot(
+                            pending_json["CONTRACT"])
+                        # Arbitrary JSON editing cannot carry over old approvals.
+                        for party in pending_json["CONTRACT"]["parties"]:
+                            party["status"] = "suggested"
+                        for term in pending_json["CONTRACT"]["terms"]:
+                            term["status"] = "suggested" if str(term.get("value") or "").strip() else "missing"
+                        # A changed contract requires fresh AI clauses or
+                        # explicit clause verification before the final approval.
+                    _remember_candidate_bundle(digest, pending_json)
+                    st.success("고급 JSON 변경값을 후보에 반영했습니다. 계약조건을 다시 확인하세요.")
+                    st.rerun()
+                except (TypeError, ValueError, KeyError):
+                    st.error("문서 후보 형식이 올바르지 않습니다. 변경값을 검토해 주세요.")
         edited_key = _fingerprint(digest + raw)
         if st.button("기존 문서 엔진으로 검증·DRAFT 생성", key="ai_intake_prepare"):
             st.session_state.pop("ai_intake_drafts", None)
