@@ -1,5 +1,6 @@
 """Parse explicit commercial notation without supplying product-based defaults."""
 from copy import deepcopy
+from collections.abc import Mapping
 import re
 
 from Quotation_KEKOREA.agent.trade_documents import normalize_quantity_unit
@@ -27,6 +28,22 @@ def normalize_trade_values(source):
     Price-source/confirmation metadata is never synthesized.
     """
     result = deepcopy(dict(source))
+    # AI candidates and older session states may encode a party as a name
+    # string instead of the object expected by the legacy trade validator.
+    # Preserve only an explicitly supplied name; never infer an address or
+    # approve an unknown counterparty. Apply to ALL trade document kinds.
+    for role in ('buyer', 'seller'):
+        party = result.get(role)
+        if isinstance(party, Mapping):
+            party = dict(party)
+        elif isinstance(party, str):
+            party = {'legal_name': party.strip(), 'address': ''}
+        else:
+            party = {'legal_name': '', 'address': ''}
+        for field in ('legal_name', 'address', 'contact', 'phone', 'email'):
+            if field in party and not isinstance(party[field], str):
+                party[field] = ''
+        result[role] = party
     currency = _text(result.get('currency')).upper()
     currency = _CURRENCIES.get(currency, currency)
     for item in result.get('items') or []:
