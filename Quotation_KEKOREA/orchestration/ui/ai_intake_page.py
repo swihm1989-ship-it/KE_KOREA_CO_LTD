@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from copy import deepcopy
 from hashlib import sha256
+from inspect import signature
+import importlib
 import json
 import os
 
@@ -25,7 +27,66 @@ from Quotation_KEKOREA.orchestration.ui.saved_contracts import _server_value
 from Quotation_KEKOREA.orchestration.workflows.document_assets import (
     document_export_env, seal_health,
 )
-from Quotation_KEKOREA.orchestration.workflows.intake_followups import missing_fields, apply_answer
+# Resolve workflow functions at call time: Streamlit may retain a pre-deploy
+# module in sys.modules while reloading this page's source code.
+FOLLOWUP_MODULE = "Quotation_KEKOREA.orchestration.workflows.intake_followups"
+PDF_EXPORT_MODULE = "Quotation_KEKOREA.orchestration.workflows.legacy_document_exports"
+PDF_EXPORT_REVISION = "review-pdf-safe-loader-20261113-v1"
+
+
+def _current_intake_followups():
+    """Reload a stale editor module without losing the user's session values."""
+    try:
+        module = importlib.import_module(FOLLOWUP_MODULE)
+        func = getattr(module, "apply_answer", None)
+        try:
+            compatible = callable(func) and "allow_blank" in signature(func).parameters
+        except (TypeError, ValueError):
+            compatible = False
+        if not compatible:
+            importlib.invalidate_caches()
+            module = importlib.reload(module)
+            func = getattr(module, "apply_answer", None)
+            compatible = callable(func) and "allow_blank" in signature(func).parameters
+        if not compatible or not callable(getattr(module, "missing_fields", None)):
+            raise RuntimeError("stale editor")
+    except (ImportError, OSError, AttributeError, TypeError, ValueError, RuntimeError):
+        raise RuntimeError(
+            "거래정보 수정 모듈 버전이 일치하지 않습니다. 앱을 재시작한 후 다시 시도하세요."
+        ) from None
+    return module
+
+
+def apply_answer(*args, **kwargs):
+    return _current_intake_followups().apply_answer(*args, **kwargs)
+
+
+def missing_fields(*args, **kwargs):
+    return _current_intake_followups().missing_fields(*args, **kwargs)
+
+
+def _current_pdf_export_renderers():
+    """Resolve a fresh PDF renderer only for an explicit PDF button click."""
+    try:
+        module = importlib.import_module(PDF_EXPORT_MODULE)
+        if (
+            getattr(module, "REVIEW_EXPORT_REVISION", None) != PDF_EXPORT_REVISION
+            or not callable(getattr(module, "render_incomplete_trade_pdf", None))
+            or not callable(getattr(module, "render_master_trade_draft", None))
+        ):
+            importlib.invalidate_caches()
+            module = importlib.reload(module)
+        if (
+            getattr(module, "REVIEW_EXPORT_REVISION", None) != PDF_EXPORT_REVISION
+            or not callable(getattr(module, "render_incomplete_trade_pdf", None))
+            or not callable(getattr(module, "render_master_trade_draft", None))
+        ):
+            raise RuntimeError("stale PDF module")
+    except (ImportError, OSError, AttributeError, TypeError, ValueError, RuntimeError):
+        raise RuntimeError(
+            "PDF 모듈 버전이 일치하지 않습니다. 앱을 재시작한 후 다시 시도하세요."
+        ) from None
+    return module.render_master_trade_draft, module.render_incomplete_trade_pdf
 
 
 def _fingerprint(text: str) -> str:
@@ -176,7 +237,7 @@ def _apply_shared_input(digest: str, field: str, widget: str) -> None:
             raw = {"$": "USD", "US$": "USD", "USD$": "USD", "₩": "KRW"}.get(raw, raw)
     try:
         updated = apply_answer(saved[1], field, raw, allow_blank=True)
-    except (ValueError, TypeError) as exc:
+    except (ValueError, TypeError, RuntimeError) as exc:
         st.session_state["ai_intake_followup_error"] = str(exc)
         return
     _remember_candidate_bundle(digest, updated)
@@ -718,15 +779,16 @@ def render_ai_intake(principal: str):
                        "미확정 항목이 있거나 발행 검증이 통과하지 않으면, 같은 입력값으로 "
                        "직인 없는 '검토용 PDF' 파일을 생성합니다.")
             if st.button("현재 거래정보로 PDF 생성", key="master_legacy_export", type="primary"):
-                st.session_state.pop("master_legacy_files", None)
                 try:
-                    from Quotation_KEKOREA.orchestration.workflows.legacy_document_exports import (
-                        render_master_trade_draft, render_incomplete_trade_pdf,
+                    render_master_trade_draft, render_incomplete_trade_pdf = (
+                        _current_pdf_export_renderers()
                     )
+                    # Keep existing draft data if a module is unavailable.
                     updated = json.loads(raw)
                     if not isinstance(updated, dict):
                         raise ValueError("문서 데이터는 JSON 객체여야 합니다.")
                     env = document_export_env(st.secrets, os.environ)
+                    st.session_state.pop("master_legacy_files", None)
                     results = {}
                     errors = {}
                     for kind in trade_kinds:
@@ -742,7 +804,7 @@ def render_ai_intake(principal: str):
                             except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as fallback:
                                 errors[kind] = ("PDF 생성 오류: " + str(fallback))[:400]
                     st.session_state["master_legacy_files"] = (edited_key, results, errors)
-                except (ValueError, TypeError, KeyError) as exc:
+                except (ValueError, TypeError, KeyError, RuntimeError, ImportError, OSError) as exc:
                     st.error("PDF 생성 실패: " + str(exc)[:400])
             export_bundle = st.session_state.get("master_legacy_files")
             if export_bundle and export_bundle[0] != edited_key:
