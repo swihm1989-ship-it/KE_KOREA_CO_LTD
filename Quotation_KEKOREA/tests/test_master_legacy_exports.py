@@ -7,6 +7,42 @@ from Quotation_KEKOREA.orchestration.workflows.legacy_document_exports import re
 
 
 class LegacyExportsTests(unittest.TestCase):
+    def test_incomplete_pi_gets_pdf_without_fabricating_amount_or_seal(self):
+        from Quotation_KEKOREA.orchestration.workflows.legacy_document_exports import render_incomplete_trade_pdf
+        from hashlib import sha256
+        import pymupdf
+        original = {"document_type": "PI", "product_family": "solar_cell",
+                    "document_number": "", "buyer": {"legal_name": "Smart Solar Systems Co. Ltd",
+                    "address": ""}, "seller": {"legal_name": "KE KOREA CO. LTD"},
+                    "currency": "USD", "items": [{"product_name": "M10 Solar Cells",
+                    "quantity": "", "unit": "PCS", "unit_price": ""}],
+                    "missing_fields": ["payment year"]}
+        snapshot = __import__("copy").deepcopy(original)
+        files = render_incomplete_trade_pdf("PI", original)
+        self.assertEqual(original, snapshot)
+        self.assertEqual(set(files), {"pdf"})
+        self.assertTrue(files["pdf"]["content"].startswith(b"%PDF"))
+        self.assertEqual(files["pdf"]["sha256"], sha256(files["pdf"]["content"]).hexdigest())
+        self.assertFalse(files["pdf"]["final"])
+        self.assertFalse(files["pdf"]["sendable"])
+        self.assertTrue(files["pdf"]["review_only"])
+        self.assertNotIn(b"PRIVATE", files["pdf"]["content"])
+        with pymupdf.open(stream=files["pdf"]["content"], filetype="pdf") as document:
+            text = "\n".join(page.get_text() for page in document)
+        self.assertIn("Smart Solar Systems Co. Ltd", text)
+        self.assertIn("M10 Solar Cells", text)
+        self.assertIn("NOT FOR ISSUE", text)
+        self.assertIn("NOT PROVIDED", text)
+        self.assertIn("TOTAL: NOT PROVIDED", text)
+        self.assertNotIn("0.00", text)
+
+    def test_incomplete_pdf_rejects_wrong_document_type_without_seal(self):
+        from Quotation_KEKOREA.orchestration.workflows.legacy_document_exports import render_incomplete_trade_pdf
+        with self.assertRaisesRegex(ValueError, "mismatch"):
+            render_incomplete_trade_pdf("PI", {"document_type": "PO"})
+        with self.assertRaisesRegex(ValueError, "Unsupported"):
+            render_incomplete_trade_pdf("CONTRACT", {})
+
     def test_rejects_unknown_document_kind(self):
         with self.assertRaisesRegex(ValueError, "Only PI"):
             render_master_trade_draft("CONTRACT", {}, {})
