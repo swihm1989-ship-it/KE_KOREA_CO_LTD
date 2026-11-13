@@ -231,9 +231,18 @@ def parse_message(uid: str, raw: bytes) -> MailMessage:
 
 @traced('mail.collect')
 def fetch_messages(endpoint: Endpoint, limit: int=30) -> tuple[MailMessage,...]:
+    """Read recent messages, retry failed RETR once with a fresh UIDL snapshot.
+
+    A failed RETR is NOT an empty email: never render an anonymous placeholder
+    or replace a previously successful cached message with an error record.
+    Reconnecting is bounded to one additional session per batch. No DELE.
+    """
     if not 1 <= limit <= 30:
         raise ValueError('한 번에 1~30건을 가져올 수 있습니다.')
     client = _pop(endpoint)
+    result = []
+    failed_uids = []
+    total = 0
     try:
         try:
             entries = _uidl(client)[:limit]
@@ -247,8 +256,6 @@ def fetch_messages(endpoint: Endpoint, limit: int=30) -> tuple[MailMessage,...]:
                     sizes[int(parts[0])] = int(parts[1])
         except Exception:
             raise MailConnectionError('메일 크기 목록(LIST) 조회에 실패했습니다.') from None
-        result = []
-        total = 0
         for number, uid in entries:
             size = sizes.get(number)
             if size is None or size < 0 or size > MAX_MESSAGE_BYTES or total + size > MAX_BATCH_BYTES:
@@ -258,16 +265,62 @@ def fetch_messages(endpoint: Endpoint, limit: int=30) -> tuple[MailMessage,...]:
                 lines = client.retr(number)[1]
                 raw = b'\r\n'.join(lines)
             except Exception:
-                result.append(MailMessage(uid, notice='이 메일의 POP3 본문(RETR) 조회에 실패했습니다.'))
+                failed_uids.append(uid)
                 continue
             total += len(raw)
             if total > MAX_BATCH_BYTES:
-                result.append(MailMessage(uid, notice='이번 조회의 용량 제한을 초과했습니다.'))
                 break
             try:
                 result.append(parse_message(uid, raw))
             except Exception:
-                result.append(MailMessage(uid, notice='이 메일의 MIME 형식 해석에 실패했습니다.'))
-        return tuple(result)
+                # A MIME parsing error is not an empty message either.
+                failed_uids.append(uid)
     finally:
         _finish(client)
+
+    if failed_uids:
+        # Some POP3 servers drop long-lived RETR sessions. Re-authenticate only
+        # once and resolve message numbers by UIDL again, since POP3 sequence
+        # numbers can change between sessions. Do not retry deleted/missing UIDs.
+        retry_client = None
+        try:
+            retry_client = _pop(endpoint)
+            current = {uid: number for number, uid in _uidl(retry_client)}
+            retry_sizes = {}
+            for line in retry_client.list()[1]:
+                parts = line.split()
+                if len(parts) >= 2:
+                    retry_sizes[int(parts[0])] = int(parts[1])
+            for uid in failed_uids:
+                number = current.get(uid)
+                size = retry_sizes.get(number)
+                if number is None or size is None or size < 0 or size > MAX_MESSAGE_BYTES:
+                    continue
+                if total + size > MAX_BATCH_BYTES:
+                    continue
+                try:
+                    raw = b'\r\n'.join(retry_client.retr(number)[1])
+                    total += len(raw)
+                    if total > MAX_BATCH_BYTES:
+                        break
+                    result.append(parse_message(uid, raw))
+                except Exception:
+                    continue
+        except (MailConnectionError, OSError, ValueError, poplib.error_proto):
+            pass
+        finally:
+            if retry_client is not None:
+                _finish(retry_client)
+
+    if failed_uids and not any(message.body or message.subject or message.sender
+                                for message in result):
+        # Preserve previous in-session successful cache through the UI caller.
+        # Never expose the POP3 server exception, which can contain account data.
+        raise MailConnectionError(
+            'POP3 본문(RETR) 조회 실패: 메일 서버가 본문 요청을 처리하지 못했습니다. '
+            '기존 정상 메일은 유지합니다. 잠시 후 다시 동기화하거나 후이즈 POP3 서버 상태를 확인하세요.'
+        )
+    # Newer UIDL first; never include failed anonymous placeholders. An
+    # earlier cache entry with the same UID remains authoritative in the UI.
+    order = {uid: pos for pos, (_, uid) in enumerate(entries)}
+    return tuple(sorted(result, key=lambda message: order.get(message.uid, len(order))))

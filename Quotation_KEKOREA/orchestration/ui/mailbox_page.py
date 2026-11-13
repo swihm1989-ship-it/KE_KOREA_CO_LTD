@@ -158,9 +158,15 @@ def render_mailbox(principal):
 def _merge_messages(previous, incoming, max_count=30):
     """Stable server UIDL based deduplication; keep previous entries when a poll fails."""
     merged = {}
+    # A failed POP3 RETR used to create an anonymous placeholder. Never let
+    # those records displace actual content, including older cached messages.
     for item in incoming:
+        if item.notice and 'RETR' in item.notice and not (item.sender or item.subject or item.body):
+            continue
         merged[item.uid] = item
     for item in previous:
+        if item.notice and 'RETR' in item.notice and not (item.sender or item.subject or item.body):
+            continue
         merged.setdefault(item.uid, item)
     return tuple(list(merged.values())[:max_count])
 
@@ -198,6 +204,13 @@ def _live_mailbox(pop, account):
             st.session_state["whois_refresh_failed"] = True
             st.warning("자동 동기화 실패: " + str(exc))
     bundle = st.session_state.get("whois_mail_bundle")
+    if bundle and bundle[0] == account:
+        # Clean placeholders left in an already-open session by older deploys,
+        # even when every new RETR still fails and the poll raises an error.
+        cleaned = _merge_messages((), bundle[1])
+        if cleaned != bundle[1]:
+            bundle = (bundle[0], cleaned, bundle[2])
+            st.session_state["whois_mail_bundle"] = bundle
     st.caption("자동 갱신 주기: 60초 · 한 번에 최신 5건 확인 · 세션 내 최대 30건 보관")
     if not pop:
         st.info("수신 서버 설정이 필요합니다.")

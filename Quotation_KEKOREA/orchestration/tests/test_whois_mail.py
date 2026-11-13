@@ -63,11 +63,51 @@ class WhoisMailTests(unittest.TestCase):
         client.retr.side_effect=retrieve
         with patch.object(mail.poplib,'POP3_SSL',return_value=client):
             messages=mail.fetch_messages(mail.mail_config(CONFIG,'owner@example.com').pop)
-        self.assertEqual(len(messages),2)
-        self.assertIn('RETR',messages[0].notice)
-        self.assertIn('100 PCS',messages[1].body)
+        self.assertEqual(len(messages),1)
+        self.assertEqual(messages[0].uid, 'old')
+        self.assertIn('100 PCS',messages[0].body)
         self.assertNotIn('private-test-password',repr(messages))
         client.dele.assert_not_called()
+
+    def test_failed_retr_retries_using_new_uidl_numbers(self):
+        endpoint=mail.mail_config(CONFIG,'owner@example.com').pop
+        initial=Mock()
+        retry=Mock()
+        raw=message()
+        initial.uidl.return_value=(b'+OK',[b'1 uid-a',b'2 uid-b'],0)
+        initial.list.return_value=(b'+OK',[b'1 300',b'2 600'],0)
+        initial.retr.side_effect=mail.poplib.error_proto('-ERR synthetic failure')
+        # Reconnecting may change message numbers. Never use the stale 2.
+        retry.uidl.return_value=(b'+OK',[b'7 uid-b',b'8 uid-a'],0)
+        retry.list.return_value=(b'+OK',[b'7 600',b'8 300'],0)
+        retry.retr.return_value=(b'+OK',raw.splitlines(),len(raw))
+        with patch.object(mail.poplib,'POP3_SSL',side_effect=[initial,retry]):
+            messages=mail.fetch_messages(endpoint,limit=2)
+        self.assertEqual([m.uid for m in messages],['uid-b','uid-a'])
+        self.assertTrue(all('100 PCS' in m.body for m in messages))
+        self.assertEqual([call.args[0] for call in retry.retr.call_args_list],[7,8])
+        self.assertEqual(initial.quit.call_count,1)
+        self.assertEqual(retry.quit.call_count,1)
+        initial.dele.assert_not_called()
+        retry.dele.assert_not_called()
+
+    def test_all_retr_failures_are_not_anonymous_messages(self):
+        endpoint=mail.mail_config(CONFIG,'owner@example.com').pop
+        initial=Mock()
+        retry=Mock()
+        for client in (initial,retry):
+            client.uidl.return_value=(b'+OK',[b'1 uid-a'],0)
+            client.list.return_value=(b'+OK',[b'1 300'],0)
+            client.retr.side_effect=RuntimeError('private-test-password')
+        with patch.object(mail.poplib,'POP3_SSL',side_effect=[initial,retry]):
+            with self.assertRaises(mail.MailConnectionError) as error:
+                mail.fetch_messages(endpoint,limit=1)
+        self.assertIn('RETR',str(error.exception))
+        self.assertNotIn('private-test-password',str(error.exception))
+        self.assertEqual(initial.retr.call_count,1)
+        self.assertEqual(retry.retr.call_count,1)
+        initial.dele.assert_not_called()
+        retry.dele.assert_not_called()
 
     def test_smtp_authentication_error_is_classified_without_secret(self):
         client=Mock()
