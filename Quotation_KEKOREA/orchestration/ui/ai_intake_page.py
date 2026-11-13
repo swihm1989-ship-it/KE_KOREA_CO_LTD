@@ -324,7 +324,7 @@ def render_ai_intake(principal: str):
             index=1, horizontal=True, key="ai_intake_mail_processing_mode",
         )
         if mail_processing_mode == "AI 자동 분석":
-            st.info("가져온 메일을 수정하지 않고 AI로 분석합니다. 아래에서 문서 종류를 확인한 뒤 동의하고 'AI 자동 분석 실행'을 누르세요.")
+            st.info("현재 입력된 요청을 바로 AI로 분석합니다. 내용을 수정하려면 '직접 수정 후 분석'을 선택하세요. 문서 종류 확인과 명시적 동의·실행이 필요합니다.")
         else:
             st.info("메일 내용을 직접 수정하거나 거래조건을 추가한 후 AI 분석을 실행할 수 있습니다.")
     instruction = st.text_area("업무 요청 및 거래조건", height=185,
