@@ -79,8 +79,17 @@ def queue_handoff(state, message, *, extract=False, attachments=(), requested=No
         state['master_page']='AI 업무 요청'
     if request:
         state['ai_intake_instruction']=request.instruction
-        state['ai_intake_mail_source']={'fingerprint':request.fingerprint,'kinds':list(request.kinds)}
+        state['ai_intake_mail_source']={
+            'fingerprint':request.fingerprint,'kinds':list(request.kinds),
+            # Source metadata is local session evidence, NOT a verified legal
+            # identity, and never grants authorization to issue documents.
+            'sender':str(getattr(message,'sender','') or '')[:500],
+            'subject':str(getattr(message,'subject','') or '')[:500],
+        }
         state['ai_intake_mail_attachments']=deepcopy(list(attachments))
+        from Quotation_KEKOREA.agent.pricing import is_eclado_supplier
+        if is_eclado_supplier(message.subject):
+            state['ai_intake_family']='cosmetics'
         if extract:
             state['ai_intake_mail_pending']={'token':str(uuid4()),'fingerprint':request.fingerprint}
 
