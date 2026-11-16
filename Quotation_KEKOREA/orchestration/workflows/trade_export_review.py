@@ -272,7 +272,10 @@ def _reconciled_payment_timing_note(note, candidate):
     # Require exactly one explicit deadline interpretation; no inference from
     # vague terms such as "T/T in advance" alone or from two conflicting dates.
     before_date = current[max(0, dates[0].start() - 25):dates[0].start()]
-    return bool(re.search(r'\b(?:before|prior\s+to|on)\s+(?:the\s+)?kind, source, *, final=False, allow_optional_na=False, allow_incomplete=False):
+    return bool(re.search(r'\b(?:before|prior\s+to|on)\s+(?:the\s+)?$', before_date, re.I))
+
+
+def review_trade_document(kind, source, *, final=False, allow_optional_na=False, allow_incomplete=False):
     """Describe real gaps separately from old AI notes; never mutates input.
 
     The default is strict. Explicit final incomplete mode reports missing facts
