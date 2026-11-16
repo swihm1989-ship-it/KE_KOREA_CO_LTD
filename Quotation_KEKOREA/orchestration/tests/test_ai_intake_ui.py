@@ -140,7 +140,7 @@ class AiIntakeUiTests(unittest.TestCase):
             app.session_state["ai_intake_drafts"] = ("previous-order", {"PO": {"pdf": b"prior"}})
             app.button(key="ai_intake_extract").click().run()
         self.assertFalse(app.exception, [x.message for x in app.exception])
-        self.assertTrue(any("AI 거래조건 추출 실패" in e.message for e in app.error))
+        self.assertTrue(any("AI 거래조건 추출 실패" in e.value for e in app.error))
         self.assertEqual(app.session_state["ai_intake_candidates"], saved)
         self.assertEqual(app.session_state["ai_intake_result"], previous_result)
         self.assertIn("ai_intake_drafts", app.session_state)
