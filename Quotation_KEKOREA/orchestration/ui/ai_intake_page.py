@@ -37,7 +37,9 @@ PDF_EXPORT_MODULE = "Quotation_KEKOREA.orchestration.workflows.legacy_document_e
 PDF_EXPORT_REVISION = "review-pdf-safe-loader-20261113-v4"
 TRADE_REVIEW_MODULE = "Quotation_KEKOREA.orchestration.workflows.trade_export_review"
 TRADE_REVIEW_REVISION = "image-advisory-schema-fix-20261116-v5"
-AI_INTAKE_REVISION = "master-vision-timeout-reliability-20261117-v18"
+MAIL_PARTY_BRIDGE_MODULE = "Quotation_KEKOREA.agent.mail_party_bridge"
+MAIL_PARTY_BRIDGE_REVISION = "master-po-party-hot-reload-20261117-v1"
+AI_INTAKE_REVISION = "master-party-bridge-hot-reload-20261117-v19"
 # Detect a changed source file even when the cached module has the same revision.
 AI_INTAKE_SOURCE_MTIME_NS = os.stat(__file__).st_mtime_ns
 
@@ -66,6 +68,40 @@ def _ensure_trade_extractor_current() -> bool:
         raise RuntimeError(
             "AI 추출 엔진의 버전이 일치하지 않습니다. 주문 내용을 보존하고 앱을 재시작하세요.")
     return stale
+
+
+
+def _current_mail_party_bridge():
+    """Return a current PO company module even in an old Streamlit worker.
+
+    The page itself can be freshly deployed while its imports remain cached.
+    This caused production ImportError for apply_explicit_po_roles after a
+    successful ECLADO PO AI extraction. Check capabilities and file revision.
+    """
+    try:
+        module = importlib.import_module(MAIL_PARTY_BRIDGE_MODULE)
+
+        def compatible():
+            return (
+                getattr(module, "MAIL_PARTY_BRIDGE_REVISION", None) == MAIL_PARTY_BRIDGE_REVISION
+                and all(callable(getattr(module, key, None)) for key in
+                        ("apply_explicit_po_roles", "apply_mail_counterparties"))
+                and getattr(module, "MAIL_PARTY_BRIDGE_SOURCE_MTIME_NS", None)
+                == os.stat(module.__file__).st_mtime_ns
+            )
+
+        if not compatible():
+            importlib.invalidate_caches()
+            module = importlib.reload(module)
+        if not compatible():
+            raise RuntimeError("stale PO company-party module")
+    except (ImportError, OSError, AttributeError, TypeError, RuntimeError):
+        # Do not leak server paths, source order content or credentials.
+        raise RuntimeError(
+            "PO 회사정보 모듈 갱신에 실패했습니다. 입력 내용을 보존한 후 "
+            "Master 앱을 새로고침하거나 Manage app에서 Reboot하세요."
+        ) from None
+    return module
 
 
 def _current_ai_workflow():
@@ -257,7 +293,6 @@ def _master_catalog_pricing(candidates: dict) -> dict:
     from Quotation_KEKOREA.orchestration.workflows.legacy_catalog_bridge import (
         requires_eclado_catalog, reuse_legacy_catalog,
     )
-    from Quotation_KEKOREA.agent.mail_party_bridge import apply_mail_counterparties
     from Quotation_KEKOREA.orchestration.workflows.document_assets import EXPECTED_PROJECT
 
     env = document_export_env(st.secrets, os.environ)
@@ -281,7 +316,7 @@ def _master_catalog_pricing(candidates: dict) -> dict:
                 st.session_state["master_company_directory_status"] = "unavailable"
             else:
                 st.session_state["master_company_directory_status"] = "connected"
-        updated = apply_mail_counterparties(
+        updated = _current_mail_party_bridge().apply_mail_counterparties(
             candidates, profiles,
             instruction=st.session_state.get("ai_intake_instruction") or "")
     else:
@@ -377,8 +412,7 @@ def _remember_candidate_bundle(digest: str, candidate_map: dict, *, replace_edit
     # extraction, never on edits to an already-reviewed PO. Imported customer
     # orders can otherwise leave their PI seller/buyer on the generated PO.
     if replace_editor and (not previous or previous[0] != digest):
-        from Quotation_KEKOREA.agent.mail_party_bridge import apply_explicit_po_roles
-        candidate_map = apply_explicit_po_roles(
+        candidate_map = _current_mail_party_bridge().apply_explicit_po_roles(
             candidate_map, st.session_state.get("ai_intake_instruction") or "")
     candidate_map = _master_catalog_pricing(candidate_map)
     candidate_map = apply_default_list_prices(candidate_map)
@@ -396,8 +430,7 @@ def _confirm_po_supplier_and_reprice(digest: str) -> None:
     saved = st.session_state.get("ai_intake_candidates")
     if not saved or saved[0] != digest or not isinstance(saved[1].get("PO"), dict):
         return
-    from Quotation_KEKOREA.agent.mail_party_bridge import apply_explicit_po_roles
-    revised = apply_explicit_po_roles(
+    revised = _current_mail_party_bridge().apply_explicit_po_roles(
         saved[1], "Buyer는 KE KOREA, Supplier는 ECLADO")
     _remember_candidate_bundle(digest, revised)
     st.session_state["ai_intake_last_answer"] = (
@@ -1854,7 +1887,7 @@ def render_ai_intake(principal: str):
     if not principal:
         raise PermissionError("로그인이 필요합니다.")
     st.subheader("AI 거래조건 추출 · 기존 문서 엔진 연결")
-    st.caption("화면 업데이트: 2026-11-17 · AI 이미지·PDF 응답시간 보완 + PO 매입단가 재조회")
+    st.caption("화면 업데이트: 2026-11-17 · PO 당사자 모듈 자동 갱신 + KRW 단가 재조회")
     st.caption("문서 작업은 이 화면에서 진행합니다. 검토용 초안과 최종 발행 문서는 기존 검증·승인 규칙에 따라 구분합니다.")
     st.caption("기존 계약서 분석 AI를 사용해 자연어에서 거래조건을 제안합니다. 확정·발행·전송은 자동으로 하지 않습니다.")
     st.info("AI 요청에는 아래 입력 내용과 직접 선택한 참고파일만 전송합니다. 저장된 계약서는 모델에 전달되지 않습니다.")
