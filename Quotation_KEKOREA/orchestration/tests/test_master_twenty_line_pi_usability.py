@@ -102,6 +102,24 @@ class MasterTwentyLinePiUxTests(unittest.TestCase):
             self.assertTrue(pdf["content"].startswith(b"%PDF"))
             self.assertTrue(pdf["final"])
 
+    def test_corrected_image_item_final_pdf_without_source_flag(self):
+        doc = twenty_item_pi()
+        doc.pop("source_image_attached", None)
+        for item in doc["items"]:
+            item["discount_percent"] = "0"
+        doc["items"][1].update(product_name="Melaser Whitening Serum",
+                               capacity="50ml", unit_price="7.50",
+                               master_price=True)
+        with self.seal():
+            app = self.app(doc, editor=True)
+            self.assertFalse(app.exception, [e.message for e in app.exception])
+            self.assertFalse(next(c for c in app.checkbox
+                                  if c.label.startswith("PI · 최종 출력")).disabled)
+            self.approve(app)
+            self.export(app)
+            self.assertTrue(app.session_state["master_trade_final_files"]["PI"]
+                            ["files"]["pdf"]["content"].startswith(b"%PDF"))
+
     def test_bulk_button_does_not_edit_other_documents(self):
         doc = twenty_item_pi()
         po = deepcopy(doc)
