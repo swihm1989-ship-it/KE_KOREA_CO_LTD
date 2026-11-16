@@ -791,8 +791,6 @@ def _render_trade_final_panel(digest: str, sources: dict, env: dict, *, edited_m
             _render_trade_issue_list(kind, report)
             if report['missing']:
                 st.caption("누락 항목은 위 거래정보 입력창에서 보완하거나, 아래 승인 후 빈칸으로 출력할 수 있습니다.")
-            if source.get('missing_fields'):
-                st.caption("이전 AI 미입력 기록은 참고용으로 유지됩니다. 현재 입력값과 위 누락 항목을 확인하세요.")
             key = digest[:12] + "_" + kind + "_" + fingerprint[:18] + "_" + str(revision)
             approval_key = "master_trade_final_approve_" + key
             blocked = bool(report['issues']) or not edited_matches or bool(pending_errors)
@@ -887,8 +885,19 @@ def _render_single_editor(digest: str, candidates: dict) -> None:
         st.caption("한 곳에서 입력한 값이 PI/PO/CI/PL·계약서 후보와 PDF 입력에 함께 반영됩니다. Enter 또는 칸 이동 시 자동 저장됩니다.")
         st.caption("전화번호·이메일·담당자 등 선택 항목이 해당 없으면 N/A를 직접 입력하세요. "
                    "확인되지 않은 값은 비워둘 수 있으며, 최종 출력 시 빈칸 유지 승인이 필요합니다.")
+        # Shared inputs are revalidated on every Streamlit rerun after edit.
+        # Show only CURRENT structured gaps once. Historical extraction notes
+        # live in the original AI review and never count as new missing input.
         if gaps:
-            st.warning("누락 정보 · 입력하거나 최종 출력에서 빈칸 유지 승인: " + "; ".join(gap.label for gap in gaps))
+            st.info("현재 입력값 재검증 · 미입력/확인 필요 " + str(len(gaps)) +
+                    "개 (선택한 전체 문서 기준)")
+            with st.expander("현재 누락 항목 보기", expanded=False):
+                for gap in gaps:
+                    st.write(gap.label)
+            st.caption("아래 입력값을 수정하면 자동으로 다시 검증합니다. "
+                       "다른 문서에 남은 누락은 현재 PI의 최종 PDF 발행을 자동 차단하지 않습니다.")
+        else:
+            st.success("현재 입력칸의 누락 항목 없음 · 문서별 계산·조건 검증은 아래에서 별도 수행합니다.")
         error = st.session_state.get("ai_intake_followup_error")
         if error:
             st.error(error)
@@ -928,20 +937,9 @@ def _render_single_editor(digest: str, candidates: dict) -> None:
                               args=(digest, index, field, widget))
         if isinstance(candidates.get("CONTRACT"), dict):
             _render_contract_confirmations(digest, candidates["CONTRACT"])
-        # Prior free-text extraction notes are historical context, not a second
-        # manual approval workflow. Current structured inputs and validation
-        # determine whether a document can be generated.
-        try:
-            gaps = missing_fields(candidates)
-        except RuntimeError as exc:
-            st.warning(str(exc))
-        else:
-            if gaps:
-                st.warning("미입력·확인 필요 항목 " + str(len(gaps)) +
-                           "개 (전체 문서 기준): " + "; ".join(gap.label for gap in gaps))
-                st.caption("아래 최종 출력은 선택한 문서별로 다시 검증합니다.")
-            else:
-                st.success("현재 거래정보 입력 완료 · 문서별 검증 및 승인 후 PDF 생성 가능")
+        st.caption("입력 내용은 변경 시 자동 저장·재검증됩니다. "
+                   "기존 AI 추출 기록은 현재 누락 여부를 결정하지 않습니다. "
+                   "최종 PDF는 아래 해당 문서의 계산·조건 검증과 사용자 승인 후 생성합니다.")
 
 
 

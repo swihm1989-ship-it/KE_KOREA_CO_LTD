@@ -60,14 +60,29 @@ render_ai_intake('synthetic@example.test')
         next(b for b in app.button if b.label==kind+' 최종 PDF 생성').click().run()
         self.assertFalse(app.exception,[e.message for e in app.exception])
 
-    def test_last_gap_warning_names_the_remaining_fields(self):
+    def test_current_missing_fields_are_shown_once_not_as_prior_ai_warnings(self):
         doc=self.doc();doc['buyer']['email']='';doc['seller']['phone']=''
-        source="from Quotation_KEKOREA.orchestration.ui.ai_intake_page import _render_single_editor\n_render_single_editor('named-gaps',"+repr({'PI':doc})+")"
-        app=AppTest.from_string(source).run()
-        self.assertFalse(app.exception)
-        warning=next(w.value for w in app.warning if '미입력·확인 필요 항목 2개' in w.value)
-        self.assertIn('Buyer',warning);self.assertIn('이메일',warning)
-        self.assertIn('Seller',warning);self.assertIn('전화번호',warning)
+        doc['missing_fields']=['Solar cell technical specs (original AI note)']
+        app=self.app(doc,editor=True)
+        self.assertFalse(app.exception,[e.message for e in app.exception])
+        hints=[i.value for i in app.info if '미입력/확인 필요 2개' in i.value]
+        self.assertEqual(len(hints),1)
+        self.assertTrue(any(e.label=='현재 누락 항목 보기' for e in app.expander))
+        self.assertFalse(any('미입력·확인 필요 항목 2개' in w.value for w in app.warning))
+        self.assertFalse(any('Solar cell technical specs' in w.value for w in app.warning))
+        next(t for t in app.text_input if t.label=='Buyer · 이메일').set_value(
+            'synthetic@example.test').run()
+        self.assertFalse(app.exception,[e.message for e in app.exception])
+        self.assertTrue(any('미입력/확인 필요 1개' in i.value for i in app.info))
+        next(t for t in app.text_input if t.label=='Seller · 전화번호').set_value(
+            'N/A').run()
+        self.assertFalse(app.exception,[e.message for e in app.exception])
+        self.assertFalse(any('미입력/확인 필요' in i.value for i in app.info))
+        self.assertTrue(any('현재 입력칸의 누락 항목 없음' in x.value for x in app.success))
+        self.assertEqual(app.session_state['ai_intake_candidates'][1]['PI']['missing_fields'],
+                         ['Solar cell technical specs (original AI note)'])
+        self.assertFalse(next(c for c in app.checkbox
+                              if c.label.startswith('PI · 최종 출력')).disabled)
 
     def test_final_download_requires_approval_and_edit_revokes_it(self):
         from PIL import Image
