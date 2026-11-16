@@ -91,6 +91,44 @@ _remember_candidate_bundle("po-unnamed", {"PO": DATA}, replace_editor=True)
         self.assertEqual(po["seller"]["legal_name"], "")
         self.assertIsNone(po["items"][0]["unit_price"])
 
+    def test_existing_po_has_explicit_button_to_refresh_supplier_and_purchase_prices(self):
+        """Existing stale Streamlit candidates must not require a second AI extraction."""
+        from Quotation_KEKOREA.orchestration.tests.test_missing_document_details import complete_pi
+        from Quotation_KEKOREA.orchestration.workflows.document_assets import EXPECTED_PROJECT
+        env = {"SUPABASE_URL": "https://" + EXPECTED_PROJECT + ".supabase.co",
+               "SUPABASE_SECRET_KEY": "TEST-ONLY-SERVER-KEY"}
+        doc = complete_pi()
+        doc["document_type"] = "PO"
+        doc["product_family"] = "cosmetics"
+        doc["seller"]["legal_name"] = "KE KOREA CO. LTD"  # stale source-PI seller
+        doc["buyer"]["legal_name"] = "DEAR GLOW PTE LTD"
+        doc["items"][0].update(product_name="Cell Memory Cream (E-165)",
+                               capacity="50g", unit_price=None,
+                               price_source=None, master_price=False, quantity="10")
+        source = """import streamlit as st
+from Quotation_KEKOREA.orchestration.ui.ai_intake_page import (
+    _remember_candidate_bundle, _render_single_editor)
+st.session_state["ai_intake_instruction"] = "Please prepare PO from this customer order"
+if "ai_intake_candidates" not in st.session_state:
+    _remember_candidate_bundle("po-retry", {"PO": DATA}, replace_editor=True)
+_render_single_editor("po-retry", st.session_state["ai_intake_candidates"][1])
+""".replace("DATA", repr(doc))
+        with (patch.object(ai_intake_page, "document_export_env", return_value=env),
+              patch.object(ai_intake_page, "_cached_master_eclado_catalog",
+                           return_value=CATALOG)):
+            app = AppTest.from_string(source, default_timeout=25).run()
+            self.assertFalse(app.exception, [e.message for e in app.exception])
+            button = next(x for x in app.button
+                          if x.label == "PO · KE KOREA 매입 / ECLADO 공급처 확인 및 단가 재조회")
+            button.click().run()
+        self.assertFalse(app.exception, [e.message for e in app.exception])
+        po = app.session_state["ai_intake_candidates"][1]["PO"]
+        self.assertEqual(po["buyer"]["legal_name"], "KE Korea Co. LTD")
+        self.assertEqual(po["seller"]["legal_name"], "ECLADO")
+        self.assertEqual(po["currency"], "KRW")
+        self.assertEqual(po["items"][0]["unit_price"], "1000")
+        self.assertTrue(po["items"][0]["master_price"])
+
     def test_no_secrets_preserves_user_trade_price_without_network(self):
         app, loader = self.app({"PI": trade("PI", price="19.99")}, {})
         loader.assert_not_called()
