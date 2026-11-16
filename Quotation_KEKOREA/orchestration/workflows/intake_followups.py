@@ -39,6 +39,8 @@ LABELS = {
     "container_count": "컨테이너 수(컨테이너 운송이 아니면 0)",
     "item.discount_percent": "할인율 %(할인이 없으면 0)",
     "item.product_name": "상품명 및 규격(영문)",
+    "item.capacity": "상품 규격·용량 (50ml, 50g 등)",
+    "item.product_code": "상품 코드/SKU",
     "item.quantity": "수량(숫자)",
     "item.unit": "수량 단위(PCS, W 등)",
     "item.unit_price": "단가(숫자)",
