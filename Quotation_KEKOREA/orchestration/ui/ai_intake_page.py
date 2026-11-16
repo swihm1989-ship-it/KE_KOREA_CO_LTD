@@ -201,12 +201,12 @@ def _model_config():
     )}
 
 
-_MASTER_ECLADO_CATALOG_REVISION = "reuse-legacy-catalog-20261116-v1"
+_MASTER_ECLADO_CATALOG_REVISION = "mail-directory-plus-catalog-20261116-v2"
 
 
 @st.cache_data(ttl=300, show_spinner=False)
 def _cached_master_eclado_catalog(project_url: str, _secret_key: str) -> dict:
-    """Use the exact original ECLADO Supabase price loader, server-side only."""
+    """Reuse exactly the original ECLADO server-side price loader."""
     from Quotation_KEKOREA.agent.pricing import load_supabase_catalog
     return load_supabase_catalog({
         "SUPABASE_URL": project_url,
@@ -214,34 +214,72 @@ def _cached_master_eclado_catalog(project_url: str, _secret_key: str) -> dict:
     })
 
 
-def _master_catalog_pricing(candidates: dict) -> dict:
-    """Enrich selected MASTER candidates with original, authorized pricing.
+@st.cache_data(ttl=300, show_spinner=False)
+def _cached_master_company_profiles(project_url: str, _secret_key: str) -> list:
+    """Reuse the original KE KOREA customer/company directory."""
+    from Quotation_KEKOREA.agent.counterparties import load_company_profiles
+    return load_company_profiles({
+        "SUPABASE_URL": project_url,
+        "SUPABASE_SECRET_KEY": _secret_key,
+    })
 
-    No catalog means no invented price. Original email/unit prices remain
-    unchanged and unverified; bank/contract/CI source rules are untouched.
+
+def _master_catalog_pricing(candidates: dict) -> dict:
+    """Run the original document-agent company and pricing engine on MASTER.
+
+    The email's original subject is input evidence, not an instruction to
+    choose the output document type. Saved manual edits take precedence.
+    All private Supabase access happens server-side only.
     """
     from urllib.parse import urlparse
     from Quotation_KEKOREA.orchestration.workflows.legacy_catalog_bridge import (
         requires_eclado_catalog, reuse_legacy_catalog,
     )
-    if not requires_eclado_catalog(candidates):
-        st.session_state.pop("master_eclado_catalog_status", None)
-        return candidates
+    from Quotation_KEKOREA.agent.mail_party_bridge import apply_mail_counterparties
+    from Quotation_KEKOREA.orchestration.workflows.document_assets import EXPECTED_PROJECT
+
     env = document_export_env(st.secrets, os.environ)
     url, key = env.get("SUPABASE_URL", ""), env.get("SUPABASE_SECRET_KEY", "")
-    if not url or not key:
+    has_server_credentials = bool(url and key)
+    valid_project = (has_server_credentials and urlparse(url).scheme == "https"
+                     and urlparse(url).hostname == EXPECTED_PROJECT + ".supabase.co"
+                     and not urlparse(url).path.rstrip("/"))
+    mail_source = st.session_state.get("ai_intake_mail_source")
+    updated = candidates
+    if mail_source:
+        profiles = []
+        if not has_server_credentials:
+            st.session_state["master_company_directory_status"] = "not_configured"
+        elif not valid_project:
+            st.session_state["master_company_directory_status"] = "wrong_project"
+        else:
+            try:
+                profiles = _cached_master_company_profiles(url, key)
+            except (RuntimeError, ValueError, KeyError, TypeError, OSError):
+                st.session_state["master_company_directory_status"] = "unavailable"
+            else:
+                st.session_state["master_company_directory_status"] = "connected"
+        updated = apply_mail_counterparties(
+            candidates, profiles,
+            instruction=st.session_state.get("ai_intake_instruction") or "")
+    else:
+        st.session_state.pop("master_company_directory_status", None)
+
+    if not requires_eclado_catalog(updated):
+        st.session_state.pop("master_eclado_catalog_status", None)
+        return updated
+    if not has_server_credentials:
         st.session_state["master_eclado_catalog_status"] = "not_configured"
-        return candidates
-    from Quotation_KEKOREA.orchestration.workflows.document_assets import EXPECTED_PROJECT
-    if urlparse(url).hostname != EXPECTED_PROJECT + ".supabase.co":
+        return updated
+    if not valid_project:
         st.session_state["master_eclado_catalog_status"] = "wrong_project"
-        return candidates
+        return updated
     try:
         catalog = _cached_master_eclado_catalog(url, key)
-        updated = reuse_legacy_catalog(candidates, catalog)
+        updated = reuse_legacy_catalog(updated, catalog)
     except (RuntimeError, ValueError, KeyError, TypeError, OSError):
         st.session_state["master_eclado_catalog_status"] = "unavailable"
-        return candidates
+        return updated
     st.session_state["master_eclado_catalog_status"] = "connected"
     st.session_state["master_eclado_catalog_products"] = len(catalog.get("products", []))
     return updated
