@@ -274,7 +274,7 @@ def review_trade_document(kind, source, *, final=False, allow_optional_na=False,
         # for each old extraction note. Keep notes as non-blocking warnings;
         # independent numeric, identity and CI-import checks still apply.
         candidate['missing_fields'] = []
-        candidate['conflicts'] = []
+        # Preserve unresolved conflicting terms as blockers; historical missing-field notes are informational.
     if allow_optional_na:
         for field in missing_review_fields(candidate):
             if not field.required:
