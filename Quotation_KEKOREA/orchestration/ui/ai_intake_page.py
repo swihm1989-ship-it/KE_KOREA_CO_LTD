@@ -740,11 +740,12 @@ def _render_trade_issue_list(kind: str, report: dict) -> None:
     elif not current_warnings:
         st.success(kind + " · 현재 입력값 검증 통과")
     if historical:
-        with st.expander("과거 AI 추출 참고 · " + str(len(historical)) + "건", expanded=False):
-            st.caption("최초 메일의 참고 기록입니다. 아래 최종 출력은 현재 입력값과 "
-                       "실제 충돌·계산 오류를 별도로 검증합니다.")
-            for row in historical:
-                st.text(row["message"])
+        # This function is sometimes rendered inside an existing expander.
+        # Never nest Streamlit expanders (which raises StreamlitAPIException).
+        # Original extraction notes remain in the 'AI 추출 원본' reference pane.
+        st.caption("과거 AI 추출 참고 " + str(len(historical)) +
+                   "건 · 최초 추출 기록은 위 'AI 추출 원본'에서 확인하세요. "
+                   "현재 입력값과 실제 검증 오류만 최종 발행을 차단합니다.")
 
 
 def _discard_trade_final(kind: str) -> None:
