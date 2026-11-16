@@ -166,7 +166,7 @@ _render_single_editor("po-ambiguous", st.session_state["ai_intake_candidates"][1
         self.assertFalse(app.exception, [e.message for e in app.exception])
         po = app.session_state["ai_intake_candidates"][1]["PO"]
         self.assertIsNone(po["items"][0]["unit_price"])
-        self.assertTrue(any("용량" in x.message or "SKU" in x.message
+        self.assertTrue(any("용량" in x.value or "SKU" in x.value
                             for x in app.warning))
 
     def test_no_secrets_preserves_user_trade_price_without_network(self):
