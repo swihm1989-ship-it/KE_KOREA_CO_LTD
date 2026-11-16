@@ -1788,7 +1788,7 @@ def render_ai_intake(principal: str):
                                     kind, updated[kind], final=True, allow_incomplete=True)
                                 if approved_review["ready"]:
                                     errors[kind] = (
-                                        "이 버튼은 검토용 PDF만 생성합니다. 정식 발행은 아래 "
+                                        "이 버튼은 검토용 PDF만 생성합니다. 정식 발행은 위 "
                                         "'최종 PDF'에서 현재 거래정보 승인 후 생성하세요.")
                                 else:
                                     errors[kind] = (
@@ -1819,7 +1819,7 @@ def render_ai_intake(principal: str):
                                                data=file["content"], file_name=file["filename"],
                                                mime=file["mime"], key="master_legacy_" + kind + "_" + fmt)
             st.caption("미확정 항목이 있어도 검토용 PDF를 생성할 수 있습니다. "
-                       "아래 최종 PDF에서는 누락 항목을 빈칸으로 유지하도록 직접 승인할 수 있습니다.")
+                       "위 최종 PDF에서는 누락 항목을 빈칸으로 유지하도록 직접 승인할 수 있습니다.")
         if "CONTRACT" in candidates[1]:
             st.caption("계약서 DRAFT는 기존 초안 엔진, FINAL은 기존 원본 계약서 "
                        "출력 엔진을 사용합니다. 두 방식 모두 별도 검토·승인 정책을 유지합니다.")
