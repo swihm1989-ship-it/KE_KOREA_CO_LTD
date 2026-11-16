@@ -831,30 +831,51 @@ def _generate_trade_numbers(digest: str, widget: str) -> None:
 
 
 def _render_trade_issue_list(kind: str, report: dict) -> None:
+    """One concise document-specific summary; details remain accessible once.
+
+    The 20 products in an image order must not yield dozens of visible
+    duplicates for discount, prior AI notes and the same numeric omission.
+    Never conceal genuine blocking conflicts, missing pricing or invalid math.
+    """
     warnings = report.get("warnings") or []
     issues = report.get("issues") or []
     historical = [row for row in warnings
                   if str(row.get("code") or "").startswith("prior_ai_")]
-    current_warnings = [row for row in warnings if row not in historical]
-    if current_warnings:
-        st.warning(kind + " · 현재 누락·확인 필요 " + str(len(current_warnings)) +
-                   "건 · 승인 시 미확정값은 빈칸 유지")
-        for row in current_warnings:
-            st.text(row["message"])
+    current = [row for row in warnings if row not in historical]
+    discount_gaps = {
+        str(row.get("key"))
+        for row in current
+        if str(row.get("code")) == "missing"
+        and str(row.get("key") or "").endswith(".discount_percent")
+    }
     if issues:
-        st.warning(kind + " · 발행 전 수정 필요 " + str(len(issues)) + "건")
-        for row in issues:
-            prefix = ("이전 AI 기록 · " if row["code"] in {"ai_missing", "ai_conflict"} else "")
-            st.text(prefix + row["message"])
-    elif not current_warnings:
-        st.success(kind + " · 현재 입력값 검증 통과")
+        unique_issues = list(dict.fromkeys(str(row.get("message") or "")
+                                          for row in issues if row.get("message")))
+        st.warning(kind + " · 발행 전 실제 오류 " + str(len(unique_issues)) +
+                   "건 · 상세보기에서 확인·수정해 주세요.")
+        for reason in unique_issues[:3]:
+            st.text(reason)
+    elif current:
+        if discount_gaps:
+            st.info(kind + " · 미입력 할인율 " + str(len(discount_gaps)) +
+                    "개 · 위 '0% 일괄 적용'으로 직접 승인하거나 빈칸 출력 승인 가능")
+        else:
+            st.caption(kind + " · 선택적 누락정보 " + str(len(current)) +
+                       "건 · 최종 승인 시 확인되지 않은 항목은 빈칸 유지")
+    else:
+        st.success(kind + " · 현재 거래정보 검증 통과")
     if historical:
-        # This function is sometimes rendered inside an existing expander.
-        # Never nest Streamlit expanders (which raises StreamlitAPIException).
-        # Original extraction notes remain in the 'AI 추출 원본' reference pane.
         st.caption("과거 AI 추출 참고 " + str(len(historical)) +
-                   "건 · 최초 추출 기록은 위 'AI 추출 원본'에서 확인하세요. "
-                   "현재 입력값과 실제 검증 오류만 최종 발행을 차단합니다.")
+                   "건 · 현재 입력 오류로 중복 집계하지 않습니다.")
+    if issues or current:
+        with st.expander(kind + " · 검증 상세 (필요할 때만 펼치기)", expanded=False):
+            seen = set()
+            for row in issues + current:
+                message = str(row.get("message") or "").strip()
+                key = (str(row.get("code")), str(row.get("key")), message)
+                if message and key not in seen:
+                    st.write(("수정 필요: " if row in issues else "확인 항목: ") + message)
+                    seen.add(key)
 
 
 def _discard_trade_final(kind: str) -> None:
