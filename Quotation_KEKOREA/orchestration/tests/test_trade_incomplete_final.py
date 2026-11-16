@@ -36,17 +36,12 @@ class IncompleteFinalTests(unittest.TestCase):
         self.assertFalse(review.review_trade_document('PI', self.doc, final=True)['ready'])
         self.assertEqual(self.doc, before)
 
-    def test_historical_ai_conflicts_do_not_require_separate_acknowledgement(self):
+    def test_unresolved_ai_conflicts_still_block_final_without_acknowledge_button(self):
         self.doc['missing_fields'] = ['PI number was not present in the original mail']
         self.doc['conflicts'] = ['Original email mentioned two payment deadlines']
         report = self.report()
-        self.assertTrue(report['ready'], report['issues'])
-        self.assertEqual(report['issues'], [])
-        self.assertTrue(any(row['code'] == 'prior_ai_conflicts'
-                            for row in report['warnings']))
-        self.assertEqual(report['render_data']['missing_fields'], [])
-        self.assertEqual(report['render_data']['conflicts'], [])
-        # Strict legacy validation remains unchanged.
+        self.assertFalse(report['ready'])
+        self.assertTrue(report['issues'])
         self.assertFalse(review.review_trade_document('PI', self.doc, final=True)['ready'])
 
     def test_placeholders_and_draft_number_become_blanks_not_optional_na(self):
