@@ -32,9 +32,22 @@ class IncompleteFinalTests(unittest.TestCase):
         self.assertEqual(report['issues'], [])
         self.assertTrue({'buyer.legal_name', 'buyer.email', 'payment_terms'} <=
                         {issue['key'] for issue in report['warnings']})
-        self.assertTrue(any(row['code'] == 'ai_missing' for row in report['warnings']))
+        self.assertTrue(any(row['code'] == 'prior_ai_missing_fields' for row in report['warnings']))
         self.assertFalse(review.review_trade_document('PI', self.doc, final=True)['ready'])
         self.assertEqual(self.doc, before)
+
+    def test_historical_ai_conflicts_do_not_require_separate_acknowledgement(self):
+        self.doc['missing_fields'] = ['PI number was not present in the original mail']
+        self.doc['conflicts'] = ['Original email mentioned two payment deadlines']
+        report = self.report()
+        self.assertTrue(report['ready'], report['issues'])
+        self.assertEqual(report['issues'], [])
+        self.assertTrue(any(row['code'] == 'prior_ai_conflicts'
+                            for row in report['warnings']))
+        self.assertEqual(report['render_data']['missing_fields'], [])
+        self.assertEqual(report['render_data']['conflicts'], [])
+        # Strict legacy validation remains unchanged.
+        self.assertFalse(review.review_trade_document('PI', self.doc, final=True)['ready'])
 
     def test_placeholders_and_draft_number_become_blanks_not_optional_na(self):
         self.doc['document_number'] = 'DRAFT'
