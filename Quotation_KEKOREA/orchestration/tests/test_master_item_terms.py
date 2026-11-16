@@ -200,7 +200,7 @@ class MasterItemTermsTests(unittest.TestCase):
         self.assertFalse(app.exception, [e.message for e in app.exception])
         current = app.session_state["ai_intake_candidates"][1]["PI"]
         self.assertEqual([x["discount_percent"] for x in current["items"]], ["7.5", "7.5"])
-        self.assertTrue(any("0~100" in x.message for x in app.error))
+        self.assertTrue(any("0~100" in x.value for x in app.error))
 
     def test_bulk_discount_actions_not_offered_for_ci(self):
         ci = document()
