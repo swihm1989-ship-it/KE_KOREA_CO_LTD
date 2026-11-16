@@ -85,5 +85,25 @@ class SharedDocumentEngineParity(unittest.TestCase):
         self.assertEqual(master["currency"], legacy["currency"])
 
 
+    def test_unrelated_po_keeps_original_foreign_currency(self):
+        raw = trade_source("PO")
+        raw["buyer"] = {"legal_name": "KE KOREA CO. LTD", "address": "Synthetic"}
+        raw["seller"] = {"legal_name": "UNRELATED SUPPLIER LTD",
+                         "address": "Synthetic"}
+        raw["currency"] = "EUR"
+        for pipeline in (
+            lambda: _safe_trade(deepcopy(raw), "PO", REQUEST, "cosmetics", ()),
+            lambda: document_engine.finalize_extracted_trade(
+                deepcopy(raw), REQUEST, "PO", (), EMPTY_CATALOG,
+                family="cosmetics"),
+        ):
+            with self.subTest(pipeline=pipeline):
+                output = pipeline()
+                self.assertEqual(output["currency"], "EUR")
+                self.assertEqual(output["seller"]["legal_name"],
+                                 "UNRELATED SUPPLIER LTD")
+
+
+
 if __name__ == "__main__":
     unittest.main()
