@@ -5,6 +5,12 @@ Prefer a single explicit counterparty match and preserve direct edits.
 """
 from copy import deepcopy
 from collections.abc import Mapping
+import os
+
+# Streamlit keeps imported dependency modules across GitHub deployments.
+# The UI checks this marker and on-disk source timestamp before using PO roles.
+MAIL_PARTY_BRIDGE_REVISION = "master-po-party-hot-reload-20261117-v1"
+MAIL_PARTY_BRIDGE_SOURCE_MTIME_NS = os.stat(__file__).st_mtime_ns
 
 from Quotation_KEKOREA.agent.counterparties import (
     apply_company_profiles, apply_ke_korea_company_defaults,

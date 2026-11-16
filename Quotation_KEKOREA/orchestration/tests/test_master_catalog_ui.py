@@ -72,6 +72,38 @@ if "ai_intake_candidates" not in st.session_state:
         self.assertEqual(po["items"][0]["unit_price"], "1000")
         self.assertTrue(po["items"][0]["master_price"])
 
+    def test_predeploy_po_party_bridge_with_missing_symbol_is_reloaded(self):
+        """Reproduce 2026-11-17 live ImportError after successful PO AI analysis.
+
+        The Streamlit process retains the old company-party module even though
+        the new ai_intake_page source requires apply_explicit_po_roles.
+        """
+        from Quotation_KEKOREA.agent import mail_party_bridge
+        from Quotation_KEKOREA.orchestration.workflows.document_assets import EXPECTED_PROJECT
+        env = {"SUPABASE_URL": "https://" + EXPECTED_PROJECT + ".supabase.co",
+               "SUPABASE_SECRET_KEY": "TEST-ONLY-SERVER-KEY"}
+        po = trade("PO", buyer="DEAR GLOW PTE LTD",
+                   seller="KE KOREA CO. LTD", price=None)
+        po["currency"] = "USD"
+        source = """import streamlit as st
+from Quotation_KEKOREA.orchestration.ui.ai_intake_page import _remember_candidate_bundle
+st.session_state["ai_intake_instruction"] = (
+    "Dear Glow 주문 기준 발주 PO. Buyer는 KE KOREA, Supplier는 ECLADO.")
+if "ai_intake_candidates" not in st.session_state:
+    _remember_candidate_bundle("old-bridge", {"PO": DATA}, replace_editor=True)
+""".replace("DATA", repr(po))
+        with (patch.object(ai_intake_page, "document_export_env", return_value=env),
+              patch.object(ai_intake_page, "_cached_master_eclado_catalog",
+                           return_value=CATALOG),
+              patch.object(mail_party_bridge, "apply_explicit_po_roles", None)):
+            app = AppTest.from_string(source, default_timeout=25).run()
+        self.assertFalse(app.exception, [e.message for e in app.exception])
+        result = app.session_state["ai_intake_candidates"][1]["PO"]
+        self.assertEqual(result["seller"]["legal_name"], "ECLADO")
+        self.assertEqual(result["buyer"]["legal_name"], "KE Korea Co. LTD")
+        self.assertEqual(result["currency"], "KRW")
+        self.assertEqual(result["items"][0]["unit_price"], "1000")
+
     def test_po_only_brand_in_product_text_does_not_invent_supplier(self):
         from Quotation_KEKOREA.orchestration.workflows.document_assets import EXPECTED_PROJECT
         env = {"SUPABASE_URL": "https://" + EXPECTED_PROJECT + ".supabase.co",
