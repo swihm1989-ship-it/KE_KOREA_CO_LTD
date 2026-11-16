@@ -62,8 +62,11 @@ class MasterTwentyLinePiUxTests(unittest.TestCase):
                               if e.label.startswith("상품별 상세 수정")]), 1)
         self.assertFalse(any(e.label == "현재 입력 확인사항 · 누락·오류 상세"
                              for e in app.expander))
-        self.assertTrue(any("20" in x.label and "0%" in x.label
-                            for x in app.button))
+        self.assertEqual(len([x for x in app.selectbox if "· 할인율" in x.label]), 20)
+        self.assertEqual(len([x for x in app.selectbox if "· 증정행사" in x.label]), 20)
+        self.assertFalse(any("미입력 할인율" in x.label for x in app.button))
+        self.assertTrue(all(item["discount_percent"] == "0"
+                            for item in app.session_state["ai_intake_candidates"][1]["PI"]["items"]))
         self.assertEqual(len(app.dataframe), 1)
         # Every line-item discount exists in the collapsed advanced editor,
         # not as a repeated warning/comment 20 times.
@@ -71,14 +74,10 @@ class MasterTwentyLinePiUxTests(unittest.TestCase):
         self.assertFalse(next(c for c in app.checkbox
                               if c.label.startswith("PI · 최종 출력")).disabled)
 
-    def test_one_click_discount_preserves_explicit_item_rate(self):
+    def test_default_list_discount_preserves_explicit_item_rate(self):
         doc = twenty_item_pi()
         doc["items"][0]["discount_percent"] = "5"
         app = self.app(doc, editor=True)
-        self.assertFalse(app.exception, [e.message for e in app.exception])
-        button = next(b for b in app.button
-                      if b.label.startswith("PI · 미입력 할인율 19개를 0%"))
-        button.click().run()
         self.assertFalse(app.exception, [e.message for e in app.exception])
         result = app.session_state["ai_intake_candidates"][1]["PI"]
         self.assertEqual(len(result["items"]), 20)
@@ -90,11 +89,10 @@ class MasterTwentyLinePiUxTests(unittest.TestCase):
         self.assertFalse(next(c for c in app.checkbox
                               if c.label.startswith("PI · 최종 출력")).disabled)
 
-    def test_user_can_export_real_legacy_pi_after_one_bulk_action(self):
+    def test_user_can_export_real_legacy_pi_without_bulk_discount_action(self):
         with self.seal():
             app = self.app(twenty_item_pi(), editor=True)
             self.assertFalse(app.exception, [e.message for e in app.exception])
-            next(b for b in app.button if "미입력 할인율 20개" in b.label).click().run()
             self.assertFalse(app.exception, [e.message for e in app.exception])
             self.approve(app)
             self.export(app)
@@ -120,7 +118,7 @@ class MasterTwentyLinePiUxTests(unittest.TestCase):
             self.assertTrue(app.session_state["master_trade_final_files"]["PI"]
                             ["files"]["pdf"]["content"].startswith(b"%PDF"))
 
-    def test_bulk_button_does_not_edit_other_documents(self):
+    def test_discount_edits_are_scoped_and_do_not_edit_other_documents(self):
         doc = twenty_item_pi()
         po = deepcopy(doc)
         po["document_type"] = "PO"
@@ -132,10 +130,12 @@ class MasterTwentyLinePiUxTests(unittest.TestCase):
         po["conflicts"] = []
         app = self.app(bundle={"PI": doc, "PO": po}, editor=True)
         self.assertFalse(app.exception, [x.message for x in app.exception])
-        next(b for b in app.button if "PI · 미입력 할인율 20개" in b.label).click().run()
+        self.assertEqual(app.session_state["ai_intake_candidates"][1]["PI"]["items"][0]["discount_percent"], "0")
+        self.assertEqual(app.session_state["ai_intake_candidates"][1]["PO"]["items"][0]["discount_percent"], "0")
+        next(x for x in app.selectbox if x.label == "PI · 상품 1 · 할인율").set_value("5%").run()
         candidate = app.session_state["ai_intake_candidates"][1]
-        self.assertEqual(candidate["PI"]["items"][0]["discount_percent"], "0")
-        self.assertIsNone(candidate["PO"]["items"][0]["discount_percent"])
+        self.assertEqual(candidate["PI"]["items"][0]["discount_percent"], "5")
+        self.assertEqual(candidate["PO"]["items"][0]["discount_percent"], "0")
 
 
 if __name__ == "__main__":
