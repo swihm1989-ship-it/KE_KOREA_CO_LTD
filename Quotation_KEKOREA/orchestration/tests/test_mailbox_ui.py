@@ -157,10 +157,9 @@ class MailboxUiTests(unittest.TestCase):
             self.assertIn('100 PCS', app.text_area(key='ai_intake_instruction').value)
             self.assertEqual(app.session_state['ai_intake_mail_source']['kinds'], ['PI'])
             self.assertFalse(app.checkbox(key='ai_intake_consent').value)
-            self.assertEqual(app.radio(key='ai_intake_mail_processing_mode').value,
-                             '직접 수정 후 분석')
+            self.assertFalse(app.checkbox(key='ai_intake_edit_mail_before_analysis').value)
             self.assertEqual(app.button(key='ai_intake_extract').label,
-                             '수정한 내용으로 AI 분석')
+                             'AI 거래조건 분석')
             self.assertTrue(app.button(key='ai_intake_extract').disabled)
             self.assertNotIn('master_mail_navigation_pending', app.session_state)
             self.assertNotIn('ai_intake_mail_pending', app.session_state)
@@ -180,10 +179,9 @@ class MailboxUiTests(unittest.TestCase):
             app.radio(key='master_page').set_value('메일함').run()
             app.button(key='whois_ai_synthetic-pi-uid').click().run()
             provider.assert_not_called()
-            app.radio(key='ai_intake_mail_processing_mode').set_value('AI 자동 분석').run()
             provider.assert_not_called()
             self.assertTrue(app.text_area(key='ai_intake_instruction').disabled)
-            self.assertEqual(app.button(key='ai_intake_extract').label, 'AI 자동 분석 실행')
+            self.assertEqual(app.button(key='ai_intake_extract').label, 'AI 거래조건 분석')
             self.assertTrue(app.button(key='ai_intake_extract').disabled)
             app.checkbox(key='ai_intake_consent').check().run()
             provider.assert_not_called()
@@ -214,6 +212,7 @@ class MailboxUiTests(unittest.TestCase):
                              '직접 수정 후 분석')
             self.assertFalse(app.checkbox(key='ai_intake_consent').value)
             self.assertIn('MoU', app.text_area(key='ai_intake_instruction').value)
+            app.checkbox(key='ai_intake_edit_mail_before_analysis').check().run()
             app.text_area(key='ai_intake_instruction').set_value(
                 'BIPV 설치 MoU 수정 요청. 계약 당사자 확인 필요').run()
             self.assertFalse(app.exception, [x.message for x in app.exception])
