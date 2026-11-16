@@ -107,6 +107,29 @@ class MasterTwentyLinePiUxTests(unittest.TestCase):
             self.assertIn("$10.00", printed)
             self.assertIn("$100.00", printed)
 
+    def test_bulk_five_percent_applies_to_all_twenty_and_prints_real_pi_amounts(self):
+        """20-row orders need one click, not 20 separately opened accordions."""
+        import pymupdf
+        doc = twenty_item_pi()
+        doc["items"][0]["discount_percent"] = "10"
+        with self.seal():
+            app = self.app(doc, editor=True)
+            self.assertFalse(app.exception, [e.message for e in app.exception])
+            next(x for x in app.button if x.label == "PI · 전체 5%").click().run()
+            self.assertFalse(app.exception, [e.message for e in app.exception])
+            pi = app.session_state["ai_intake_candidates"][1]["PI"]
+            self.assertEqual(len(pi["items"]), 20)
+            self.assertTrue(all(row["discount_percent"] == "5"
+                                for row in pi["items"]))
+            self.assertTrue(all(row["unit_price"] == "10.00" for row in pi["items"]))
+            self.approve(app)
+            self.export(app)
+            pdf = app.session_state["master_trade_final_files"]["PI"]["files"]["pdf"]
+            with pymupdf.open(stream=pdf["content"], filetype="pdf") as output:
+                content = "\n".join(page.get_text() for page in output)
+            self.assertIn("$9.50", content)
+            self.assertIn("$95.00", content)
+
     def test_corrected_image_item_final_pdf_without_source_flag(self):
         doc = twenty_item_pi()
         doc.pop("source_image_attached", None)
