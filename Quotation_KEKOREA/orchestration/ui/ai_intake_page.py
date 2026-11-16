@@ -612,6 +612,28 @@ def _apply_extra_item(digest: str, index: int, field: str, widget: str) -> None:
     st.session_state.pop("ai_intake_followup_error", None)
 
 
+def _apply_bulk_zero_discount(digest: str, kind: str) -> None:
+    """Owner-approved single action: fill only absent line discounts with 0%.
+
+    Never overwrite an explicitly supplied positive discount and never assume
+    that a blank discount is zero without this action. Each document is scoped
+    independently (a PO and PI can have different commercial terms).
+    """
+    from Quotation_KEKOREA.agent.review_fields import _missing
+    saved = st.session_state.get("ai_intake_candidates")
+    if not saved or saved[0] != digest or kind not in {"PI", "PO", "CI"}:
+        return
+    candidate = saved[1].get(kind)
+    if not isinstance(candidate, dict):
+        return
+    updated = deepcopy(saved[1])
+    for row in updated[kind].get("items") or []:
+        if isinstance(row, dict) and _missing(row.get("discount_percent"), True):
+            row["discount_percent"] = "0"
+    _remember_candidate_bundle(digest, updated)
+    st.session_state["ai_intake_last_answer"] = kind + " · 미입력 할인율 0% 적용"
+
+
 def _edit_contract_fact(digest: str, section: str, identity: str,
                         field: str, widget: str) -> None:
     """Edit contract-specific facts in the same input card; revoke AI clauses."""
@@ -809,30 +831,51 @@ def _generate_trade_numbers(digest: str, widget: str) -> None:
 
 
 def _render_trade_issue_list(kind: str, report: dict) -> None:
+    """One concise document-specific summary; details remain accessible once.
+
+    The 20 products in an image order must not yield dozens of visible
+    duplicates for discount, prior AI notes and the same numeric omission.
+    Never conceal genuine blocking conflicts, missing pricing or invalid math.
+    """
     warnings = report.get("warnings") or []
     issues = report.get("issues") or []
     historical = [row for row in warnings
                   if str(row.get("code") or "").startswith("prior_ai_")]
-    current_warnings = [row for row in warnings if row not in historical]
-    if current_warnings:
-        st.warning(kind + " · 현재 누락·확인 필요 " + str(len(current_warnings)) +
-                   "건 · 승인 시 미확정값은 빈칸 유지")
-        for row in current_warnings:
-            st.text(row["message"])
+    current = [row for row in warnings if row not in historical]
+    discount_gaps = {
+        str(row.get("key"))
+        for row in current
+        if str(row.get("code")) == "missing"
+        and str(row.get("key") or "").endswith(".discount_percent")
+    }
     if issues:
-        st.warning(kind + " · 발행 전 수정 필요 " + str(len(issues)) + "건")
-        for row in issues:
-            prefix = ("이전 AI 기록 · " if row["code"] in {"ai_missing", "ai_conflict"} else "")
-            st.text(prefix + row["message"])
-    elif not current_warnings:
-        st.success(kind + " · 현재 입력값 검증 통과")
+        unique_issues = list(dict.fromkeys(str(row.get("message") or "")
+                                          for row in issues if row.get("message")))
+        st.warning(kind + " · 발행 전 실제 오류 " + str(len(unique_issues)) +
+                   "건 · 상세보기에서 확인·수정해 주세요.")
+        for reason in unique_issues[:3]:
+            st.text(reason)
+    elif current:
+        if discount_gaps:
+            st.info(kind + " · 미입력 할인율 " + str(len(discount_gaps)) +
+                    "개 · 위 '0% 일괄 적용'으로 직접 승인하거나 빈칸 출력 승인 가능")
+        else:
+            st.caption(kind + " · 선택적 누락정보 " + str(len(current)) +
+                       "건 · 최종 승인 시 확인되지 않은 항목은 빈칸 유지")
+    else:
+        st.success(kind + " · 현재 거래정보 검증 통과")
     if historical:
-        # This function is sometimes rendered inside an existing expander.
-        # Never nest Streamlit expanders (which raises StreamlitAPIException).
-        # Original extraction notes remain in the 'AI 추출 원본' reference pane.
         st.caption("과거 AI 추출 참고 " + str(len(historical)) +
-                   "건 · 최초 추출 기록은 위 'AI 추출 원본'에서 확인하세요. "
-                   "현재 입력값과 실제 검증 오류만 최종 발행을 차단합니다.")
+                   "건 · 현재 입력 오류로 중복 집계하지 않습니다.")
+    if issues or current:
+        with st.expander(kind + " · 검증 상세 (필요할 때만 펼치기)", expanded=False):
+            seen = set()
+            for row in issues + current:
+                message = str(row.get("message") or "").strip()
+                key = (str(row.get("code")), str(row.get("key")), message)
+                if message and key not in seen:
+                    st.write(("수정 필요: " if row in issues else "확인 항목: ") + message)
+                    seen.add(key)
 
 
 def _discard_trade_final(kind: str) -> None:
@@ -902,7 +945,9 @@ def _render_trade_final_panel(digest: str, sources: dict, env: dict, *, edited_m
                     st.session_state["master_trade_final_files"] = bundle
                 except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as exc:
                     if isinstance(exc, review.TradeExportValidationError):
-                        _render_trade_issue_list(kind, {'issues': exc.issues})
+                        st.error(kind + " · 최종 검증 중 실제 오류 " +
+                                 str(len(exc.issues)) + "건이 확인됐습니다. "
+                                 "위 검증 상세에서 현재 입력을 확인해 주세요.")
                     elif str(exc).startswith(('승인 후 문서', '최종 PDF 생성에 대한 사용자')):
                         st.error(str(exc))
                     else:
@@ -994,34 +1039,94 @@ def _render_single_editor(digest: str, candidates: dict) -> None:
         last = st.session_state.get("ai_intake_last_answer")
         if last:
             st.caption("최근 반영: " + str(last) + " · 이전 PDF 및 검토 상태 무효화")
-        for field, label in fields:
-            if field.startswith(("buyer.", "seller.")) and field.split(".")[-1] in {"contact", "phone", "email"}:
-                if _render_contact_inputs(digest, candidates, field, label):
-                    continue
-            widget = "ai_intake_shared_" + _shared_widget_identity(digest) + "_" + field.replace(".", "_")
-            _initialize_shared_widget(widget, _shared_current(candidates, field))
-            help_text = ("누락 정보입니다. 확인한 값 또는 선택 항목의 N/A를 입력하세요."
-                         if field in gap_keys else None)
-            st.text_input(label, key=widget, help=help_text, on_change=_apply_shared_input,
-                          args=(digest, field, widget))
-            if field == "document_number":
-                st.button("문서번호 자동 생성", key=widget + "_generate",
-                          on_click=_generate_trade_numbers, args=(digest, widget))
-            if field in gap_keys and _shared_current(candidates, field):
-                st.button(label + " · 현재 값으로 누락 항목에도 반영",
-                          key=widget + "_apply_to_missing", on_click=_apply_input_to_missing,
-                          args=(digest, field, widget))
+        # The document list above is the source of truth. Contact details,
+        # shipping options and twenty per-item text editors are NOT part of the
+        # default path for an already-matched ECLADO order.
+        requested_kinds = {k for k in candidates if k in {"PI", "PO", "CI", "PL"}}
+        fields = [(key, label) for key, label in fields
+                  if (key != "shipment_reference" or requested_kinds & {"CI", "PL"})
+                  and (key != "country_of_origin" or "CI" in requested_kinds)
+                  and (key != "payment_terms" or requested_kinds & {"PI", "PO"})]
+        item_fields = [(key, label) for key, label in fields if key.startswith("item.")]
+        optional_names = {"buyer.contact", "buyer.phone", "buyer.email",
+                          "seller.contact", "seller.phone", "seller.email", "ship_to"}
+        optional_fields = [(key, label) for key, label in fields if key in optional_names]
+        core_fields = [(key, label) for key, label in fields
+                       if key not in optional_names and not key.startswith("item.")]
+
+        def _render_fields(selection):
+            for field, label in selection:
+                if (field.startswith(("buyer.", "seller."))
+                        and field.split(".")[-1] in {"contact", "phone", "email"}):
+                    if _render_contact_inputs(digest, candidates, field, label):
+                        continue
+                widget = ("ai_intake_shared_" + _shared_widget_identity(digest) +
+                          "_" + field.replace(".", "_"))
+                _initialize_shared_widget(widget, _shared_current(candidates, field))
+                help_text = ("누락 정보입니다. 확인한 값 또는 선택 항목의 N/A를 입력하세요."
+                             if field in gap_keys else None)
+                st.text_input(label, key=widget, help=help_text,
+                              on_change=_apply_shared_input, args=(digest, field, widget))
+                if field == "document_number":
+                    st.button("문서번호 자동 생성", key=widget + "_generate",
+                              on_click=_generate_trade_numbers, args=(digest, widget))
+                if field in gap_keys and _shared_current(candidates, field):
+                    st.button(label + " · 현재 값으로 누락 항목에도 반영",
+                              key=widget + "_apply_to_missing",
+                              on_click=_apply_input_to_missing, args=(digest, field, widget))
+
+        _render_fields(core_fields)
+        if optional_fields:
+            with st.expander("거래처 연락처·선택 배송정보 (필요 시 수정)", expanded=False):
+                st.caption("연락처 등 선택 정보는 빈칸으로 두고 최종 출력할 수 있습니다.")
+                _render_fields(optional_fields)
+
         item_count = max((len(doc.get("items") or []) for kind, doc in candidates.items()
                           if kind in {"PI", "PO", "CI", "PL"} and isinstance(doc, dict)), default=0)
-        for index in range(1, item_count):
-            st.markdown("**상품 " + str(index + 1) + "**")
-            for field, label in (("product_name", "상품명"), ("quantity", "수량"),
-                                 ("unit", "단위"), ("unit_price", "단가"),
-                                 ("price_basis", "단가 기준"), ("discount_percent", "할인율 % (없으면 0)")):
-                widget = "ai_intake_shared_" + _shared_widget_identity(digest) + "_item_" + str(index) + "_" + field
-                _initialize_shared_widget(widget, _shared_current(candidates, f"item.{index}.{field}"))
-                st.text_input(label, key=widget, on_change=_apply_extra_item,
-                              args=(digest, index, field, widget))
+        if item_count:
+            st.markdown("##### 추출된 상품 목록")
+            st.caption("상품명·규격·수량·가격을 한눈에 비교하세요. 필요한 행만 아래 상세 수정에서 고칠 수 있습니다.")
+            from Quotation_KEKOREA.agent.review_fields import _missing
+            for kind, doc in candidates.items():
+                if kind not in {"PI", "PO", "CI", "PL"} or not isinstance(doc, dict):
+                    continue
+                items = doc.get("items") or []
+                if len(requested_kinds) > 1:
+                    st.caption(kind + " · " + str(len(items)) + "개 상품")
+                st.dataframe([
+                    {"No": idx + 1, "상품명": item.get("product_name") or "",
+                     "규격": item.get("capacity") or "",
+                     "수량": item.get("paid_quantity") or item.get("quantity") or "",
+                     "단위": item.get("unit") or "",
+                     "단가": item.get("unit_price") if item.get("unit_price") is not None else "",
+                     "할인 %": item.get("discount_percent")
+                            if item.get("discount_percent") is not None else "",
+                     "단가 출처": "검증된 카탈로그" if item.get("master_price") is True else "개별 확인"}
+                    for idx, item in enumerate(items) if isinstance(item, dict)],
+                    hide_index=True, width="stretch")
+                absent_discounts = sum(
+                    _missing(item.get("discount_percent"), True)
+                    for item in items if isinstance(item, dict)) if kind != "PL" else 0
+                if absent_discounts:
+                    st.button(kind + " · 미입력 할인율 " + str(absent_discounts) +
+                              "개를 0%로 일괄 적용",
+                              key="ai_intake_zero_discount_" + digest[:12] + "_" + kind,
+                              help="사용자가 0%를 명시적으로 승인합니다. 기존에 입력된 할인율은 유지합니다.",
+                              on_click=_apply_bulk_zero_discount, args=(digest, kind))
+            with st.expander("상품별 상세 수정 (" + str(item_count) + "개)", expanded=item_count == 1):
+                _render_fields(item_fields)
+                for index in range(1, item_count):
+                    st.markdown("**상품 " + str(index + 1) + "**")
+                    for field, label in (("product_name", "상품명"), ("quantity", "수량"),
+                                         ("unit", "단위"), ("unit_price", "단가"),
+                                         ("price_basis", "단가 기준"),
+                                         ("discount_percent", "할인율 % (없으면 0)")):
+                        widget = ("ai_intake_shared_" + _shared_widget_identity(digest) +
+                                  "_item_" + str(index) + "_" + field)
+                        _initialize_shared_widget(
+                            widget, _shared_current(candidates, f"item.{index}.{field}"))
+                        st.text_input(label, key=widget, on_change=_apply_extra_item,
+                                      args=(digest, index, field, widget))
         if isinstance(candidates.get("CONTRACT"), dict):
             _render_contract_confirmations(digest, candidates["CONTRACT"])
         st.caption("입력 내용은 변경 시 자동 저장·재검증됩니다. "
@@ -1624,7 +1729,7 @@ def render_ai_intake(principal: str):
                 with st.container(border=True):
                     st.markdown("**" + doc.kind + " · 검토용 초안**")
                     if doc.blockers:
-                        with st.expander("누락·확인 필요 사항", expanded=True):
+                        with st.expander("초안 검토 상세 (선택)", expanded=False):
                             for issue in doc.blockers:
                                 st.write(str(issue))
                     for fmt, file in (doc.files or {}).items():
@@ -1632,21 +1737,9 @@ def render_ai_intake(principal: str):
                             data=file["content"], file_name=file["filename"],
                             mime=file["mime"], key=f"ai_intake_download_{doc.kind}_{fmt}")
             st.caption("생성된 파일은 최종 발행·계약 체결·메일 발송에 사용할 수 없습니다.")
-        # One shared editor above owns all commercial facts. The strict
-        # validator remains informative, not an additional input window.
-        trade_data = {k: v for k, v in candidates[1].items()
-                      if k in ("PI", "PO", "CI", "PL") and isinstance(v, dict)}
-        if trade_data:
-            with st.expander("현재 입력 확인사항 · 누락·오류 상세", expanded=True):
-                for kind, trade in trade_data.items():
-                    try:
-                        report = _current_trade_export_review().review_trade_document(
-                            kind, trade, final=True, allow_incomplete=True)
-                        _render_trade_issue_list(kind, report)
-                    except (ValueError, TypeError, KeyError, AttributeError, RuntimeError) as exc:
-                        # Corrupt historical candidate data should be a review
-                        # warning, not an unhandled Streamlit exception.
-                        st.warning(kind + " 확인 필요: 거래정보 형식을 다시 확인해 주세요.")
+        # The same report is shown in the FINAL panel below. Do not display a
+        # second expanded list of every AI note and each line-item omission.
+        st.caption("현재 문서별 검증 결과와 실제 수정 필요 항목은 아래 '최종 PDF'에서 한 번만 표시합니다.")
         st.divider()
         st.markdown("#### 기존 KE KOREA 양식 · PI / PO / CI / PL PDF·Excel")
         st.caption("현재 MASTER 앱에서 기존 업무 에이전트의 검증·직인·페이지 분할·PDF/XLSX 엔진을 직접 호출합니다. 기존 앱으로 이동하지 않습니다.")
@@ -1662,7 +1755,7 @@ def render_ai_intake(principal: str):
             st.caption("확인된 거래조건은 기존 KE KOREA 양식과 회사 직인을 사용합니다. "
                        "미확정 항목이 있거나 발행 검증이 통과하지 않으면, 같은 입력값으로 "
                        "직인 없는 '검토용 PDF' 파일을 생성합니다.")
-            if st.button("검토용 PDF 생성 · 최종 발행 아님", key="master_legacy_export", type="primary",
+            if st.button("검토용 PDF 생성 · 최종 발행 아님", key="master_legacy_export", type="secondary",
                          disabled=not editor_matches):
                 try:
                     render_master_trade_draft, render_incomplete_trade_pdf = (
@@ -1707,12 +1800,8 @@ def render_ai_intake(principal: str):
             if export_bundle and export_bundle[0] == edited_key:
                 for kind, reason in export_bundle[2].items():
                     st.warning(kind + " 정식 양식 발행 보류: " + reason)
-                    try:
-                        report = _current_trade_export_review().review_trade_document(
-                            kind, json.loads(raw)[kind], final=True, allow_incomplete=True)
-                        _render_trade_issue_list(kind, report)
-                    except (ValueError, TypeError, KeyError, AttributeError, RuntimeError):
-                        st.warning(kind + " 입력 데이터 형식을 확인하세요.")
+                    # FINAL panel below owns validation; do not repeat the
+                    # same historical AI and discount notes for DRAFT fallback.
                 for kind, files in export_bundle[1].items():
                     with st.container(border=True):
                         title = ("미확정 내부 검토용 PDF (정식 발행 아님)"

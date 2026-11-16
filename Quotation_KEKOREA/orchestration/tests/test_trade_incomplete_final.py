@@ -95,6 +95,70 @@ class IncompleteFinalTests(unittest.TestCase):
                 self.assertTrue(any(row['code'] == 'ai_conflict'
                                     for row in report['issues']))
 
+    def test_twenty_line_eclado_image_pi_uses_current_facts_not_old_ai_visual_note(self):
+        from PIL import Image
+        names = [
+            "Melaser Whitening Toner", "Melaser Whitening Serum",
+            "Melaser Turn Over Cream", "Melaser Radiance Cream",
+            "Exo Clinica Toner", "Exo Clinica Gel", "Exo Clinica Cream",
+            "Exo Clinica UV Suncream", "Cell Memory Cream",
+            "Golden Sandalwood Gua Sha", "Rescuer Cica Balm",
+            "Enhancer Mild Cleanser", "Purifying Cleanser",
+            "Enzyme Deep Cleanser Pure Powder", "Perfect Cleansing Smoothie Balm",
+            "Rejuven Fiber&Ampoule System", "Oxygen Bubble Pack",
+            "Whitening Enhancer Sun Blemish Balm", "Shining V-C Serum",
+            "Revitalizing Elastin & Collagen Serum",
+        ]
+        doc = deepcopy(self.doc)
+        doc["product_family"] = "cosmetics"
+        doc["source_image_attached"] = True
+        doc["document_number"] = "DRAFT"
+        doc["incoterms"] = ""
+        doc["payment_terms"] = ""
+        original_item = deepcopy(doc["items"][0])
+        doc["items"] = [
+            {**deepcopy(original_item), "product_name": name,
+             "quantity": str(15 if i == 7 else 5 if i == 15 else 10),
+             "paid_quantity": str(15 if i == 7 else 5 if i == 15 else 10),
+             "unit": "PCS", "price_basis": "PCS",
+             "unit_price": "12.50", "master_price": True,
+             "discount_percent": "0"}
+            for i, name in enumerate(names)]
+        doc["conflicts"] = [
+            "Order details were extracted from an image; visually confirm "
+            "product names, sizes, and quantities",
+            "Item 2 has no verifiable exact quote from the prompt; confirm its extracted facts",
+        ]
+        prior = deepcopy(doc)
+        report = self.report(doc)
+        self.assertTrue(report["ready"], report["issues"])
+        self.assertEqual(len(report["render_data"]["items"]), 20)
+        self.assertEqual(doc, prior)
+        self.assertEqual(len([row for row in report["warnings"]
+                              if row["code"] == "prior_ai_conflicts"]), 2)
+        self.assertFalse(report["render_data"]["conflicts"])
+        seal = BytesIO()
+        Image.new("RGB", (2, 2), "white").save(seal, format="PNG")
+        digest = review.trade_export_fingerprint("PI", doc, allow_incomplete=True)
+        with patch.object(exports, "resolve_company_seal",
+                          return_value=(Path("/missing/stamp.png"), seal.getvalue(), None)):
+            files = exports.render_master_trade_final(
+                "PI", doc, {}, approved=True, expected_fingerprint=digest,
+                allow_incomplete=True)
+        self.assertTrue(files["pdf"]["content"].startswith(b"%PDF"))
+        self.assertTrue(files["pdf"]["final"])
+
+    def test_actual_image_trade_conflict_still_blocks_and_image_without_source_cannot_bypass(self):
+        doc = deepcopy(self.doc)
+        doc["source_image_attached"] = True
+        doc["conflicts"] = ["The image states 10 PCS but the email states 20 PCS"]
+        self.assertFalse(self.report(doc)["ready"])
+        doc["conflicts"] = [
+            "Order details were extracted from an image; visually confirm "
+            "product names, sizes, and quantities"]
+        doc["source_image_attached"] = False
+        self.assertFalse(self.report(doc)["ready"])
+
     def test_placeholders_and_draft_number_become_blanks_not_optional_na(self):
         self.doc['document_number'] = 'DRAFT'
         self.doc['buyer']['legal_name'] = 'N/A'

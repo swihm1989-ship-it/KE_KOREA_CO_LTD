@@ -275,6 +275,34 @@ def _reconciled_payment_timing_note(note, candidate):
     return bool(re.search(r'\b(?:before|prior\s+to|on)\s+(?:the\s+)?$', before_date, re.I))
 
 
+def _historical_image_review_note(note, candidate):
+    """Treat source-image verification reminders as advice on owner approval.
+
+    A request to *visually confirm* image-extracted facts is not itself a
+    contradiction. The actual extracted facts still go through the original
+    quantity, price, SKU, currency and source-PI checks below. Do not suppress
+    conflicting numerical values or any generic AI conflict text.
+    """
+    if not candidate.get("source_image_attached"):
+        return False
+    items = candidate.get("items") or []
+    if not items or any(
+            not str(row.get("product_name") or "").strip()
+            or _quantity(row, candidate.get("document_type")) is None
+            or not str(row.get("unit") or "").strip()
+            for row in items if isinstance(row, Mapping)):
+        return False
+    text = str(note or "").strip().lower()
+    return bool(
+        re.fullmatch(
+            r"order details were extracted from an image;\s*visually confirm "
+            r"product names, sizes, and quantities\.?|"
+            r"item \d+ has no verifiable exact quote from the prompt;\s*"
+            r"confirm its extracted facts\.?",
+            text)
+    )
+
+
 def review_trade_document(kind, source, *, final=False, allow_optional_na=False, allow_incomplete=False):
     """Describe real gaps separately from old AI notes; never mutates input.
 
@@ -307,6 +335,7 @@ def review_trade_document(kind, source, *, final=False, allow_optional_na=False,
         candidate['conflicts'] = [
             note for note in candidate.get('conflicts') or []
             if not _reconciled_payment_timing_note(note, candidate)
+            and not _historical_image_review_note(note, candidate)
         ]
         # All other conflicts remain validation blockers; historic notes are
         # retained separately for display, not silently discarded from source.
