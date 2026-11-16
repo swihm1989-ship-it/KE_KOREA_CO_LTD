@@ -106,31 +106,45 @@ def extract_trade_data(prompt, *, images=None, env=None, opener=urllib.request.u
                "input": [{"role": "user", "content": content}],
                "text": {"format": {"type": "json_schema", "name": "trade_document_draft",
                                     "strict": True, "schema": schema}},
-               "max_output_tokens": 12000 if packing_source or any(p['type'] == 'input_file' for p in content) or (requested_document_type == 'CI' and images) else 5000}
-    request = urllib.request.Request("https://api.openai.com/v1/responses",
-        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"}, method="POST")
+               "max_output_tokens": (16000 if any(p['type'] == 'input_image' for p in content)
+                                     else 12000 if packing_source or any(p['type'] == 'input_file' for p in content)
+                                     or (requested_document_type == 'CI' and images)
+                                     else 5000)}
     pdf_attached = any(item.get("mime_type") == "application/pdf" for item in images or [])
     with operation('ai.request', model=model) as observation:
-        try:
-            with opener(request, timeout=90) as response:
-                result = json.loads(response.read().decode("utf-8"))
-                observation.usage(result)
-        except urllib.error.HTTPError as exc:
-            observation.failure(exc)
-            detail = ""
+        for attempt in range(2):
+            # Each retry uses the same source bytes, schema and selected document.
+            # Only the output-token allowance changes; partial JSON is never used.
+            request = urllib.request.Request("https://api.openai.com/v1/responses",
+                data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"}, method="POST")
             try:
-                body = json.loads(exc.read().decode("utf-8"))
-                error = body.get("error") if isinstance(body, dict) else None
-                if isinstance(error, dict) and error.get("message"):
-                    detail = f": {error['message']}"
-            except (UnicodeDecodeError, json.JSONDecodeError):
-                pass
-            source = "attached PDF" if pdf_attached else "request"
-            raise RuntimeError(f"OpenAI could not process the {source} (HTTP {exc.code}){detail}") from None
-        except (urllib.error.URLError, TimeoutError) as exc:
-            observation.failure(exc)
-            raise RuntimeError("OpenAI API could not be reached; check your network connection") from None
+                with opener(request, timeout=90) as response:
+                    result = json.loads(response.read().decode("utf-8"))
+                    observation.usage(result)
+            except urllib.error.HTTPError as exc:
+                observation.failure(exc)
+                detail = ""
+                try:
+                    body = json.loads(exc.read().decode("utf-8"))
+                    error = body.get("error") if isinstance(body, dict) else None
+                    if isinstance(error, dict) and error.get("message"):
+                        detail = f": {error['message']}"
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    pass
+                source = "attached PDF" if pdf_attached else "request"
+                raise RuntimeError(f"OpenAI could not process the {source} (HTTP {exc.code}){detail}") from None
+            except (urllib.error.URLError, TimeoutError) as exc:
+                observation.failure(exc)
+                raise RuntimeError("OpenAI API could not be reached; check your network connection") from None
+            details = result.get("incomplete_details") if isinstance(result, dict) else None
+            reason = details.get("reason") if isinstance(details, dict) else None
+            if (attempt == 0 and isinstance(result, dict)
+                    and result.get("status") == "incomplete"
+                    and reason == "max_output_tokens"):
+                payload["max_output_tokens"] = min(32768, payload["max_output_tokens"] * 2)
+                continue
+            break
         if not isinstance(result, dict):
             raise RuntimeError("OpenAI returned an invalid response; no document was created")
         if result.get("status") == "incomplete":
@@ -140,6 +154,10 @@ def extract_trade_data(prompt, *, images=None, env=None, opener=urllib.request.u
                 raise RuntimeError(
                     "The PDF was received, but extraction exceeded the response limit. "
                     "Split the PDF into fewer pages and upload the parts separately."
+                )
+            if reason == "max_output_tokens":
+                raise RuntimeError(
+                    "OpenAI extraction exceeded the response limit (max_output_tokens) after retry; no document was created"
                 )
             raise RuntimeError(f"OpenAI extraction was incomplete{f' ({reason})' if reason else ''}; no document was created")
         api_error = result.get("error")
