@@ -1174,6 +1174,58 @@ def _render_single_editor(digest: str, candidates: dict) -> None:
                      "단가 출처": "검증된 카탈로그" if item.get("master_price") is True else "개별 확인"}
                     for idx, item in enumerate(items) if isinstance(item, dict)],
                     hide_index=True, width="stretch")
+                # Missing item fields must be editable HERE, directly below
+                # the preview table. Previously every row editor was hidden
+                # in a collapsed twenty-product expander, so a blank item 2
+                # could not be found without scrolling through 120 widgets.
+                missing_indices = [
+                    idx for idx, item in enumerate(items)
+                    if isinstance(item, dict) and _item_needs_correction(kind, item)]
+                if missing_indices:
+                    st.info(kind + " · 상품정보 미입력 " +
+                            ", ".join(str(i + 1) for i in missing_indices) +
+                            "번 · 아래에서 수정하면 저장되고 가격표를 다시 조회합니다.")
+                    for idx in missing_indices:
+                        item = items[idx]
+                        with st.container(border=True):
+                            st.markdown("**" + kind + " · 상품 " + str(idx + 1) +
+                                        " 정보 바로 보완**")
+                            cols = st.columns([3, 1, 1])
+                            first = (("product_name", "상품명"),
+                                     ("capacity", "규격"),
+                                     ("product_code", "SKU/모델"))
+                            for col, (field, label) in zip(cols, first):
+                                widget = ("ai_intake_shared_" +
+                                          _shared_widget_identity(digest) +
+                                          "_fix_" + kind + "_" + str(idx) + "_" + field)
+                                _initialize_shared_widget(
+                                    widget, str(item.get(field) or "").strip())
+                                with col:
+                                    st.text_input(
+                                        kind + " · 상품 " + str(idx + 1) + " · " + label,
+                                        key=widget, on_change=_apply_scoped_item,
+                                        args=(digest, kind, idx, field, widget))
+                            required = [("quantity", "수량"), ("unit", "단위")]
+                            if kind != "PL":
+                                required += [("unit_price", "단가"),
+                                             ("price_basis", "단가 기준")]
+                            for field, label in required:
+                                # Show known numbers as context, but only ask
+                                # user to type missing facts (catalog price may
+                                # appear automatically after naming the item).
+                                if field == "quantity" and not _missing(
+                                        item.get("paid_quantity") or item.get("quantity"), True):
+                                    continue
+                                if not _missing(item.get(field), True):
+                                    continue
+                                widget = ("ai_intake_shared_" +
+                                          _shared_widget_identity(digest) +
+                                          "_fix_" + kind + "_" + str(idx) + "_" + field)
+                                _initialize_shared_widget(widget, str(item.get(field) or ""))
+                                st.text_input(
+                                    kind + " · 상품 " + str(idx + 1) + " · " + label,
+                                    key=widget, on_change=_apply_scoped_item,
+                                    args=(digest, kind, idx, field, widget))
                 absent_discounts = sum(
                     _missing(item.get("discount_percent"), True)
                     for item in items if isinstance(item, dict)) if kind != "PL" else 0
