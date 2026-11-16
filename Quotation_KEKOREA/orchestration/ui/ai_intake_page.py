@@ -354,6 +354,13 @@ def _remember_candidate_bundle(digest: str, candidate_map: dict, *, replace_edit
         st.session_state.pop("ai_intake_followup_error", None)
     candidate_map = {kind: normalize_trade_values(data) if kind in {"PI", "PO", "CI", "PL"} else data
                      for kind, data in candidate_map.items()}
+    # Resolve explicit user-authored PO buyer/supplier roles only on the NEW
+    # extraction, never on edits to an already-reviewed PO. Imported customer
+    # orders can otherwise leave their PI seller/buyer on the generated PO.
+    if replace_editor and (not previous or previous[0] != digest):
+        from Quotation_KEKOREA.agent.mail_party_bridge import apply_explicit_po_roles
+        candidate_map = apply_explicit_po_roles(
+            candidate_map, st.session_state.get("ai_intake_instruction") or "")
     candidate_map = _master_catalog_pricing(candidate_map)
     candidate_map = apply_default_list_prices(candidate_map)
     st.session_state["ai_intake_catalog_revision"] = _MASTER_ECLADO_CATALOG_REVISION
