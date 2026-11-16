@@ -72,5 +72,16 @@ def reuse_legacy_catalog(candidates, catalog):
             apply_verified_eclado_prices(document, catalog)
         elif (document.get("product_family") == "cosmetics"
               or is_eclado_supplier(_company_name(document, "seller"))):
+            # A previous verified price is specific to its buyer/supplier.
+            # If that party changes, retain product identity but never leak
+            # Dear Glow's sales quote or ECLADO's cost to another counterparty.
+            if kind in {"PI", "PO"}:
+                for item in document.get("items") or []:
+                    if (isinstance(item, dict) and item.get("master_price") is True
+                            and str(item.get("price_source") or "").startswith(
+                                "Verified ECLADO catalog;")):
+                        item["unit_price"] = None
+                        item["price_source"] = None
+                        item["master_price"] = False
             apply_catalog_product_matches(document, catalog)
     return result
