@@ -612,6 +612,76 @@ def _apply_extra_item(digest: str, index: int, field: str, widget: str) -> None:
     st.session_state.pop("ai_intake_followup_error", None)
 
 
+def _apply_scoped_item(digest: str, kind: str, index: int,
+                       field: str, widget: str) -> None:
+    """Save one visible missing-product field to its OWN document and row.
+
+    The former generic item editor applied index N to every PI/PO/CI/PL at
+    once, even when a PO has purchase prices and a PI has sale prices.
+    Edits must never reprice another document silently.
+    """
+    saved = st.session_state.get("ai_intake_candidates")
+    if not saved or saved[0] != digest or not _is_current_shared_widget(digest, widget):
+        return
+    doc = saved[1].get(kind)
+    if kind not in {"PI", "PO", "CI", "PL"} or not isinstance(doc, dict):
+        return
+    rows = doc.get("items") or []
+    if not isinstance(index, int) or index < 0 or index >= len(rows):
+        return
+    raw = str(st.session_state.get(widget) or "").strip()
+    if field in {"unit", "price_basis"}:
+        raw = raw.upper()
+    try:
+        revised_doc = apply_answer(
+            {kind: doc}, f"item.{index}.{field}", raw, allow_blank=True)[kind]
+        changed = revised_doc["items"][index]
+        previous = rows[index]
+        # Replacing a verified identity invalidates that identity's old
+        # price, so the existing KE KOREA catalog engine can rematch/reprice.
+        if (field in {"product_name", "capacity", "product_code"}
+                and raw != str(previous.get(field) or "").strip()):
+            changed.pop("product_id", None)
+            if previous.get("master_price") is True:
+                changed["unit_price"] = None
+                changed["master_price"] = False
+                changed["price_source"] = None
+                changed.pop("price_override_confirmed", None)
+        if field == "unit_price":
+            changed["price_source"] = (
+                "User-entered value in document review" if raw else None)
+            if not raw:
+                changed["master_price"] = False
+                changed.pop("price_override_confirmed", None)
+        updated = deepcopy(saved[1])
+        updated[kind] = revised_doc
+        _remember_candidate_bundle(digest, updated)
+    except (ValueError, TypeError, KeyError, RuntimeError) as exc:
+        _record_input_error(digest, f"{kind}.item.{index}.{field}",
+                            widget, str(exc))
+        return
+    _clear_input_error(widget)
+    st.session_state["ai_intake_last_answer"] = (
+        kind + " · 상품 " + str(index + 1) + " · " + field)
+    st.session_state.pop("ai_intake_followup_error", None)
+
+
+def _item_needs_correction(kind: str, item: dict) -> bool:
+    """Only actual absent line inputs, not all historical AI warning notes."""
+    from Quotation_KEKOREA.agent.review_fields import _missing
+    if _missing(item.get("product_name"), True):
+        return True
+    if _missing(item.get("unit"), True):
+        return True
+    if all(_missing(item.get(key), True)
+           for key in ("quantity", "paid_quantity", "shipped_quantity")):
+        return True
+    if kind != "PL" and (_missing(item.get("unit_price"), True)
+                        or _missing(item.get("price_basis"), True)):
+        return True
+    return False
+
+
 def _apply_bulk_zero_discount(digest: str, kind: str) -> None:
     """Owner-approved single action: fill only absent line discounts with 0%.
 
