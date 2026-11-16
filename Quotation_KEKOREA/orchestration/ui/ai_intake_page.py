@@ -35,7 +35,7 @@ FOLLOWUP_MODULE = "Quotation_KEKOREA.orchestration.workflows.intake_followups"
 PDF_EXPORT_MODULE = "Quotation_KEKOREA.orchestration.workflows.legacy_document_exports"
 PDF_EXPORT_REVISION = "review-pdf-safe-loader-20261113-v4"
 TRADE_REVIEW_MODULE = "Quotation_KEKOREA.orchestration.workflows.trade_export_review"
-TRADE_REVIEW_REVISION = "prior-ai-notes-optional-20261116-v2"
+TRADE_REVIEW_REVISION = "payment-conflict-reconcile-20261116-v3"
 AI_INTAKE_REVISION = "ai-intake-hot-reload-20261113-v9"
 
 _PDF_LOGGER = logging.getLogger("master.trade_final_pdf")
@@ -724,18 +724,27 @@ def _generate_trade_numbers(digest: str, widget: str) -> None:
 def _render_trade_issue_list(kind: str, report: dict) -> None:
     warnings = report.get("warnings") or []
     issues = report.get("issues") or []
-    if warnings:
-        st.warning(kind + " · 누락·확인 필요 " + str(len(warnings)) + "건 · 승인 시 빈칸 유지")
-        for row in warnings:
-            prefix = ("이전 AI 기록 · " if row["code"] in {"ai_missing", "ai_conflict"} else "")
-            st.text(prefix + row["message"])
+    historical = [row for row in warnings
+                  if str(row.get("code") or "").startswith("prior_ai_")]
+    current_warnings = [row for row in warnings if row not in historical]
+    if current_warnings:
+        st.warning(kind + " · 현재 누락·확인 필요 " + str(len(current_warnings)) +
+                   "건 · 승인 시 미확정값은 빈칸 유지")
+        for row in current_warnings:
+            st.text(row["message"])
     if issues:
         st.warning(kind + " · 발행 전 수정 필요 " + str(len(issues)) + "건")
         for row in issues:
             prefix = ("이전 AI 기록 · " if row["code"] in {"ai_missing", "ai_conflict"} else "")
             st.text(prefix + row["message"])
-    elif not warnings:
+    elif not current_warnings:
         st.success(kind + " · 현재 입력값 검증 통과")
+    if historical:
+        with st.expander("과거 AI 추출 참고 · " + str(len(historical)) + "건", expanded=False):
+            st.caption("최초 메일의 참고 기록입니다. 아래 최종 출력은 현재 입력값과 "
+                       "실제 충돌·계산 오류를 별도로 검증합니다.")
+            for row in historical:
+                st.text(row["message"])
 
 
 def _discard_trade_final(kind: str) -> None:
@@ -1499,7 +1508,7 @@ def render_ai_intake(principal: str):
             st.caption("확인된 거래조건은 기존 KE KOREA 양식과 회사 직인을 사용합니다. "
                        "미확정 항목이 있거나 발행 검증이 통과하지 않으면, 같은 입력값으로 "
                        "직인 없는 '검토용 PDF' 파일을 생성합니다.")
-            if st.button("현재 거래정보로 PDF 생성", key="master_legacy_export", type="primary",
+            if st.button("검토용 PDF 생성 · 최종 발행 아님", key="master_legacy_export", type="primary",
                          disabled=not editor_matches):
                 try:
                     render_master_trade_draft, render_incomplete_trade_pdf = (
@@ -1522,10 +1531,17 @@ def render_ai_intake(principal: str):
                             # user's still-unconfirmed facts (no fake bank data).
                             try:
                                 results[kind] = render_incomplete_trade_pdf(kind, updated[kind])
-                                errors[kind] = (
-                                    _formal_pdf_hold_reason(kind, exc, env) +
-                                    " 아래 PDF는 정식 발행본이 아닌 내부 검토용입니다."
-                                )
+                                approved_review = _current_trade_export_review().review_trade_document(
+                                    kind, updated[kind], final=True, allow_incomplete=True)
+                                if approved_review["ready"]:
+                                    errors[kind] = (
+                                        "이 버튼은 검토용 PDF만 생성합니다. 정식 발행은 아래 "
+                                        "'최종 PDF'에서 현재 거래정보 승인 후 생성하세요.")
+                                else:
+                                    errors[kind] = (
+                                        _formal_pdf_hold_reason(kind, exc, env) +
+                                        " 아래 PDF는 내부 검토용이며 정식 발행본이 아닙니다."
+                                    )
                             except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as fallback:
                                 errors[kind] = ("PDF 생성 오류: " + str(fallback))[:400]
                     st.session_state["master_legacy_files"] = (edited_key, results, errors)
@@ -1539,7 +1555,7 @@ def render_ai_intake(principal: str):
                     st.warning(kind + " 정식 양식 발행 보류: " + reason)
                     try:
                         report = _current_trade_export_review().review_trade_document(
-                            kind, json.loads(raw)[kind])
+                            kind, json.loads(raw)[kind], final=True, allow_incomplete=True)
                         _render_trade_issue_list(kind, report)
                     except (ValueError, TypeError, KeyError, AttributeError, RuntimeError):
                         st.warning(kind + " 입력 데이터 형식을 확인하세요.")
