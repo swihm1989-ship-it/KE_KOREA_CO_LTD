@@ -260,6 +260,21 @@ class AiIntakeUiTests(unittest.TestCase):
             self.assertFalse(any("최신 버전으로" in e.message for e in app.error))
             self.assertIsNotNone(app.button(key="ai_intake_extract"))
 
+    def test_same_revision_but_stale_source_cache_reloads_before_render(self):
+        """A live process must not keep the prior editor after code is redeployed.
+
+        The existing revision-only guard misses deployments where a developer
+        changes item controls but forgets to bump the version string.
+        """
+        from Quotation_KEKOREA.orchestration.ui import ai_intake_page
+        with (patch.object(ai_intake_page, "AI_INTAKE_SOURCE_MTIME_NS", -1, create=True),
+              patch.object(ai_intake_page, "render_ai_intake",
+                           side_effect=AssertionError("stale editor was rendered"))):
+            app = AppTest.from_file(str(PAGE), default_timeout=25).run()
+            app.radio[0].set_value("AI 업무 요청").run()
+            self.assertFalse(app.exception, [e.message for e in app.exception])
+            self.assertIsNotNone(app.button(key="ai_intake_extract"))
+
     def test_cached_legacy_apply_answer_reloads_and_preserves_user_edit(self):
         from Quotation_KEKOREA.orchestration.ui import ai_intake_page
         from Quotation_KEKOREA.orchestration.workflows import intake_followups
