@@ -1,6 +1,7 @@
 """Parse explicit commercial notation without supplying product-based defaults."""
 from copy import deepcopy
 from collections.abc import Mapping
+from decimal import Decimal, InvalidOperation
 import re
 
 from Quotation_KEKOREA.agent.trade_documents import normalize_quantity_unit
@@ -98,6 +99,38 @@ def apply_default_list_prices(candidates):
                          and not item['discount_percent'].strip())):
                 item['discount_percent'] = '0'
     return result
+
+
+
+def apply_bulk_discount(candidates, kind, percent):
+    """Override ONLY one PI/PO's item discounts after an explicit button click.
+
+    Promotions and derived free/shipped quantities are unchanged, as are the
+    catalog-sourced list unit prices and every other document in the bundle.
+    A 0% rate means full list price; missing unit prices remain missing.
+    """
+    if kind not in {"PI", "PO"}:
+        raise ValueError("일괄 할인율은 PI 또는 PO에만 적용할 수 있습니다.")
+    if not isinstance(candidates, Mapping):
+        raise ValueError("거래 문서가 올바르지 않습니다.")
+    raw = str(percent if percent is not None else "").strip()
+    try:
+        rate = Decimal(raw)
+    except (InvalidOperation, ValueError, TypeError):
+        raise ValueError("할인율은 0~100 사이의 숫자로 입력하세요.") from None
+    if not raw or not rate.is_finite() or rate < 0 or rate > 100:
+        raise ValueError("할인율은 0~100 사이의 숫자로 입력하세요.")
+    revised = deepcopy(dict(candidates))
+    doc = revised.get(kind)
+    if not isinstance(doc, dict):
+        raise ValueError("일괄 적용할 PI/PO 문서가 없습니다.")
+    if not any(isinstance(row, dict) for row in (doc.get("items") or [])):
+        raise ValueError("할인율을 적용할 상품이 없습니다.")
+    value = format(rate.normalize(), "f")
+    for row in doc.get("items") or []:
+        if isinstance(row, dict):
+            row["discount_percent"] = value
+    return revised
 
 
 def normalize_analysis_values(analysis):
