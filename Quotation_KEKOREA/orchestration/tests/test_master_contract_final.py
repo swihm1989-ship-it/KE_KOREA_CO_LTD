@@ -126,22 +126,49 @@ class MasterContractFinalParityTests(TestCase):
                     authorized=True, expected_fingerprint=prior_fingerprint)
             seal.assert_not_called()
 
-    def test_unconfirmed_ai_conditions_and_missing_signers_block_final(self):
-        snapshot = confirmed_sale()
-        snapshot["parties"][0]["status"] = "suggested"
-        snapshot["terms"][0]["status"] = "suggested"
-        errors = contract_final_blockers(snapshot, {})
-        self.assertTrue(any("당사자" in line for line in errors))
-        self.assertTrue(any("계약조건" in line or "AI 제안" in line for line in errors))
+    def test_ai_suggestions_use_original_final_policy_not_extra_master_gates(self):
+        from Quotation_KEKOREA.contracts.final_policy import final_document_blockers
+        candidate = confirmed_sale()
+        candidate["parties"][0]["status"] = "suggested"
+        candidate["terms"][0]["status"] = "suggested"
+        # The original app explicitly calls these suggestions advisory.
+        self.assertEqual(contract_final_blockers(candidate, {}),
+                         final_document_blockers(candidate))
+        with patch("Quotation_KEKOREA.contracts.ui._verified_contract_seal",
+                   return_value=synthetic_seal()) as seal:
+            files = render_original_final(
+                candidate, {}, principal="owner@example.test",
+                approved=True, authorized=True,
+                expected_fingerprint=contract_fingerprint(candidate))
+            self.assertTrue(files["pdf"]["content"].startswith(b"%PDF"))
+            seal.assert_called_once()
+        candidate["parties"] = [candidate["parties"][1]]
+        self.assertTrue(contract_final_blockers(candidate, {}))
         with patch("Quotation_KEKOREA.contracts.ui._verified_contract_seal") as seal:
             with self.assertRaises(ValueError):
-                render_original_final(
-                    snapshot, {}, principal="test@example.test", approved=True,
-                    authorized=True, expected_fingerprint=contract_fingerprint(snapshot))
+                render_original_final(candidate, {}, principal="owner@example.test",
+                                      approved=True, authorized=True,
+                                      expected_fingerprint=contract_fingerprint(candidate))
             seal.assert_not_called()
-        snapshot["parties"] = [snapshot["parties"][1]]
-        self.assertTrue(any("직인" in text or "Seller" in text
-                            for text in contract_final_blockers(snapshot, {})))
+
+    def test_unresolved_placeholder_requires_explicit_opt_in_like_legacy(self):
+        candidate = confirmed_sale()
+        candidate["clauses"][0]["sentences"][0]["text"] += " [TO CONFIRM]"
+        self.assertTrue(contract_final_blockers(candidate, {}))
+        self.assertEqual(contract_final_blockers(
+            candidate, {}, allow_unresolved_text=True), [])
+        with patch("Quotation_KEKOREA.contracts.ui._verified_contract_seal",
+                   return_value=synthetic_seal()):
+            with self.assertRaises(ValueError):
+                render_original_final(candidate, {}, principal="owner@example.test",
+                    approved=True, authorized=True,
+                    expected_fingerprint=contract_fingerprint(candidate))
+            files = render_original_final(
+                candidate, {}, principal="owner@example.test",
+                approved=True, authorized=True,
+                expected_fingerprint=contract_fingerprint(candidate),
+                allow_unresolved_text=True)
+            self.assertTrue(files["pdf"]["content"].startswith(b"%PDF"))
 
     def test_explicit_record_confirmation_never_auto_approves_a_changed_party(self):
         snapshot = confirmed_sale()
@@ -175,31 +202,30 @@ class MasterContractFinalParityTests(TestCase):
                 "country": "",
             }, sort_keys=True, ensure_ascii=False))
 
-    def test_unconfirmed_ai_review_issue_blocks_until_user_action(self):
+    def test_review_issues_are_advisory_for_final_but_can_be_recorded(self):
         from Quotation_KEKOREA.orchestration.workflows.master_contract_final import (
             confirm_contract_issue,
         )
+        from Quotation_KEKOREA.contracts.final_policy import final_document_blockers
         original = confirmed_sale()
         original["issues"] = [
             {"severity": "confirm", "code": "synthetic-review",
-             "message": "Confirm synthetic payment deadline", "confirmed": False},
+             "message": "Review synthetic payment deadline", "confirmed": False},
             {"severity": "block", "code": "synthetic-block",
-             "message": "Missing independent approval"},
+             "message": "Independent reviewer flag"},
         ]
-        self.assertTrue(any("Confirm synthetic payment deadline" in m
-                            for m in contract_final_blockers(original, {})))
-        snapshot = deepcopy(original)
+        self.assertEqual(contract_final_blockers(original, {}),
+                         final_document_blockers(original))
+        prior = deepcopy(original)
         updated = confirm_contract_issue(
-            original, 0, "Confirm synthetic payment deadline")
+            original, 0, "Review synthetic payment deadline")
         self.assertTrue(updated["issues"][0]["confirmed"])
-        self.assertEqual(original, snapshot)
+        self.assertEqual(original, prior)
         self.assertFalse(updated["issues"][1].get("confirmed"))
-        self.assertTrue(any("Missing independent approval" in m
-                            for m in contract_final_blockers(updated, {})))
         with self.assertRaises(ValueError):
-            confirm_contract_issue(updated, 1, "Missing independent approval")
+            confirm_contract_issue(updated, 1, "Independent reviewer flag")
         with self.assertRaises(ValueError):
-            confirm_contract_issue(original, 0, "Different old message")
+            confirm_contract_issue(original, 0, "Unrelated note")
 
     def test_non_master_contract_never_claims_to_be_new_master_final(self):
         original = confirmed_sale()
