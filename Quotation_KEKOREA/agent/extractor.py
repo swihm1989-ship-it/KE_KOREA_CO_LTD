@@ -3,8 +3,13 @@ from Quotation_KEKOREA.observability.core import operation, traced
 import json
 import os
 from pathlib import Path
+import time
 import urllib.error
 import urllib.request
+
+
+TRADE_EXTRACTOR_REVISION = "master-long-image-timeout-20261117-v1"
+TRADE_EXTRACTOR_SOURCE_MTIME_NS = Path(__file__).stat().st_mtime_ns
 
 
 def load_env(path=None, secrets=None):
@@ -111,32 +116,60 @@ def extract_trade_data(prompt, *, images=None, env=None, opener=urllib.request.u
                                      or (requested_document_type == 'CI' and images)
                                      else 5000)}
     pdf_attached = any(item.get("mime_type") == "application/pdf" for item in images or [])
+    # An attached image/PDF can require a longer model processing interval.
+    # The older uniform 90s socket timeout caused verified production failures
+    # at 90.2s for ECLADO multi-item PO analysis on 2026-11-17.
+    response_timeout = 180 if images else 90
     with operation('ai.request', model=model) as observation:
         for attempt in range(2):
-            # Each retry uses the same source bytes, schema and selected document.
-            # Only the output-token allowance changes; partial JSON is never used.
-            request = urllib.request.Request("https://api.openai.com/v1/responses",
-                data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-                headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"}, method="POST")
-            try:
-                with opener(request, timeout=90) as response:
-                    result = json.loads(response.read().decode("utf-8"))
-                    observation.usage(result)
-            except urllib.error.HTTPError as exc:
-                observation.failure(exc)
-                detail = ""
+            # Output-limit retries still use the original image/PDF and schema.
+            # Separately permit ONE retry for a transient network/timeout
+            # failure. Provider HTTP errors are never blindly retried.
+            for network_attempt in range(2):
+                request = urllib.request.Request("https://api.openai.com/v1/responses",
+                    data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                    headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"}, method="POST")
                 try:
-                    body = json.loads(exc.read().decode("utf-8"))
-                    error = body.get("error") if isinstance(body, dict) else None
-                    if isinstance(error, dict) and error.get("message"):
-                        detail = f": {error['message']}"
-                except (UnicodeDecodeError, json.JSONDecodeError):
-                    pass
-                source = "attached PDF" if pdf_attached else "request"
-                raise RuntimeError(f"OpenAI could not process the {source} (HTTP {exc.code}){detail}") from None
-            except (urllib.error.URLError, TimeoutError) as exc:
-                observation.failure(exc)
-                raise RuntimeError("OpenAI API could not be reached; check your network connection") from None
+                    with opener(request, timeout=response_timeout) as response:
+                        result = json.loads(response.read().decode("utf-8"))
+                        observation.usage(result)
+                    break
+                except urllib.error.HTTPError as exc:
+                    observation.failure(exc)
+                    detail = ""
+                    try:
+                        body = json.loads(exc.read().decode("utf-8"))
+                        error = body.get("error") if isinstance(body, dict) else None
+                        if isinstance(error, dict) and error.get("message"):
+                            detail = f": {error['message']}"
+                    except (UnicodeDecodeError, json.JSONDecodeError):
+                        pass
+                    source = "attached PDF" if pdf_attached else "request"
+                    raise RuntimeError(f"OpenAI could not process the {source} (HTTP {exc.code}){detail}") from None
+                except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
+                    if network_attempt == 0:
+                        observation.retry_count += 1
+                        time.sleep(0.8)
+                        continue
+                    # Never print API keys, hostnames, source order content or
+                    # urllib exception text in authenticated Streamlit UI/logs.
+                    if isinstance(exc, ConnectionError) and not isinstance(exc, TimeoutError):
+                        observation.fail_code("network")
+                    else:
+                        observation.failure(exc)
+                    timed_out = (isinstance(exc, TimeoutError)
+                                 or isinstance(getattr(exc, "reason", None), TimeoutError))
+                    if timed_out:
+                        raise RuntimeError(
+                            "OpenAI API 응답 시간 초과: Master 서버에서 OpenAI 응답을 "
+                            f"설정된 대기시간({response_timeout}초/회) 내에 받지 못했습니다. "
+                            "1회 자동 재시도도 실패했습니다. 잠시 후 다시 시도하세요."
+                        ) from None
+                    raise RuntimeError(
+                        "OpenAI API 연결 실패: Master 서버와 OpenAI 간 통신이 "
+                        "일시적으로 불안정합니다. 1회 자동 재시도도 실패했습니다. "
+                        "잠시 후 다시 시도하세요."
+                    ) from None
             details = result.get("incomplete_details") if isinstance(result, dict) else None
             reason = details.get("reason") if isinstance(details, dict) else None
             if (attempt == 0 and isinstance(result, dict)
