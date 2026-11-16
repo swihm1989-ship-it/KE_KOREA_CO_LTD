@@ -37,7 +37,9 @@ PDF_EXPORT_MODULE = "Quotation_KEKOREA.orchestration.workflows.legacy_document_e
 PDF_EXPORT_REVISION = "review-pdf-safe-loader-20261113-v4"
 TRADE_REVIEW_MODULE = "Quotation_KEKOREA.orchestration.workflows.trade_export_review"
 TRADE_REVIEW_REVISION = "image-advisory-schema-fix-20261116-v5"
-AI_INTAKE_REVISION = "master-image-notes-final-20261116-v14"
+AI_INTAKE_REVISION = "master-per-item-promotion-20261117-v15"
+# Detect a changed source file even when the cached module has the same revision.
+AI_INTAKE_SOURCE_MTIME_NS = os.stat(__file__).st_mtime_ns
 
 _PDF_LOGGER = logging.getLogger("master.trade_final_pdf")
 
@@ -1744,6 +1746,7 @@ def render_ai_intake(principal: str):
     if not principal:
         raise PermissionError("로그인이 필요합니다.")
     st.subheader("AI 거래조건 추출 · 기존 문서 엔진 연결")
+    st.caption("화면 업데이트: 2026-11-17 · 상품별 할인율·증정행사 선택 지원")
     st.caption("문서 작업은 이 화면에서 진행합니다. 검토용 초안과 최종 발행 문서는 기존 검증·승인 규칙에 따라 구분합니다.")
     st.caption("기존 계약서 분석 AI를 사용해 자연어에서 거래조건을 제안합니다. 확정·발행·전송은 자동으로 하지 않습니다.")
     st.info("AI 요청에는 아래 입력 내용과 직접 선택한 참고파일만 전송합니다. 저장된 계약서는 모델에 전달되지 않습니다.")
