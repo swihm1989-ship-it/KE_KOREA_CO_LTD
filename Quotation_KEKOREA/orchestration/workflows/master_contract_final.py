@@ -13,7 +13,6 @@ from typing import Any, Mapping
 
 from Quotation_KEKOREA.contracts.final_policy import final_document_blockers
 from Quotation_KEKOREA.contracts.models import validate_snapshot
-from Quotation_KEKOREA.contracts.rules import validate_snapshot as contract_rule_issues
 
 
 def contract_fingerprint(snapshot: Mapping[str, Any]) -> str:
@@ -25,37 +24,32 @@ def contract_fingerprint(snapshot: Mapping[str, Any]) -> str:
     return sha256(source).hexdigest()
 
 
-def contract_final_blockers(snapshot: Mapping[str, Any], env: Mapping[str, str]) -> list[str]:
-    """Fail closed; stricter than legacy advisory-only final validation."""
+def contract_final_blockers(snapshot: Mapping[str, Any], env: Mapping[str, str],
+                            *, allow_unresolved_text: bool = False) -> list[str]:
+    """Exactly the original KE KOREA FINAL content policy, not a second gate.
+
+    The legacy contract workspace shows AI findings as advice; it does NOT
+    require confirming every AI-proposed term and party separately to export.
+    MASTER must use the same author-controlled text, unresolved-text opt-in,
+    explicit version approval and seal authorization. The extra provenance
+    guard below prevents a saved third-party contract from being reissued as
+    a new MASTER contract.
+    """
     try:
         checked = validate_snapshot(deepcopy(dict(snapshot)))
-        policy = final_document_blockers(checked)
-        checked_issues = contract_rule_issues(checked, for_export=True, env=dict(env))
+        policy = final_document_blockers(
+            checked, allow_unresolved_text=allow_unresolved_text)
     except (TypeError, ValueError, KeyError, AttributeError):
         return ["계약서 구조가 유효하지 않습니다. 기존 계약서 검토 화면에서 다시 확인하세요."]
     blockers = list(policy)
-    blockers.extend(str(issue.get("message") or issue.get("code") or "확인 필요")
-                    for issue in checked_issues
-                    if isinstance(issue, dict) and (
-                        issue.get("severity") == "block" or (
-                            issue.get("severity") == "confirm" and
-                            not issue.get("confirmed"))))
-    # Even optional AI suggestions must be consciously confirmed for FINAL.
-    for party in checked.get("parties") or []:
-        if party.get("status") != "confirmed":
-            blockers.append("미확정 계약 당사자: " + str(", ".join(party.get("roles") or [])))
-    for term in checked.get("terms") or []:
-        if term.get("status") != "confirmed" and str(term.get("value") or "").strip():
-            blockers.append("미확정 계약조건: " + str(term.get("key") or ""))
-    # A fresh Master candidate must never impersonate a saved contract revision.
     if not str(checked.get("contract_id") or "").startswith("orchestration-"):
         blockers.append("Master에서 생성한 신규 계약서 초안만 처리합니다.")
     return list(dict.fromkeys(blockers))
 
-
 def render_original_final(snapshot: Mapping[str, Any], env: Mapping[str, str], *,
                           principal: str, approved: bool, authorized: bool,
-                          expected_fingerprint: str) -> dict[str, dict[str, Any]]:
+                          expected_fingerprint: str,
+                          allow_unresolved_text: bool = False) -> dict[str, dict[str, Any]]:
     """Use the SAME original contracts.exports.export_contract as the legacy app.
 
     Validation and revision-bound explicit approval are checked again at
@@ -69,7 +63,8 @@ def render_original_final(snapshot: Mapping[str, Any], env: Mapping[str, str], *
     if (not isinstance(expected_fingerprint, str)
             or contract_fingerprint(snapshot) != expected_fingerprint):
         raise ValueError("계약 정보가 변경되었습니다. 최신 내용을 다시 승인하세요.")
-    issues = contract_final_blockers(snapshot, env)
+    issues = contract_final_blockers(
+        snapshot, env, allow_unresolved_text=allow_unresolved_text)
     if issues:
         raise ValueError("최종 계약서 검증이 완료되지 않았습니다: " + "; ".join(issues[:5]))
     validated = validate_snapshot(deepcopy(dict(snapshot)))
