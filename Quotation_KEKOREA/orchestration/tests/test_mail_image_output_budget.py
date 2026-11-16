@@ -4,6 +4,8 @@ No API requests or genuine trade/order data are used.
 """
 import json
 import unittest
+import urllib.error
+from unittest.mock import patch
 
 from Quotation_KEKOREA.agent.extractor import extract_trade_data
 
@@ -85,6 +87,72 @@ class MailImageOutputBudgetTests(unittest.TestCase):
                 requested_document_type="PI",
             )
         self.assertEqual(len(requests), 2)
+
+    def test_image_po_waits_longer_than_90_seconds_for_openai_response(self):
+        observed = []
+
+        def opener(request, timeout):
+            observed.append(timeout)
+            return Response(COMPLETE)
+
+        result = extract_trade_data(
+            "Create an ECLADO PO for twenty products from the photo",
+            images=IMAGE, env={"OPENAI_API_KEY": "synthetic"},
+            opener=opener, requested_document_type="PO")
+        self.assertEqual(result["items"][0]["quantity"], "10")
+        self.assertEqual(observed, [180])
+
+    def test_temporary_timeout_retries_once_with_identical_order_evidence(self):
+        observed = []
+
+        def opener(request, timeout):
+            observed.append((json.loads(request.data), timeout))
+            if len(observed) == 1:
+                raise urllib.error.URLError(TimeoutError("never-log-this-private-key"))
+            return Response(COMPLETE)
+
+        with patch("Quotation_KEKOREA.agent.extractor.time.sleep") as sleep:
+            result = extract_trade_data(
+                "Create PO with ECLADO purchase terms",
+                images=IMAGE, env={"OPENAI_API_KEY": "synthetic"},
+                opener=opener, requested_document_type="PO")
+        self.assertEqual(result["items"][0]["product_name"], "Synthetic Cream")
+        self.assertEqual(len(observed), 2)
+        self.assertEqual(observed[0], observed[1])
+        self.assertEqual(observed[0][1], 180)
+        sleep.assert_called_once()
+
+    def test_persistent_timeout_is_identified_as_server_side_and_sanitized(self):
+        attempts = []
+
+        def opener(request, timeout):
+            attempts.append(timeout)
+            raise urllib.error.URLError(TimeoutError("secret-upstream-token-should-not-leak"))
+
+        with patch("Quotation_KEKOREA.agent.extractor.time.sleep"):
+            with self.assertRaises(RuntimeError) as error:
+                extract_trade_data(
+                    "Create PO from 20-item source",
+                    images=IMAGE, env={"OPENAI_API_KEY": "synthetic"},
+                    opener=opener, requested_document_type="PO")
+        self.assertEqual(attempts, [180, 180])
+        self.assertIn("서버", str(error.exception))
+        self.assertIn("시간 초과", str(error.exception))
+        self.assertNotIn("secret-upstream", str(error.exception))
+
+    def test_persistent_network_error_is_reported_without_blame_on_phone(self):
+        attempts = []
+
+        def opener(request, timeout):
+            attempts.append(timeout)
+            raise urllib.error.URLError("private DNS hostname internal-db.net")
+
+        with patch("Quotation_KEKOREA.agent.extractor.time.sleep"):
+            with self.assertRaises(RuntimeError) as error:
+                extract_trade_data("Create PI", env={"OPENAI_API_KEY": "synthetic"}, opener=opener)
+        self.assertEqual(attempts, [90, 90])
+        self.assertIn("Master 서버", str(error.exception))
+        self.assertNotIn("private DNS", str(error.exception))
 
     def test_other_incomplete_reason_is_not_retried(self):
         requests = []
