@@ -1016,34 +1016,94 @@ def _render_single_editor(digest: str, candidates: dict) -> None:
         last = st.session_state.get("ai_intake_last_answer")
         if last:
             st.caption("최근 반영: " + str(last) + " · 이전 PDF 및 검토 상태 무효화")
-        for field, label in fields:
-            if field.startswith(("buyer.", "seller.")) and field.split(".")[-1] in {"contact", "phone", "email"}:
-                if _render_contact_inputs(digest, candidates, field, label):
-                    continue
-            widget = "ai_intake_shared_" + _shared_widget_identity(digest) + "_" + field.replace(".", "_")
-            _initialize_shared_widget(widget, _shared_current(candidates, field))
-            help_text = ("누락 정보입니다. 확인한 값 또는 선택 항목의 N/A를 입력하세요."
-                         if field in gap_keys else None)
-            st.text_input(label, key=widget, help=help_text, on_change=_apply_shared_input,
-                          args=(digest, field, widget))
-            if field == "document_number":
-                st.button("문서번호 자동 생성", key=widget + "_generate",
-                          on_click=_generate_trade_numbers, args=(digest, widget))
-            if field in gap_keys and _shared_current(candidates, field):
-                st.button(label + " · 현재 값으로 누락 항목에도 반영",
-                          key=widget + "_apply_to_missing", on_click=_apply_input_to_missing,
-                          args=(digest, field, widget))
+        # The document list above is the source of truth. Contact details,
+        # shipping options and twenty per-item text editors are NOT part of the
+        # default path for an already-matched ECLADO order.
+        requested_kinds = {k for k in candidates if k in {"PI", "PO", "CI", "PL"}}
+        fields = [(key, label) for key, label in fields
+                  if (key != "shipment_reference" or requested_kinds & {"CI", "PL"})
+                  and (key != "country_of_origin" or "CI" in requested_kinds)
+                  and (key != "payment_terms" or requested_kinds & {"PI", "PO"})]
+        item_fields = [(key, label) for key, label in fields if key.startswith("item.")]
+        optional_names = {"buyer.contact", "buyer.phone", "buyer.email",
+                          "seller.contact", "seller.phone", "seller.email", "ship_to"}
+        optional_fields = [(key, label) for key, label in fields if key in optional_names]
+        core_fields = [(key, label) for key, label in fields
+                       if key not in optional_names and not key.startswith("item.")]
+
+        def _render_fields(selection):
+            for field, label in selection:
+                if (field.startswith(("buyer.", "seller."))
+                        and field.split(".")[-1] in {"contact", "phone", "email"}):
+                    if _render_contact_inputs(digest, candidates, field, label):
+                        continue
+                widget = ("ai_intake_shared_" + _shared_widget_identity(digest) +
+                          "_" + field.replace(".", "_"))
+                _initialize_shared_widget(widget, _shared_current(candidates, field))
+                help_text = ("누락 정보입니다. 확인한 값 또는 선택 항목의 N/A를 입력하세요."
+                             if field in gap_keys else None)
+                st.text_input(label, key=widget, help=help_text,
+                              on_change=_apply_shared_input, args=(digest, field, widget))
+                if field == "document_number":
+                    st.button("문서번호 자동 생성", key=widget + "_generate",
+                              on_click=_generate_trade_numbers, args=(digest, widget))
+                if field in gap_keys and _shared_current(candidates, field):
+                    st.button(label + " · 현재 값으로 누락 항목에도 반영",
+                              key=widget + "_apply_to_missing",
+                              on_click=_apply_input_to_missing, args=(digest, field, widget))
+
+        _render_fields(core_fields)
+        if optional_fields:
+            with st.expander("거래처 연락처·선택 배송정보 (필요 시 수정)", expanded=False):
+                st.caption("연락처 등 선택 정보는 빈칸으로 두고 최종 출력할 수 있습니다.")
+                _render_fields(optional_fields)
+
         item_count = max((len(doc.get("items") or []) for kind, doc in candidates.items()
                           if kind in {"PI", "PO", "CI", "PL"} and isinstance(doc, dict)), default=0)
-        for index in range(1, item_count):
-            st.markdown("**상품 " + str(index + 1) + "**")
-            for field, label in (("product_name", "상품명"), ("quantity", "수량"),
-                                 ("unit", "단위"), ("unit_price", "단가"),
-                                 ("price_basis", "단가 기준"), ("discount_percent", "할인율 % (없으면 0)")):
-                widget = "ai_intake_shared_" + _shared_widget_identity(digest) + "_item_" + str(index) + "_" + field
-                _initialize_shared_widget(widget, _shared_current(candidates, f"item.{index}.{field}"))
-                st.text_input(label, key=widget, on_change=_apply_extra_item,
-                              args=(digest, index, field, widget))
+        if item_count:
+            st.markdown("##### 추출된 상품 목록")
+            st.caption("상품명·규격·수량·가격을 한눈에 비교하세요. 필요한 행만 아래 상세 수정에서 고칠 수 있습니다.")
+            from Quotation_KEKOREA.agent.review_fields import _missing
+            for kind, doc in candidates.items():
+                if kind not in {"PI", "PO", "CI", "PL"} or not isinstance(doc, dict):
+                    continue
+                items = doc.get("items") or []
+                if len(requested_kinds) > 1:
+                    st.caption(kind + " · " + str(len(items)) + "개 상품")
+                st.dataframe([
+                    {"No": idx + 1, "상품명": item.get("product_name") or "",
+                     "규격": item.get("capacity") or "",
+                     "수량": item.get("paid_quantity") or item.get("quantity") or "",
+                     "단위": item.get("unit") or "",
+                     "단가": item.get("unit_price") if item.get("unit_price") is not None else "",
+                     "할인 %": item.get("discount_percent")
+                            if item.get("discount_percent") is not None else "",
+                     "단가 출처": "검증된 카탈로그" if item.get("master_price") is True else "개별 확인"}
+                    for idx, item in enumerate(items) if isinstance(item, dict)],
+                    hide_index=True, width="stretch")
+                absent_discounts = sum(
+                    _missing(item.get("discount_percent"), True)
+                    for item in items if isinstance(item, dict)) if kind != "PL" else 0
+                if absent_discounts:
+                    st.button(kind + " · 미입력 할인율 " + str(absent_discounts) +
+                              "개를 0%로 일괄 적용",
+                              key="ai_intake_zero_discount_" + digest[:12] + "_" + kind,
+                              help="사용자가 0%를 명시적으로 승인합니다. 기존에 입력된 할인율은 유지합니다.",
+                              on_click=_apply_bulk_zero_discount, args=(digest, kind))
+            with st.expander("상품별 상세 수정 (" + str(item_count) + "개)", expanded=item_count == 1):
+                _render_fields(item_fields)
+                for index in range(1, item_count):
+                    st.markdown("**상품 " + str(index + 1) + "**")
+                    for field, label in (("product_name", "상품명"), ("quantity", "수량"),
+                                         ("unit", "단위"), ("unit_price", "단가"),
+                                         ("price_basis", "단가 기준"),
+                                         ("discount_percent", "할인율 % (없으면 0)")):
+                        widget = ("ai_intake_shared_" + _shared_widget_identity(digest) +
+                                  "_item_" + str(index) + "_" + field)
+                        _initialize_shared_widget(
+                            widget, _shared_current(candidates, f"item.{index}.{field}"))
+                        st.text_input(label, key=widget, on_change=_apply_extra_item,
+                                      args=(digest, index, field, widget))
         if isinstance(candidates.get("CONTRACT"), dict):
             _render_contract_confirmations(digest, candidates["CONTRACT"])
         st.caption("입력 내용은 변경 시 자동 저장·재검증됩니다. "
