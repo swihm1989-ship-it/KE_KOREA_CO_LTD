@@ -138,7 +138,7 @@ render_ai_intake('synthetic@example.test')
         self.approve(app)
         self.assertFalse(next(b for b in app.button if b.label=='PI 최종 PDF 생성').disabled)
 
-    def test_other_document_historical_ai_notes_do_not_block_pi_or_po(self):
+    def test_other_document_unresolved_conflict_still_blocks_po_not_pi(self):
         pi=self.doc();pi['buyer']['email']=''
         po=deepcopy(pi);po['document_type']='PO';po['document_number']=''
         po['conflicts']=['Supplier quantity conflicts with source invoice']
@@ -146,7 +146,7 @@ render_ai_intake('synthetic@example.test')
         app=self.app(bundle=bundle)
         self.assertFalse(app.exception,[e.message for e in app.exception])
         self.assertFalse(next(c for c in app.checkbox if c.label.startswith('PI · 최종 출력')).disabled)
-        self.assertFalse(next(c for c in app.checkbox if c.label.startswith('PO · 최종 출력')).disabled)
+        self.assertTrue(next(c for c in app.checkbox if c.label.startswith('PO · 최종 출력')).disabled)
         self.approve(app)
         self.assertFalse(next(b for b in app.button if b.label=='PI 최종 PDF 생성').disabled)
         self.assertTrue(next(b for b in app.button if b.label=='PO 최종 PDF 생성').disabled)  # still needs separate approval
