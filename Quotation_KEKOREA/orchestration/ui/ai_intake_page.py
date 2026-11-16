@@ -7,6 +7,7 @@ from inspect import signature
 import hmac
 import importlib
 import json
+import logging
 import os
 
 import streamlit as st
@@ -36,6 +37,13 @@ PDF_EXPORT_REVISION = "review-pdf-safe-loader-20261113-v4"
 TRADE_REVIEW_MODULE = "Quotation_KEKOREA.orchestration.workflows.trade_export_review"
 TRADE_REVIEW_REVISION = "approved-blank-final-20261113-v1"
 AI_INTAKE_REVISION = "ai-intake-hot-reload-20261113-v9"
+
+_PDF_LOGGER = logging.getLogger("master.trade_final_pdf")
+
+def _log_trade_final_render_failure(kind: str, exc: Exception) -> None:
+    """Record only the failure class, never document contents or credentials."""
+    _PDF_LOGGER.error("MASTER %s FINAL PDF failed; exception_type=%s; stage=legacy_renderer", kind, type(exc).__name__)
+
 
 
 def _current_ai_workflow():
@@ -800,7 +808,9 @@ def _render_trade_final_panel(digest: str, sources: dict, env: dict, *, edited_m
                     elif str(exc).startswith(('승인 후 문서', '최종 PDF 생성에 대한 사용자')):
                         st.error(str(exc))
                     else:
-                        st.error(kind + " 최종 PDF 생성 보류: " + _formal_pdf_hold_reason(kind, exc, env))
+                        _log_trade_final_render_failure(kind, exc)
+                        st.error(kind + " 최종 PDF 생성 보류: " + _formal_pdf_hold_reason(kind, exc, env)
+                                 + " [오류 유형: " + type(exc).__name__ + "]")
             saved = (st.session_state.get("master_trade_final_files") or {}).get(kind)
             if (saved and approved and not blocked
                     and saved['fingerprint'] == fingerprint and saved['revision'] == revision):
