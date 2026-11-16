@@ -945,7 +945,9 @@ def _render_trade_final_panel(digest: str, sources: dict, env: dict, *, edited_m
                     st.session_state["master_trade_final_files"] = bundle
                 except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as exc:
                     if isinstance(exc, review.TradeExportValidationError):
-                        _render_trade_issue_list(kind, {'issues': exc.issues})
+                        st.error(kind + " · 최종 검증 중 실제 오류 " +
+                                 str(len(exc.issues)) + "건이 확인됐습니다. "
+                                 "위 검증 상세에서 현재 입력을 확인해 주세요.")
                     elif str(exc).startswith(('승인 후 문서', '최종 PDF 생성에 대한 사용자')):
                         st.error(str(exc))
                     else:
@@ -1727,7 +1729,7 @@ def render_ai_intake(principal: str):
                 with st.container(border=True):
                     st.markdown("**" + doc.kind + " · 검토용 초안**")
                     if doc.blockers:
-                        with st.expander("누락·확인 필요 사항", expanded=True):
+                        with st.expander("초안 검토 상세 (선택)", expanded=False):
                             for issue in doc.blockers:
                                 st.write(str(issue))
                     for fmt, file in (doc.files or {}).items():
@@ -1735,21 +1737,9 @@ def render_ai_intake(principal: str):
                             data=file["content"], file_name=file["filename"],
                             mime=file["mime"], key=f"ai_intake_download_{doc.kind}_{fmt}")
             st.caption("생성된 파일은 최종 발행·계약 체결·메일 발송에 사용할 수 없습니다.")
-        # One shared editor above owns all commercial facts. The strict
-        # validator remains informative, not an additional input window.
-        trade_data = {k: v for k, v in candidates[1].items()
-                      if k in ("PI", "PO", "CI", "PL") and isinstance(v, dict)}
-        if trade_data:
-            with st.expander("현재 입력 확인사항 · 누락·오류 상세", expanded=True):
-                for kind, trade in trade_data.items():
-                    try:
-                        report = _current_trade_export_review().review_trade_document(
-                            kind, trade, final=True, allow_incomplete=True)
-                        _render_trade_issue_list(kind, report)
-                    except (ValueError, TypeError, KeyError, AttributeError, RuntimeError) as exc:
-                        # Corrupt historical candidate data should be a review
-                        # warning, not an unhandled Streamlit exception.
-                        st.warning(kind + " 확인 필요: 거래정보 형식을 다시 확인해 주세요.")
+        # The same report is shown in the FINAL panel below. Do not display a
+        # second expanded list of every AI note and each line-item omission.
+        st.caption("현재 문서별 검증 결과와 실제 수정 필요 항목은 아래 '최종 PDF'에서 한 번만 표시합니다.")
         st.divider()
         st.markdown("#### 기존 KE KOREA 양식 · PI / PO / CI / PL PDF·Excel")
         st.caption("현재 MASTER 앱에서 기존 업무 에이전트의 검증·직인·페이지 분할·PDF/XLSX 엔진을 직접 호출합니다. 기존 앱으로 이동하지 않습니다.")
@@ -1765,7 +1755,7 @@ def render_ai_intake(principal: str):
             st.caption("확인된 거래조건은 기존 KE KOREA 양식과 회사 직인을 사용합니다. "
                        "미확정 항목이 있거나 발행 검증이 통과하지 않으면, 같은 입력값으로 "
                        "직인 없는 '검토용 PDF' 파일을 생성합니다.")
-            if st.button("검토용 PDF 생성 · 최종 발행 아님", key="master_legacy_export", type="primary",
+            if st.button("검토용 PDF 생성 · 최종 발행 아님", key="master_legacy_export", type="secondary",
                          disabled=not editor_matches):
                 try:
                     render_master_trade_draft, render_incomplete_trade_pdf = (
@@ -1810,12 +1800,8 @@ def render_ai_intake(principal: str):
             if export_bundle and export_bundle[0] == edited_key:
                 for kind, reason in export_bundle[2].items():
                     st.warning(kind + " 정식 양식 발행 보류: " + reason)
-                    try:
-                        report = _current_trade_export_review().review_trade_document(
-                            kind, json.loads(raw)[kind], final=True, allow_incomplete=True)
-                        _render_trade_issue_list(kind, report)
-                    except (ValueError, TypeError, KeyError, AttributeError, RuntimeError):
-                        st.warning(kind + " 입력 데이터 형식을 확인하세요.")
+                    # FINAL panel below owns validation; do not repeat the
+                    # same historical AI and discount notes for DRAFT fallback.
                 for kind, files in export_bundle[1].items():
                     with st.container(border=True):
                         title = ("미확정 내부 검토용 PDF (정식 발행 아님)"
