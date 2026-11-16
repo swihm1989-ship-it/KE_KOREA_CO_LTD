@@ -36,8 +36,8 @@ FOLLOWUP_MODULE = "Quotation_KEKOREA.orchestration.workflows.intake_followups"
 PDF_EXPORT_MODULE = "Quotation_KEKOREA.orchestration.workflows.legacy_document_exports"
 PDF_EXPORT_REVISION = "review-pdf-safe-loader-20261113-v4"
 TRADE_REVIEW_MODULE = "Quotation_KEKOREA.orchestration.workflows.trade_export_review"
-TRADE_REVIEW_REVISION = "payment-conflict-reconcile-20261116-v3"
-AI_INTAKE_REVISION = "master-mail-party-catalog-20261116-v11"
+TRADE_REVIEW_REVISION = "historical-image-review-20261116-v4"
+AI_INTAKE_REVISION = "master-compact-20item-review-20261116-v12"
 
 _PDF_LOGGER = logging.getLogger("master.trade_final_pdf")
 
@@ -1705,6 +1705,12 @@ def render_ai_intake(principal: str):
                 except (TypeError, ValueError, KeyError):
                     st.error("문서 후보 형식이 올바르지 않습니다. 변경값을 검토해 주세요.")
         edited_key = _fingerprint(digest + raw)
+        # Final issuance is the primary workflow. A second DRAFT export is
+        # optional and must never be a prerequisite for a valid FINAL PDF.
+        _render_trade_final_panel(digest, candidates[1],
+                                  document_export_env(st.secrets, os.environ),
+                                  edited_matches=not json_changed)
+        st.markdown("#### 추가 검토용 기능 (선택)")
         if st.button("기존 문서 엔진으로 검증·DRAFT 생성", key="ai_intake_prepare",
                      disabled=not editor_matches):
             st.session_state.pop("ai_intake_drafts", None)
@@ -1782,7 +1788,7 @@ def render_ai_intake(principal: str):
                                     kind, updated[kind], final=True, allow_incomplete=True)
                                 if approved_review["ready"]:
                                     errors[kind] = (
-                                        "이 버튼은 검토용 PDF만 생성합니다. 정식 발행은 아래 "
+                                        "이 버튼은 검토용 PDF만 생성합니다. 정식 발행은 위 "
                                         "'최종 PDF'에서 현재 거래정보 승인 후 생성하세요.")
                                 else:
                                     errors[kind] = (
@@ -1813,9 +1819,7 @@ def render_ai_intake(principal: str):
                                                data=file["content"], file_name=file["filename"],
                                                mime=file["mime"], key="master_legacy_" + kind + "_" + fmt)
             st.caption("미확정 항목이 있어도 검토용 PDF를 생성할 수 있습니다. "
-                       "아래 최종 PDF에서는 누락 항목을 빈칸으로 유지하도록 직접 승인할 수 있습니다.")
-        _render_trade_final_panel(digest, candidates[1], document_export_env(st.secrets, os.environ),
-                                  edited_matches=not json_changed)
+                       "위 최종 PDF에서는 누락 항목을 빈칸으로 유지하도록 직접 승인할 수 있습니다.")
         if "CONTRACT" in candidates[1]:
             st.caption("계약서 DRAFT는 기존 초안 엔진, FINAL은 기존 원본 계약서 "
                        "출력 엔진을 사용합니다. 두 방식 모두 별도 검토·승인 정책을 유지합니다.")
