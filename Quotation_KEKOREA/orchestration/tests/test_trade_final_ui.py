@@ -98,6 +98,27 @@ render_ai_intake('synthetic@example.test')
         self.approve(app)
         self.assertFalse(next(b for b in app.button if b.label=='PI 최종 PDF 생성').disabled)
 
+    def test_old_payment_conflict_does_not_disable_final_after_clear_payment_terms(self):
+        doc=self.doc()
+        doc['payment_terms']='T/T in advance; Payment before November 20'
+        doc['conflicts']=[
+            'The stated payment date is November 20, but the payment term '
+            'also says payment is due before November 20.'
+        ]
+        doc['missing_fields']=['PI number', 'Solar cell model and specifications']
+        with self.seal():
+            app=self.app(doc,editor=True)
+            self.assertFalse(app.exception,[e.message for e in app.exception])
+            self.assertFalse(any(b.label=='해소 확인' for b in app.button))
+            approval=next(c for c in app.checkbox if c.label.startswith('PI · 최종 출력'))
+            self.assertFalse(approval.disabled)
+            self.assertFalse(any('Resolve conflicting information:' in e.value
+                                 for e in app.warning))
+            self.approve(app)
+            self.export(app)
+            self.assertTrue(app.session_state['master_trade_final_files']['PI']
+                            ['files']['pdf']['content'].startswith(b'%PDF'))
+
     def test_missing_facts_generate_approved_final_without_invented_placeholders(self):
         import pymupdf
         doc=self.doc();doc['document_number']='DRAFT'

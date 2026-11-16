@@ -12,7 +12,7 @@ from Quotation_KEKOREA.agent.ci_import import ci_import_issues
 from .commercial_values import normalize_trade_values
 from .intake_followups import format_field_label
 
-TRADE_REVIEW_REVISION = 'prior-ai-notes-optional-20261116-v2'
+TRADE_REVIEW_REVISION = 'payment-conflict-reconcile-20261116-v3'
 
 
 class TradeExportValidationError(ValueError):
@@ -245,6 +245,36 @@ def _explicit_numeric_issues(candidate):
     return issues
 
 
+
+# Payment-date conflicts extracted from old mail should not block a human-approved
+# FINAL when the CURRENT structured payment field unambiguously chooses one of
+# the two timing interpretations for the same date. All unrelated conflicts,
+# inconsistent amounts, and incorrect company identities remain blocking.
+_MONTH_DAY = re.compile(
+    r'\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|'
+    r'jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|'
+    r'dec(?:ember)?)\s+([0-3]?\d)(?:st|nd|rd|th)?\b', re.I
+)
+
+
+def _reconciled_payment_timing_note(note, candidate):
+    note = str(note or '')
+    if (not re.search(r'\bpayment\b', note, re.I)
+            or not re.search(r'\bbefore\b|\bprior\s+to\b', note, re.I)):
+        return False
+    noted = [(m[1][:3].lower(), int(m[2])) for m in _MONTH_DAY.finditer(note)]
+    if len(noted) < 2 or len(set(noted)) != 1:
+        return False
+    current = str(candidate.get('payment_terms') or '')
+    dates = list(_MONTH_DAY.finditer(current))
+    if len(dates) != 1 or (dates[0][1][:3].lower(), int(dates[0][2])) != noted[0]:
+        return False
+    # Require exactly one explicit deadline interpretation; no inference from
+    # vague terms such as "T/T in advance" alone or from two conflicting dates.
+    before_date = current[max(0, dates[0].start() - 25):dates[0].start()]
+    return bool(re.search(r'\b(?:before|prior\s+to|on)\s+(?:the\s+)?$', before_date, re.I))
+
+
 def review_trade_document(kind, source, *, final=False, allow_optional_na=False, allow_incomplete=False):
     """Describe real gaps separately from old AI notes; never mutates input.
 
@@ -274,7 +304,12 @@ def review_trade_document(kind, source, *, final=False, allow_optional_na=False,
         # for each old extraction note. Keep notes as non-blocking warnings;
         # independent numeric, identity and CI-import checks still apply.
         candidate['missing_fields'] = []
-        # Preserve unresolved conflicting terms as blockers; historical missing-field notes are informational.
+        candidate['conflicts'] = [
+            note for note in candidate.get('conflicts') or []
+            if not _reconciled_payment_timing_note(note, candidate)
+        ]
+        # All other conflicts remain validation blockers; historic notes are
+        # retained separately for display, not silently discarded from source.
     if allow_optional_na:
         for field in missing_review_fields(candidate):
             if not field.required:

@@ -44,6 +44,57 @@ class IncompleteFinalTests(unittest.TestCase):
         self.assertTrue(report['issues'])
         self.assertFalse(review.review_trade_document('PI', self.doc, final=True)['ready'])
 
+    def test_prior_payment_day_conflict_reconciles_from_explicit_current_terms(self):
+        from PIL import Image
+        doc = deepcopy(self.doc)
+        doc['document_number'] = 'DRAFT'
+        doc['payment_terms'] = 'T/T in advance; Payment before November 20'
+        doc['conflicts'] = [
+            'The stated payment date is November 20, but the payment term '
+            'also says payment is due before November 20.'
+        ]
+        doc['missing_fields'] = [
+            'Seller legal name and address', 'PI number',
+            'Specific Hanwha warehouse location', 'Solar cell specifications',
+        ]
+        original = deepcopy(doc)
+        report = self.report(doc)
+        self.assertTrue(report['ready'], report['issues'])
+        self.assertEqual(report['issues'], [])
+        self.assertEqual(report['render_data']['conflicts'], [])
+        self.assertTrue(any(row['code'] == 'prior_ai_conflicts'
+                            for row in report['warnings']))
+        self.assertEqual(doc, original)
+
+        # Exercise the real shared legacy PDF renderer with a synthetic seal.
+        seal = BytesIO()
+        Image.new('RGB', (2, 2), 'red').save(seal, format='PNG')
+        digest = review.trade_export_fingerprint('PI', doc, allow_incomplete=True)
+        with patch.object(exports, 'resolve_company_seal',
+                          return_value=(Path('/missing/company_seal.png'),
+                                        seal.getvalue(), None)):
+            files = exports.render_master_trade_final(
+                'PI', doc, {}, approved=True, expected_fingerprint=digest,
+                allow_incomplete=True)
+        self.assertTrue(files['pdf']['content'].startswith(b'%PDF'))
+        self.assertTrue(files['pdf']['final'])
+
+    def test_payment_note_remains_blocked_without_a_single_consistent_deadline(self):
+        note = ('The stated payment date is November 20, but the payment '
+                'term also says payment is due before November 20.')
+        for current in (
+                'T/T in advance',
+                'Payment on November 20 and before November 20',
+                'Payment before November 21'):
+            with self.subTest(current=current):
+                doc = deepcopy(self.doc)
+                doc['payment_terms'] = current
+                doc['conflicts'] = [note]
+                report = self.report(doc)
+                self.assertFalse(report['ready'])
+                self.assertTrue(any(row['code'] == 'ai_conflict'
+                                    for row in report['issues']))
+
     def test_placeholders_and_draft_number_become_blanks_not_optional_na(self):
         self.doc['document_number'] = 'DRAFT'
         self.doc['buyer']['legal_name'] = 'N/A'
