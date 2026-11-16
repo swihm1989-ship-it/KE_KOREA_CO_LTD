@@ -918,16 +918,9 @@ def _render_single_editor(digest: str, candidates: dict) -> None:
                               args=(digest, index, field, widget))
         if isinstance(candidates.get("CONTRACT"), dict):
             _render_contract_confirmations(digest, candidates["CONTRACT"])
-        # AI may leave free-text conflicts/missing notes that do NOT disappear
-        # when required input widgets are filled. Never silently discard them.
-        unresolved = [
-            (kind, category, index, note)
-            for kind, doc in candidates.items()
-            if kind in {"PI", "PO", "CI", "PL"} and isinstance(doc, dict)
-            for category in ("missing_fields", "conflicts")
-            for index, note in enumerate(doc.get(category) or [])
-            if isinstance(note, str) and note.strip()
-        ]
+        # Prior free-text extraction notes are historical context, not a second
+        # manual approval workflow. Current structured inputs and validation
+        # determine whether a document can be generated.
         try:
             gaps = missing_fields(candidates)
         except RuntimeError as exc:
@@ -936,31 +929,9 @@ def _render_single_editor(digest: str, candidates: dict) -> None:
             if gaps:
                 st.warning("미입력·확인 필요 항목 " + str(len(gaps)) +
                            "개 (전체 문서 기준): " + "; ".join(gap.label for gap in gaps))
-                st.caption("아래 최종 출력은 선택한 문서별로 다시 검증합니다. 다른 문서의 누락 항목 때문에 PI 출력을 막지 않습니다.")
-            if unresolved:
-                st.warning("이전 AI 확인 기록 " +
-                           str(len(unresolved)) +
-                           "건이 남아 있습니다. 아래에서 실제 조건과 대조하세요.")
-            elif not gaps:
-                st.success("기본 거래정보 입력 및 이전 AI 기록 확인 완료 · "
-                           "은행정보·직인 등 정식 발행 검증은 별도입니다.")
-        if unresolved:
-            with st.expander("이전 AI 추출 기록 · 확인 필요 (" +
-                             str(len(unresolved)) + "건)", expanded=True):
-                st.caption("기존 메일에서 추출한 미확정·충돌 기록입니다. "
-                           "실제 거래조건과 대조하여 해결된 항목만 확인하세요. "
-                           "삭제해도 금액·직인·은행정보 등 기존 발행 검증은 생략되지 않습니다.")
-                for kind, category, index, note in unresolved[:40]:
-                    kind_label = ("충돌" if category == "conflicts" else "미확정")
-                    col1, col2 = st.columns([5, 1])
-                    col1.write("**" + kind + " · " + kind_label + "**: " + note)
-                    note_hash = sha256(
-                        (kind + "|" + category + "|" + note).encode("utf-8")
-                    ).hexdigest()[:14]
-                    col2.button("해소 확인", key="ai_intake_note_" + digest[:12] +
-                                "_" + category + "_" + note_hash + "_" + str(index),
-                                on_click=_acknowledge_ai_notice,
-                                args=(digest, kind, category, index, note))
+                st.caption("아래 최종 출력은 선택한 문서별로 다시 검증합니다.")
+            else:
+                st.success("현재 거래정보 입력 완료 · 문서별 검증 및 승인 후 PDF 생성 가능")
 
 
 
