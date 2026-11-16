@@ -61,9 +61,14 @@ def reuse_legacy_catalog(candidates, catalog):
     for kind, document in result.items():
         if kind not in _TRADE or not isinstance(document, dict):
             continue
-        if kind == "PO" and is_eclado_supplier(_company_name(document, "seller")):
-            apply_verified_eclado_prices(document, catalog)
-        elif kind == "PI" and _is_dear_glow(_company_name(document, "buyer")):
+        if ((kind == "PO" and is_eclado_supplier(_company_name(document, "seller")))
+                or (kind == "PI" and _is_dear_glow(_company_name(document, "buyer")))):
+            # Recompute only catalog-owned price mismatch notes on each edit.
+            document["conflicts"] = [
+                note for note in document.get("conflicts") or []
+                if "stated price differs from the verified catalog; confirm transaction override"
+                not in str(note)
+            ]
             apply_verified_eclado_prices(document, catalog)
         elif (document.get("product_family") == "cosmetics"
               or is_eclado_supplier(_company_name(document, "seller"))):
