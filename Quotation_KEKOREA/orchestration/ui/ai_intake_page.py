@@ -1166,6 +1166,17 @@ def _render_contact_inputs(digest: str, candidates: dict, field: str, label: str
 
 def _render_single_editor(digest: str, candidates: dict) -> None:
     """One editor is the source of truth for trade/contract and PDF output."""
+    # Historic sessions and embedded MASTER pages can bypass the normal
+    # extraction-store path. Apply the same explicit list-price policy before
+    # review/FINAL, and persist it when this is the active edited candidate.
+    defaulted = apply_default_list_prices(candidates)
+    if defaulted != candidates:
+        saved = st.session_state.get("ai_intake_candidates")
+        if saved and saved[0] == digest:
+            _remember_candidate_bundle(digest, defaulted)
+            candidates = st.session_state["ai_intake_candidates"][1]
+        else:
+            candidates = defaulted
     _refresh_shared_widgets(digest, candidates)
     trade = next((doc for kind, doc in candidates.items()
                   if kind in {"PI", "PO", "CI", "PL"} and isinstance(doc, dict)), {})
