@@ -12,7 +12,7 @@ from Quotation_KEKOREA.agent.ci_import import ci_import_issues
 from .commercial_values import normalize_trade_values
 from .intake_followups import format_field_label
 
-TRADE_REVIEW_REVISION = 'approved-blank-final-20261113-v1'
+TRADE_REVIEW_REVISION = 'prior-ai-notes-optional-20261116-v2'
 
 
 class TradeExportValidationError(ValueError):
