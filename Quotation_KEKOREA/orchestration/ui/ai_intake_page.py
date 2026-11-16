@@ -1265,21 +1265,20 @@ def render_ai_intake(principal: str):
     st.info("AI 요청에는 아래 입력 내용과 직접 선택한 참고파일만 전송합니다. 저장된 계약서는 모델에 전달되지 않습니다.")
     mail_source = st.session_state.get('ai_intake_mail_source')
     mail_mode = bool(mail_source)
-    mail_processing_mode = None
+    # One default path: analyze the imported mail as-is, then correct extracted
+    # trade fields in the shared editor. Editing the raw request is optional.
+    edit_mail_before_analysis = False
     if mail_mode:
-        st.markdown("#### 메일 업무 처리 방식 선택")
-        mail_processing_mode = st.radio(
-            "처리 방식", ["AI 자동 분석", "직접 수정 후 분석"],
-            index=1, horizontal=True, key="ai_intake_mail_processing_mode",
+        st.markdown("#### 메일 거래조건 AI 분석")
+        st.caption("메일 원문을 분석한 뒤 아래 거래정보 입력창에서 부족정보를 보완할 수 있습니다.")
+        edit_mail_before_analysis = st.checkbox(
+            "분석 전 메일 내용 직접 수정 (선택)",
+            value=False, key="ai_intake_edit_mail_before_analysis",
         )
-        if mail_processing_mode == "AI 자동 분석":
-            st.info("현재 입력된 요청을 바로 AI로 분석합니다. 내용을 수정하려면 '직접 수정 후 분석'을 선택하세요. 문서 종류 확인과 명시적 동의·실행이 필요합니다.")
-        else:
-            st.info("메일 내용을 직접 수정하거나 거래조건을 추가한 후 AI 분석을 실행할 수 있습니다.")
     instruction = st.text_area("업무 요청 및 거래조건", height=185,
-        placeholder="예: 한화 M10 solar cell 100 PCS, USD 0.20/pc, EXW Seoul 조건으로 PI와 계약서 초안을 만들어줘.",
+        placeholder="예: 선크림 10,000개, USD 5/개, FOB Busan 조건으로 PI와 계약서 초안을 만들어줘.",
         key="ai_intake_instruction",
-        disabled=mail_mode and mail_processing_mode == "AI 자동 분석")
+        disabled=mail_mode and not edit_mail_before_analysis)
     if st.session_state.get('ai_intake_mail_notice'):
         st.warning(st.session_state['ai_intake_mail_notice'])
     requested = classify("", instruction)
@@ -1319,15 +1318,13 @@ def render_ai_intake(principal: str):
         digest_source += '|' + ','.join(requested) + '|' + _fingerprint(''.join(
             _fingerprint(a['name']) + sha256(a['data']).hexdigest() for a in attachments or []))
     digest = _fingerprint(digest_source)
-    button_text = ("AI 자동 분석 실행" if mail_processing_mode == "AI 자동 분석"
-                   else "수정한 내용으로 AI 분석" if mail_mode
-                   else "AI 거래조건 추출")
+    button_text = "AI 거래조건 분석" if mail_mode else "AI 거래조건 추출"
     manual_extract = st.button(button_text, key="ai_intake_extract", type="primary",
                  disabled=not (consent and ready and requested and instruction.strip() and attachments is not None))
     # Consume any pending token from a pre-upgrade mailbox session, but NEVER
     # run the external model until the user explicitly clicks the action here.
     if consume_pending(st.session_state, instruction):
-        st.info("기존 메일 요청을 가져왔습니다. 처리 방식과 거래조건을 확인하고 AI 분석을 실행해 주세요.")
+        st.info("메일 요청을 가져왔습니다. 문서 종류를 확인한 뒤 AI 거래조건 분석을 실행해 주세요.")
     if manual_extract and consent and ready and requested and attachments is not None:
         # A new extraction must not inherit prior editable widget values.
         for key in list(st.session_state):
