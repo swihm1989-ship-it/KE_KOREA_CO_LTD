@@ -17,7 +17,7 @@ from Quotation_KEKOREA.orchestration.workflows.mail_intake import (
     extract_mail_candidates, consume_pending, fingerprint as mail_fingerprint,
 )
 from Quotation_KEKOREA.orchestration.router import DOC_TYPES, classify
-from Quotation_KEKOREA.orchestration.workflows.commercial_values import (normalize_trade_values, apply_default_list_prices)
+from Quotation_KEKOREA.orchestration.workflows.commercial_values import (normalize_trade_values, apply_default_list_prices, apply_bulk_discount)
 from Quotation_KEKOREA.orchestration.workflows.label_typos import canonical_label
 from Quotation_KEKOREA.orchestration.workflows.ai_intake import (
     extract_candidate,
@@ -37,7 +37,7 @@ PDF_EXPORT_MODULE = "Quotation_KEKOREA.orchestration.workflows.legacy_document_e
 PDF_EXPORT_REVISION = "review-pdf-safe-loader-20261113-v4"
 TRADE_REVIEW_MODULE = "Quotation_KEKOREA.orchestration.workflows.trade_export_review"
 TRADE_REVIEW_REVISION = "image-advisory-schema-fix-20261116-v5"
-AI_INTAKE_REVISION = "master-per-item-promotion-20261117-v15"
+AI_INTAKE_REVISION = "master-bulk-item-discount-20261117-v16"
 # Detect a changed source file even when the cached module has the same revision.
 AI_INTAKE_SOURCE_MTIME_NS = os.stat(__file__).st_mtime_ns
 
@@ -790,26 +790,34 @@ def _item_needs_correction(kind: str, item: dict) -> bool:
     return False
 
 
-def _apply_bulk_zero_discount(digest: str, kind: str) -> None:
-    """Owner-approved single action: fill only absent line discounts with 0%.
+def _apply_bulk_discount_to_kind(digest: str, kind: str,
+                                 percent: str | None = None,
+                                 entry_key: str | None = None) -> None:
+    """Apply an explicitly selected discount to every item of ONE PI or PO.
 
-    Never overwrite an explicitly supplied positive discount and never assume
-    that a blank discount is zero without this action. Each document is scoped
-    independently (a PO and PI can have different commercial terms).
+    Keep free-goods programs, paid/shipped quantities and verified list prices.
+    The bundle revision revokes any existing PDF/FINAL approvals.
     """
-    from Quotation_KEKOREA.agent.review_fields import _missing
     saved = st.session_state.get("ai_intake_candidates")
-    if not saved or saved[0] != digest or kind not in {"PI", "PO", "CI"}:
+    if (not saved or saved[0] != digest or kind not in {"PI", "PO"}
+            or entry_key and not _is_current_shared_widget(digest, entry_key)):
         return
-    candidate = saved[1].get(kind)
-    if not isinstance(candidate, dict):
+    raw = st.session_state.get(entry_key, "") if entry_key else percent
+    try:
+        updated = apply_bulk_discount(saved[1], kind, raw)
+    except (ValueError, TypeError) as exc:
+        if entry_key:
+            _record_input_error(digest, kind + ".bulk_discount", entry_key, str(exc))
+        else:
+            st.session_state["ai_intake_followup_error"] = str(exc)
         return
-    updated = deepcopy(saved[1])
-    for row in updated[kind].get("items") or []:
-        if isinstance(row, dict) and _missing(row.get("discount_percent"), True):
-            row["discount_percent"] = "0"
+    if entry_key:
+        _clear_input_error(entry_key)
     _remember_candidate_bundle(digest, updated)
-    st.session_state["ai_intake_last_answer"] = kind + " · 미입력 할인율 0% 적용"
+    value = next(row["discount_percent"] for row in updated[kind]["items"]
+                 if isinstance(row, dict))
+    st.session_state["ai_intake_last_answer"] = kind + " · 전체 상품 할인율 " + value + "%"
+    st.session_state.pop("ai_intake_followup_error", None)
 
 
 def _edit_contract_fact(digest: str, section: str, identity: str,
@@ -1297,6 +1305,35 @@ def _render_single_editor(digest: str, candidates: dict) -> None:
                      "단가 출처": "검증된 카탈로그" if item.get("master_price") is True else "개별 확인"}
                     for idx, item in enumerate(items) if isinstance(item, dict)],
                     hide_index=True, width="stretch")
+                if kind in {"PI", "PO"} and items:
+                    with st.container(border=True):
+                        st.markdown("**" + kind + " · 전체 상품 할인율 일괄 적용**")
+                        st.caption(str(len(items)) + "개 상품의 기존 개별 할인율도 덮어씁니다. "
+                                   "원단가·수량·2+1/3+1 증정행사는 유지되며, 적용 후 "
+                                   "상품별로 다시 수정할 수 있습니다.")
+                        columns = st.columns(3)
+                        for column, rate in zip(columns, ("0", "5", "10")):
+                            with column:
+                                st.button(kind + " · 전체 " + rate + "%",
+                                          key="master_bulk_discount_" + digest[:12] +
+                                              "_" + kind + "_" + rate,
+                                          on_click=_apply_bulk_discount_to_kind,
+                                          args=(digest, kind, rate),
+                                          width="stretch")
+                        custom_key = ("ai_intake_shared_" + _shared_widget_identity(digest) +
+                                      "_bulk_discount_" + kind)
+                        _initialize_shared_widget(custom_key, "")
+                        custom_columns = st.columns([3, 2])
+                        with custom_columns[0]:
+                            st.text_input(kind + " · 할인율 직접 입력 (%)",
+                                          key=custom_key, placeholder="예: 7.5")
+                        with custom_columns[1]:
+                            st.button(kind + " · 입력 할인율 전체 적용",
+                                      key="master_bulk_discount_custom_" + digest[:12] +
+                                          "_" + kind,
+                                      on_click=_apply_bulk_discount_to_kind,
+                                      args=(digest, kind, None, custom_key),
+                                      width="stretch")
                 # All item terms are document- and row-scoped. Collapsed rows
                 # keep twenty-product mobile orders usable without a wall of
                 # inputs or a second mandatory confirmation workflow.
@@ -1746,7 +1783,7 @@ def render_ai_intake(principal: str):
     if not principal:
         raise PermissionError("로그인이 필요합니다.")
     st.subheader("AI 거래조건 추출 · 기존 문서 엔진 연결")
-    st.caption("화면 업데이트: 2026-11-17 · 상품별 할인율·증정행사 선택 지원")
+    st.caption("화면 업데이트: 2026-11-17 · 전체 할인율 일괄 적용 + 상품별 할인·행사 선택")
     st.caption("문서 작업은 이 화면에서 진행합니다. 검토용 초안과 최종 발행 문서는 기존 검증·승인 규칙에 따라 구분합니다.")
     st.caption("기존 계약서 분석 AI를 사용해 자연어에서 거래조건을 제안합니다. 확정·발행·전송은 자동으로 하지 않습니다.")
     st.info("AI 요청에는 아래 입력 내용과 직접 선택한 참고파일만 전송합니다. 저장된 계약서는 모델에 전달되지 않습니다.")
