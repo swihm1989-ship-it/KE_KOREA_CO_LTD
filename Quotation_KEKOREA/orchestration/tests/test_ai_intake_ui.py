@@ -108,6 +108,17 @@ class AiIntakeUiTests(unittest.TestCase):
             api.assert_not_called()
 
 
+    def test_stale_trade_extractor_is_reloaded_before_master_mail_analysis(self):
+        """Streamlit hot-reload must not keep the old hardcoded 90-second engine."""
+        from Quotation_KEKOREA.orchestration.ui import ai_intake_page
+        from Quotation_KEKOREA.agent import extractor
+        with patch.object(extractor, "TRADE_EXTRACTOR_REVISION",
+                          "old-90-second-timeout", create=True):
+            self.assertTrue(ai_intake_page._ensure_trade_extractor_current())
+            self.assertEqual(extractor.TRADE_EXTRACTOR_REVISION,
+                             "master-long-image-timeout-20261117-v1")
+            self.assertFalse(ai_intake_page._ensure_trade_extractor_current())
+
     def test_api_network_failure_preserves_previously_extracted_order(self):
         """A failed retry must not delete the last saved PI/PO candidate or draft."""
         saved = ("previous-order", {"PO": {
