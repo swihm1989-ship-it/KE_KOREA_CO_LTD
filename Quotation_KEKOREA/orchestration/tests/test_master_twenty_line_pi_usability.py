@@ -99,6 +99,13 @@ class MasterTwentyLinePiUxTests(unittest.TestCase):
             pdf = app.session_state["master_trade_final_files"]["PI"]["files"]["pdf"]
             self.assertTrue(pdf["content"].startswith(b"%PDF"))
             self.assertTrue(pdf["final"])
+            import pymupdf
+            with pymupdf.open(stream=pdf["content"], filetype="pdf") as output:
+                printed = "\n".join(page.get_text() for page in output)
+            # A source-proven $10 unit price must appear on the FINAL even
+            # when the order image supplied no explicit discount rate.
+            self.assertIn("$10.00", printed)
+            self.assertIn("$100.00", printed)
 
     def test_corrected_image_item_final_pdf_without_source_flag(self):
         doc = twenty_item_pi()
