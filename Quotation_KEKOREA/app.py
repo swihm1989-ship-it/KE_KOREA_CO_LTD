@@ -14,7 +14,8 @@ ROOT = Path(__file__).resolve().parent
 REPOSITORY_ROOT = ROOT.parent
 sys.path.insert(0, str(REPOSITORY_ROOT))
 from Quotation_KEKOREA.agent.workflow_state import DocumentWorkspaces
-from Quotation_KEKOREA.agent.counterparties import load_company_profiles, apply_company_profiles
+from Quotation_KEKOREA.agent.counterparties import (load_company_profiles, apply_company_profiles,
+                                                  apply_ke_korea_company_defaults)
 from Quotation_KEKOREA.agent.promotions import apply_promotion_commands, recalculate_order_promotions
 from Quotation_KEKOREA.agent.samples import ensure_sample_rows, edit_sample_rows, is_manual_sample
 from Quotation_KEKOREA.agent.attachments import prepare_uploads
@@ -33,21 +34,8 @@ from Quotation_KEKOREA.agent.trade_documents import apply_promotion, current_iss
 
 
 def _apply_ke_korea_company_defaults(draft, document_type):
-    """Fill the KE Korea party profile on every shared document workflow."""
-    role = "buyer" if document_type == "PO" else "seller"
-    party = dict(draft.get(role) or {})
-    defaults = {
-        "legal_name": "KE Korea Co. LTD",
-        "address": "#1510, 157 Yangpyung Ro, Yungdeungpo Gu, Seoul, South Korea",
-        "contact": "Representative: DAVID, SEOKWON IHM",
-        "phone": "+82 10 9823 0029",
-        "email": "david.ihm@ke-korea.com",
-    }
-    for field, value in defaults.items():
-        if not str(party.get(field) or "").strip():
-            party[field] = value
-    draft[role] = party
-    return draft
+    """Backwards-compatible entry point for the shared company defaults."""
+    return apply_ke_korea_company_defaults(draft, document_type)
 
 
 def _synchronize_extracted_quantities(draft):
