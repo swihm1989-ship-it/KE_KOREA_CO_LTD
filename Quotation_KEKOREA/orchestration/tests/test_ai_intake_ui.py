@@ -166,7 +166,7 @@ class AiIntakeUiTests(unittest.TestCase):
         self.assertNotIn("SECRET", unknown)
         self.assertIn("렌더러", unknown)
 
-    def test_one_editor_resolves_only_user_acknowledged_historical_ai_notes(self):
+    def test_one_editor_does_not_require_historical_ai_acknowledgements(self):
         import hashlib
         instruction = "Synthetic PI request with confirmed details"
         digest = hashlib.sha256((instruction + "|한국어|solar_cell").encode()).hexdigest()
@@ -192,17 +192,11 @@ class AiIntakeUiTests(unittest.TestCase):
         )
         app.run()
         self.assertFalse(app.exception, [e.message for e in app.exception])
-        self.assertTrue(any("이전 AI 확인 기록" in x.value for x in app.warning))
-        self.assertEqual(len([x for x in app.button if x.label == "해소 확인"]), 2)
-        next(x for x in app.button if x.label == "해소 확인").click().run()
-        self.assertFalse(app.exception, [e.message for e in app.exception])
+        self.assertFalse(any("이전 AI 확인 기록" in x.value for x in app.warning))
+        self.assertFalse(any(x.label == "해소 확인" for x in app.button))
         data = app.session_state["ai_intake_candidates"][1]["PI"]
-        self.assertEqual(len(data["missing_fields"]) + len(data["conflicts"]), 1)
-        next(x for x in app.button if x.label == "해소 확인").click().run()
-        self.assertFalse(app.exception, [e.message for e in app.exception])
-        data = app.session_state["ai_intake_candidates"][1]["PI"]
-        self.assertEqual(data["missing_fields"], [])
-        self.assertEqual(data["conflicts"], [])
+        self.assertEqual(data["missing_fields"], ["Confirm buyer and seller official names"])
+        self.assertEqual(data["conflicts"], ["Confirm payment date from original email"])
         self.assertEqual(data["buyer"]["legal_name"], "SYNTHETIC BUYER LTD")
         self.assertEqual(data["seller"]["legal_name"], "KE KOREA CO. LTD")
 
