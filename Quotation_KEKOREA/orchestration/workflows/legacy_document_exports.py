@@ -146,9 +146,18 @@ def _render_master_trade(kind: str, source: Mapping, env: Mapping[str, str], *, 
         # locations to the unmodified shared PI/PO/CI/PL PDF/XLSX renderer.
         logo_path = root / "assets" / "company_logo.png"
         _ensure_trade_renderers_current()
-        paths = render_files(checked, Path(directory) / "outputs",
-                             bank_details=bank, logo_path=logo_path,
-                             seal_path=actual_seal, **({"final": True} if final else {}))
+        try:
+            paths = render_files(checked, Path(directory) / "outputs",
+                                 bank_details=bank, logo_path=logo_path,
+                                 seal_path=actual_seal, **({"final": True} if final else {}))
+        except (ValueError, TypeError, KeyError, AttributeError, OSError) as exc:
+            import logging
+            logging.getLogger("master.trade_final_pdf").error(
+                "Legacy renderer failure: kind=%s, final=%s, error_type=%s",
+                kind, final, type(exc).__name__)
+            # Never leak raw document data, bank credentials or third-party
+            # exception text into the authenticated UI.
+            raise ValueError("PDF_RENDER_STAGE: 기존 PDF 렌더러 내부 처리 실패") from exc
         result = {}
         for extension in ("pdf", "xlsx", "html"):
             path = paths[extension]
