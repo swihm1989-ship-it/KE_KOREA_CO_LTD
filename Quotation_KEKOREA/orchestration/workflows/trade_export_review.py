@@ -12,7 +12,7 @@ from Quotation_KEKOREA.agent.ci_import import ci_import_issues
 from .commercial_values import normalize_trade_values
 from .intake_followups import format_field_label
 
-TRADE_REVIEW_REVISION = 'prior-ai-notes-optional-20261116-v2'
+TRADE_REVIEW_REVISION = 'payment-conflict-reconcile-20261116-v3'
 
 
 class TradeExportValidationError(ValueError):
@@ -243,6 +243,134 @@ def _explicit_numeric_issues(candidate):
                 if basis and unit and basis not in {unit, 'SET'}:
                     issues.append(f'Price basis {basis} does not match quantity unit {unit} for item {index}')
     return issues
+
+
+
+# Payment-date conflicts extracted from old mail should not block a human-approved
+# FINAL when the CURRENT structured payment field unambiguously chooses one of
+# the two timing interpretations for the same date. All unrelated conflicts,
+# inconsistent amounts, and incorrect company identities remain blocking.
+_MONTH_DAY = re.compile(
+    r'\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|'
+    r'jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|'
+    r'dec(?:ember)?)\s+([0-3]?\d)(?:st|nd|rd|th)?\b', re.I
+)
+
+
+def _reconciled_payment_timing_note(note, candidate):
+    note = str(note or '')
+    if (not re.search(r'\bpayment\b', note, re.I)
+            or not re.search(r'\bbefore\b|\bprior\s+to\b', note, re.I)):
+        return False
+    noted = [(m[1][:3].lower(), int(m[2])) for m in _MONTH_DAY.finditer(note)]
+    if len(noted) < 2 or len(set(noted)) != 1:
+        return False
+    current = str(candidate.get('payment_terms') or '')
+    dates = list(_MONTH_DAY.finditer(current))
+    if len(dates) != 1 or (dates[0][1][:3].lower(), int(dates[0][2])) != noted[0]:
+        return False
+    # Require exactly one explicit deadline interpretation; no inference from
+    # vague terms such as "T/T in advance" alone or from two conflicting dates.
+    before_date = current[max(0, dates[0].start() - 25):dates[0].start()]
+    return bool(re.search(r'\b(?:before|prior\s+to|on)\s+(?:the\s+)?kind, source, *, final=False, allow_optional_na=False, allow_incomplete=False):
+    """Describe real gaps separately from old AI notes; never mutates input.
+
+    The default is strict. Explicit final incomplete mode reports missing facts
+    as warnings and leaves them blank; supplied invalid values, conflicts and
+    original-PI price requirements continue to block.
+    """
+    kind=str(kind).upper()
+    if kind not in {'PI','PO','CI','PL'} or not isinstance(source,Mapping):
+        raise ValueError('지원하지 않는 무역 문서입니다.')
+    if not isinstance(source.get('items') or [], list) or any(
+            not isinstance(item, Mapping) for item in source.get('items') or []):
+        raise ValueError('상품 목록 형식을 확인해 주세요.')
+    candidate=normalize_trade_values(source)
+    if candidate.get('document_type') and str(candidate['document_type']).upper()!=kind:
+        raise ValueError('Document type mismatch')
+    candidate['document_type']=kind
+    partial = final and allow_incomplete is True
+    prior_ai_notes = {
+        key: list(candidate.get(key) or [])
+        for key in ('missing_fields', 'conflicts')
+    } if partial else {}
+    if partial:
+        candidate = _blank_unknowns(candidate)
+        # Legacy AI prose is not a structured validation result. Once the user
+        # has reviewed the current transaction, do not require a second button
+        # for each old extraction note. Keep notes as non-blocking warnings;
+        # independent numeric, identity and CI-import checks still apply.
+        candidate['missing_fields'] = []
+        candidate['conflicts'] = [
+            note for note in candidate.get('conflicts') or []
+            if not _reconciled_payment_timing_note(note, candidate)
+        ]
+        # All other conflicts remain validation blockers; historic notes are
+        # retained separately for display, not silently discarded from source.
+    if allow_optional_na:
+        for field in missing_review_fields(candidate):
+            if not field.required:
+                target=candidate
+                for part in field.path[:-1]:target=target.setdefault(part,{})
+                target[field.path[-1]]='N/A'
+    missing=[]
+    for field in missing_review_fields(candidate):
+        key=_key(field.path)
+        missing.append({'key':key,'label':format_field_label(key), 'required':field.required,
+                        'message':format_field_label(key) + (' · 필수 입력' if field.required else ' · 값 또는 N/A 입력')})
+    checked=validate_and_calculate(candidate)
+    render_data = _renderable_partial(candidate, checked) if partial else checked
+    messages=list(checked.get('blocking_issues') or [])
+    if partial:
+        messages.extend(_explicit_numeric_issues(candidate))
+    if kind=='CI':
+        messages.extend(ci_import_issues(checked))
+    issues=[]
+    warnings=[]
+    missing_messages = _missing_validation_messages(candidate) if partial else set()
+    for message in dict.fromkeys(map(str,messages)):
+        code='validation'
+        if message.startswith('Confirm missing information: '):code='ai_missing'
+        elif message.startswith('Resolve conflicting information: '):code='ai_conflict'
+        entry={'code':code,'key':'','message':message}
+        is_missing = partial and (code=='ai_missing' or message in missing_messages)
+        if partial and message.startswith('PI import: '):
+            is_missing = message.removeprefix('PI import: ') in missing_messages
+        # A source total cannot be compared with an amount whose inputs are
+        # absent. Display that limitation; never replace the price with a catalog.
+        if partial and kind == 'CI' and 'source amount differs from the calculated amount' in message:
+            from Quotation_KEKOREA.agent.ci_import import _amount
+            match = re.match(r'PI import item (\d+) amount:', message)
+            is_missing = (match is not None and
+                          _amount(candidate['items'][int(match[1])-1].get('source_line_total')) is not None and
+                          render_data['items'][int(match[1])-1]['line_total'] is None)
+            if message.startswith('PI import total:'):
+                is_missing = (_amount(candidate.get('source_total')) is not None and
+                              render_data.get('total') is None)
+        if (partial and kind == 'PL'
+                and message.startswith('Packing source discrepancy: Source quantity total ')
+                and render_data['_final_packing_totals']['quantities'] is None):
+            from Quotation_KEKOREA.agent.packing import _number
+            declared_unit = normalize_quantity_unit(candidate.get('declared_total_quantity_unit'))
+            units = {normalize_quantity_unit(item.get('unit')) for item in candidate.get('items') or []}
+            is_missing = (_number(candidate.get('declared_total_quantity')) is not None
+                          and (not declared_unit or declared_unit in units or '' in units or not units))
+        (warnings if is_missing else issues).append(entry)
+    if partial:
+        for category, notes in prior_ai_notes.items():
+            for note in notes:
+                if isinstance(note, str) and note.strip():
+                    warnings.append({'code': 'prior_ai_' + category, 'key': '',
+                                     'message': '이전 AI 추출 참고 (' + category + '): ' + note})
+    for row in missing:
+        (warnings if partial else issues).append({'code':'missing',**row})
+    number=str(candidate.get('document_number') or '').strip()
+    if final and not partial and (_missing(number,True) or number.upper().startswith('DRAFT')):
+        issues.append({'code':'final_number','key':'document_number',
+                       'message':'최종 문서번호를 입력하거나 문서번호 자동 생성을 누르세요. DRAFT 번호로 최종 발행하지 않습니다.'})
+    return {'candidate':candidate,'checked':checked,'render_data':render_data,
+            'missing':missing,'issues':issues,'warnings':warnings, 'ready':not issues}
+, before_date, re.I))
 
 
 def review_trade_document(kind, source, *, final=False, allow_optional_na=False, allow_incomplete=False):
