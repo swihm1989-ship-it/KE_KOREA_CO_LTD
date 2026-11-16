@@ -108,6 +108,32 @@ class AiIntakeUiTests(unittest.TestCase):
             api.assert_not_called()
 
 
+    def test_api_network_failure_preserves_previously_extracted_order(self):
+        """A failed retry must not delete the last saved PI/PO candidate or draft."""
+        saved = ("previous-order", {"PO": {
+            "document_type": "PO", "items": [{"product_name": "Saved product",
+                                               "quantity": "10", "unit_price": "1000"}]}})
+        previous_result = ("previous-order",
+                           {"parties": [], "terms": [], "issues": [], "questions": []})
+        with (patch.dict(os.environ, {
+                  "OPENAI_API_KEY": "TEST-ONLY", "OPENAI_MODEL": "gpt-6-luna"}),
+              patch("Quotation_KEKOREA.orchestration.ui.ai_intake_page.extract_candidate",
+                    side_effect=RuntimeError("OpenAI API 응답 시간 초과"))):
+            app = AppTest.from_file(str(PAGE), default_timeout=25).run()
+            app.radio[0].set_value("AI 업무 요청").run()
+            app.text_area(key="ai_intake_instruction").set_value(
+                "Create PO for 10 synthetic ECLADO creams").run()
+            app.checkbox(key="ai_intake_consent").check().run()
+            app.session_state["ai_intake_candidates"] = saved
+            app.session_state["ai_intake_result"] = previous_result
+            app.session_state["ai_intake_drafts"] = ("previous-order", {"PO": {"pdf": b"prior"}})
+            app.button(key="ai_intake_extract").click().run()
+        self.assertFalse(app.exception, [x.message for x in app.exception])
+        self.assertTrue(any("AI 거래조건 추출 실패" in e.message for e in app.error))
+        self.assertEqual(app.session_state["ai_intake_candidates"], saved)
+        self.assertEqual(app.session_state["ai_intake_result"], previous_result)
+        self.assertIn("ai_intake_drafts", app.session_state)
+
     def test_advanced_json_draft_button_normalizes_existing_raw_price(self):
         import hashlib
         from Quotation_KEKOREA.orchestration.tests.test_draft_files import trade_fixture
