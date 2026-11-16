@@ -114,31 +114,41 @@ def consume_pending(state, instruction):
 
 
 def _safe_trade(raw, kind, instruction, family, attachments):
-    from Quotation_KEKOREA.agent.extractor import _schema, verify_item_quotes
-    from Quotation_KEKOREA.agent.ci_import import prepare_ci_import, ci_import_issues
+    """Call the exact same KE KOREA postprocessor as the document-agent UI.
+
+    The private catalog and company directory may be applied after extracting
+    these candidate facts; original doc/role-specific checks are shared.
+    """
+    from Quotation_KEKOREA.agent.extractor import _schema
+    from Quotation_KEKOREA.agent.document_engine import finalize_extracted_trade
+    from Quotation_KEKOREA.agent.ci_import import ci_import_issues
     from Quotation_KEKOREA.orchestration.workflows.commercial_values import normalize_trade_values
-    if not isinstance(raw,dict) or not isinstance(raw.get('items'),list):
-        raise ValueError('AI 무역서류 응답의 품목 목록이 유효하지 않습니다.')
-    schema=_schema()
-    allowed=set(schema['properties'])|{'source_document_type','source_total'}
-    fields=set(schema['properties']['items']['items']['properties'])|{'source_line_total'}
-    data={k:deepcopy(v) for k,v in raw.items() if k in allowed}
-    if any(not isinstance(row,dict) for row in raw['items']):
-        raise ValueError('AI 품목 행이 유효하지 않습니다.')
-    data['items']=[{k:deepcopy(v) for k,v in row.items() if k in fields} for row in raw['items']]
-    data['document_type']=kind
-    data['product_family']=family
-    # DRAFT is a label, never an invented final invoice number.
-    data['document_number']=data.get('document_number') or 'DRAFT'
-    from .mail_trade_normalization import explicit_ship_to, synchronize_nullable_quantities
-    if not explicit_ship_to(instruction) and not (attachments and explicit_ship_to(data.get('ship_to_source'))):
-        data['ship_to']=None
-    data=verify_item_quotes(data,instruction,image_context=bool(attachments))
-    data=synchronize_nullable_quantities(normalize_trade_values(data))
-    if kind=='CI':
-        prepare_ci_import(data,requested_type='CI',has_attachments=bool(attachments))
+    from .mail_trade_normalization import synchronize_nullable_quantities
+    if not isinstance(raw, dict) or not isinstance(raw.get("items"), list):
+        raise ValueError("AI 무역서류 응답의 품목 목록이 유효하지 않습니다.")
+    schema = _schema()
+    allowed = set(schema["properties"]) | {"source_document_type", "source_total"}
+    fields = set(schema["properties"]["items"]["items"]["properties"]) | {"source_line_total"}
+    data = {k: deepcopy(v) for k, v in raw.items() if k in allowed}
+    if any(not isinstance(row, dict) for row in raw["items"]):
+        raise ValueError("AI 품목 행이 유효하지 않습니다.")
+    data["items"] = [
+        {k: deepcopy(v) for k, v in row.items() if k in fields}
+        for row in raw["items"]]
+    data["document_type"] = kind
+    data["product_family"] = family
+    data["document_number"] = data.get("document_number") or "DRAFT"
+    # The original KE KOREA pipeline handles CI import, source evidence,
+    # quantities, discounts, FOC, company defaults, and catalog matching.
+    data = finalize_extracted_trade(
+        data, instruction, kind, attachments,
+        {"products": [], "purchase_prices": [], "buyer_prices": []},
+        family=family)
+    data = synchronize_nullable_quantities(normalize_trade_values(data))
+    if kind == "CI":
         for issue in ci_import_issues(data):
-            if issue not in data.setdefault('missing_fields',[]):data['missing_fields'].append(issue)
+            if issue not in data.setdefault("missing_fields", []):
+                data["missing_fields"].append(issue)
     return normalize_trade_values(data)
 
 
