@@ -84,6 +84,25 @@ class MasterLegacyCatalogParityTests(unittest.TestCase):
         self.assertFalse(any("stated price differs" in x
                              for x in fixed["PI"]["conflicts"]))
 
+    def test_po_switching_supplier_clears_only_verified_eclado_purchase_price(self):
+        """The former supplier's private KRW cost must not survive a PO supplier change."""
+        original = trade("PO", buyer="KE KOREA CO. LTD", seller="ECLADO", price=None)
+        priced = reuse_legacy_catalog({"PO": original}, CATALOG)
+        self.assertEqual(priced["PO"]["items"][0]["unit_price"], "1000")
+        priced["PO"]["seller"]["legal_name"] = "UNRELATED SUPPLIER LTD"
+        revised = reuse_legacy_catalog(priced, CATALOG)["PO"]
+        self.assertIsNone(revised["items"][0]["unit_price"])
+        self.assertFalse(revised["items"][0].get("master_price", False))
+
+    def test_pi_switching_buyer_does_not_leak_dear_glow_catalog_price(self):
+        original = trade("PI", price=None)
+        priced = reuse_legacy_catalog({"PI": original}, CATALOG)
+        self.assertEqual(priced["PI"]["items"][0]["unit_price"], "12.50")
+        priced["PI"]["buyer"]["legal_name"] = "OTHER BUYER LTD"
+        revised = reuse_legacy_catalog(priced, CATALOG)["PI"]
+        self.assertIsNone(revised["items"][0]["unit_price"])
+        self.assertFalse(revised["items"][0].get("master_price", False))
+
     def test_unrelated_solar_transaction_skips_catalog(self):
         source = {"PI": {"document_type": "PI",
                          "product_family": "solar_cell",

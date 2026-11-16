@@ -138,7 +138,7 @@ elif page == "AI 업무 요청":
     try:
         ai_page = importlib.import_module(
             "Quotation_KEKOREA.orchestration.ui.ai_intake_page")
-        expected_revision = "master-bulk-item-discount-20261117-v16"
+        expected_revision = "master-po-krw-catalog-recheck-20261117-v17"
         source_mtime = Path(ai_page.__file__).stat().st_mtime_ns
         # Streamlit may keep an imported module in memory after a GitHub
         # deployment. A forgotten manual version bump previously left the

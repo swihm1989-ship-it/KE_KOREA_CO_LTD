@@ -37,7 +37,7 @@ PDF_EXPORT_MODULE = "Quotation_KEKOREA.orchestration.workflows.legacy_document_e
 PDF_EXPORT_REVISION = "review-pdf-safe-loader-20261113-v4"
 TRADE_REVIEW_MODULE = "Quotation_KEKOREA.orchestration.workflows.trade_export_review"
 TRADE_REVIEW_REVISION = "image-advisory-schema-fix-20261116-v5"
-AI_INTAKE_REVISION = "master-bulk-item-discount-20261117-v16"
+AI_INTAKE_REVISION = "master-po-krw-catalog-recheck-20261117-v17"
 # Detect a changed source file even when the cached module has the same revision.
 AI_INTAKE_SOURCE_MTIME_NS = os.stat(__file__).st_mtime_ns
 
@@ -204,7 +204,7 @@ def _model_config():
     )}
 
 
-_MASTER_ECLADO_CATALOG_REVISION = "master-item-list-price-20261116-v3"
+_MASTER_ECLADO_CATALOG_REVISION = "master-po-krw-catalog-recheck-20261117-v4"
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -354,11 +354,36 @@ def _remember_candidate_bundle(digest: str, candidate_map: dict, *, replace_edit
         st.session_state.pop("ai_intake_followup_error", None)
     candidate_map = {kind: normalize_trade_values(data) if kind in {"PI", "PO", "CI", "PL"} else data
                      for kind, data in candidate_map.items()}
+    # Resolve explicit user-authored PO buyer/supplier roles only on the NEW
+    # extraction, never on edits to an already-reviewed PO. Imported customer
+    # orders can otherwise leave their PI seller/buyer on the generated PO.
+    if replace_editor and (not previous or previous[0] != digest):
+        from Quotation_KEKOREA.agent.mail_party_bridge import apply_explicit_po_roles
+        candidate_map = apply_explicit_po_roles(
+            candidate_map, st.session_state.get("ai_intake_instruction") or "")
     candidate_map = _master_catalog_pricing(candidate_map)
     candidate_map = apply_default_list_prices(candidate_map)
     st.session_state["ai_intake_catalog_revision"] = _MASTER_ECLADO_CATALOG_REVISION
     st.session_state["ai_intake_candidates"] = (digest, candidate_map)
     _invalidate_document_outputs()
+
+
+
+def _confirm_po_supplier_and_reprice(digest: str) -> None:
+    """Use explicit owner confirmation to repair an existing, unpriced PO.
+
+    Do not call AI again, copy customer sale prices, or modify the paired PI.
+    """
+    saved = st.session_state.get("ai_intake_candidates")
+    if not saved or saved[0] != digest or not isinstance(saved[1].get("PO"), dict):
+        return
+    from Quotation_KEKOREA.agent.mail_party_bridge import apply_explicit_po_roles
+    revised = apply_explicit_po_roles(
+        saved[1], "Buyer는 KE KOREA, Supplier는 ECLADO")
+    _remember_candidate_bundle(digest, revised)
+    st.session_state["ai_intake_last_answer"] = (
+        "PO Buyer KE KOREA / Supplier ECLADO 확인 · KRW 매입단가 재조회")
+    st.session_state.pop("ai_intake_followup_error", None)
 
 
 def _refresh_shared_widgets(digest: str, candidates: dict) -> None:
@@ -1305,6 +1330,33 @@ def _render_single_editor(digest: str, candidates: dict) -> None:
                      "단가 출처": "검증된 카탈로그" if item.get("master_price") is True else "개별 확인"}
                     for idx, item in enumerate(items) if isinstance(item, dict)],
                     hide_index=True, width="stretch")
+                if kind == "PO" and doc.get("product_family") == "cosmetics" and items:
+                    from Quotation_KEKOREA.agent.pricing import is_eclado_supplier
+                    supplier = str((doc.get("seller") or {}).get("legal_name") or "")
+                    verified_count = sum(
+                        row.get("master_price") is True and row.get("unit_price") not in (None, "")
+                        for row in items if isinstance(row, dict))
+                    if not is_eclado_supplier(supplier):
+                        st.warning("PO 매입단가 자동 조회 보류: Supplier가 ECLADO로 확인되지 않았습니다. "
+                                   "원본 Dear Glow 주문의 판매자 정보가 PO에 남았을 수 있습니다.")
+                    elif st.session_state.get("master_eclado_catalog_status") != "connected":
+                        st.warning("PO 매입단가 자동 조회 대기: ECLADO Supabase 가격표 연결을 확인해 주세요.")
+                    elif verified_count < len(items):
+                        st.warning("PO 매입단가 자동 적용 " + str(verified_count) + "/" +
+                                   str(len(items)) + "개 · 단가가 없는 상품은 제품명·용량·SKU가 "
+                                   "정확히 일치하는지 확인하세요. 미확정 가격은 임의로 채우지 않습니다.")
+                    else:
+                        st.caption("PO KRW 매입단가 검증 완료 · " + str(verified_count) +
+                                   "/" + str(len(items)) + "개 상품")
+                    if verified_count < len(items) or not is_eclado_supplier(supplier):
+                        st.button(
+                            "PO · KE KOREA 매입 / ECLADO 공급처 확인 및 단가 재조회",
+                            key="ai_intake_reprice_eclado_po_" + digest[:12],
+                            help="사용자가 Buyer KE KOREA / Supplier ECLADO를 확정합니다. "
+                                 "회사정보를 해당 당사자로 맞추고 Supabase KRW 매입단가를 다시 조회합니다. "
+                                 "매칭되지 않는 품목의 용량·SKU는 별도로 확인해야 합니다.",
+                            on_click=_confirm_po_supplier_and_reprice,
+                            args=(digest,), width="stretch")
                 if kind in {"PI", "PO"} and items:
                     with st.container(border=True):
                         st.markdown("**" + kind + " · 전체 상품 할인율 일괄 적용**")
@@ -1783,7 +1835,7 @@ def render_ai_intake(principal: str):
     if not principal:
         raise PermissionError("로그인이 필요합니다.")
     st.subheader("AI 거래조건 추출 · 기존 문서 엔진 연결")
-    st.caption("화면 업데이트: 2026-11-17 · 전체 할인율 일괄 적용 + 상품별 할인·행사 선택")
+    st.caption("화면 업데이트: 2026-11-17 · PO KRW 매입단가 재조회 + 상품별 할인·행사 선택")
     st.caption("문서 작업은 이 화면에서 진행합니다. 검토용 초안과 최종 발행 문서는 기존 검증·승인 규칙에 따라 구분합니다.")
     st.caption("기존 계약서 분석 AI를 사용해 자연어에서 거래조건을 제안합니다. 확정·발행·전송은 자동으로 하지 않습니다.")
     st.info("AI 요청에는 아래 입력 내용과 직접 선택한 참고파일만 전송합니다. 저장된 계약서는 모델에 전달되지 않습니다.")
