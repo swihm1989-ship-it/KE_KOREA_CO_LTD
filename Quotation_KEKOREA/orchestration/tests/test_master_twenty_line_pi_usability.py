@@ -48,7 +48,12 @@ def twenty_item_pi():
     return doc
 
 
-class MasterTwentyLinePiUxTests(TradeFinalUiTests):
+class MasterTwentyLinePiUxTests(unittest.TestCase):
+    app = TradeFinalUiTests.app
+    seal = TradeFinalUiTests.seal
+    approve = TradeFinalUiTests.approve
+    export = TradeFinalUiTests.export
+
     def test_twenty_products_use_a_single_compact_editor_and_one_final_report(self):
         doc = twenty_item_pi()
         app = self.app(doc, editor=True)
