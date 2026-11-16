@@ -1705,6 +1705,12 @@ def render_ai_intake(principal: str):
                 except (TypeError, ValueError, KeyError):
                     st.error("문서 후보 형식이 올바르지 않습니다. 변경값을 검토해 주세요.")
         edited_key = _fingerprint(digest + raw)
+        # Final issuance is the primary workflow. A second DRAFT export is
+        # optional and must never be a prerequisite for a valid FINAL PDF.
+        _render_trade_final_panel(digest, candidates[1],
+                                  document_export_env(st.secrets, os.environ),
+                                  edited_matches=not json_changed)
+        st.markdown("#### 추가 검토용 기능 (선택)")
         if st.button("기존 문서 엔진으로 검증·DRAFT 생성", key="ai_intake_prepare",
                      disabled=not editor_matches):
             st.session_state.pop("ai_intake_drafts", None)
@@ -1814,8 +1820,6 @@ def render_ai_intake(principal: str):
                                                mime=file["mime"], key="master_legacy_" + kind + "_" + fmt)
             st.caption("미확정 항목이 있어도 검토용 PDF를 생성할 수 있습니다. "
                        "아래 최종 PDF에서는 누락 항목을 빈칸으로 유지하도록 직접 승인할 수 있습니다.")
-        _render_trade_final_panel(digest, candidates[1], document_export_env(st.secrets, os.environ),
-                                  edited_matches=not json_changed)
         if "CONTRACT" in candidates[1]:
             st.caption("계약서 DRAFT는 기존 초안 엔진, FINAL은 기존 원본 계약서 "
                        "출력 엔진을 사용합니다. 두 방식 모두 별도 검토·승인 정책을 유지합니다.")
