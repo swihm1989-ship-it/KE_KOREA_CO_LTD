@@ -36,7 +36,7 @@ PDF_EXPORT_MODULE = "Quotation_KEKOREA.orchestration.workflows.legacy_document_e
 PDF_EXPORT_REVISION = "review-pdf-safe-loader-20261113-v4"
 TRADE_REVIEW_MODULE = "Quotation_KEKOREA.orchestration.workflows.trade_export_review"
 TRADE_REVIEW_REVISION = "payment-conflict-reconcile-20261116-v3"
-AI_INTAKE_REVISION = "master-eclado-catalog-20261116-v10"
+AI_INTAKE_REVISION = "master-mail-party-catalog-20261116-v11"
 
 _PDF_LOGGER = logging.getLogger("master.trade_final_pdf")
 
@@ -1390,6 +1390,30 @@ def render_ai_intake(principal: str):
                 except ValueError as exc:
                     st.error(str(exc))
                     attachments = None
+        else:
+            # PI/PO/PL mail orders often contain only an inline image marker
+            # in the text: the ORIGINAL binary file must accompany the AI
+            # request or the model has no product/quantity evidence.
+            uploads = st.file_uploader(
+                "메일 주문 이미지·PDF 추가 (원본 파일 누락 시)",
+                type=["pdf", "png", "jpg", "jpeg", "webp"],
+                accept_multiple_files=True, key="ai_intake_mail_order_uploads")
+            if uploads:
+                from Quotation_KEKOREA.agent.attachments import prepare_uploads
+                try:
+                    attachments = attachments + prepare_uploads(uploads)
+                except ValueError as exc:
+                    st.error(str(exc))
+                    attachments = None
+        image_mentions = re.findall(r"\[(?:image|이미지)\s*:\s*([^\]]+)\]", instruction, re.I)
+        provided_names = {str(a.get("name") or "").strip().casefold()
+                          for a in (attachments or [])}
+        missing_images = [name for name in image_mentions
+                          if name.strip().casefold() not in provided_names]
+        if missing_images:
+            st.warning("메일의 [image: 파일명] 표시는 실제 이미지 데이터가 아닙니다. "
+                       "원본 주문 이미지를 위에서 첨부해야 제품명·수량·SKU를 분석할 수 있습니다: "
+                       + ", ".join(missing_images[:5]))
     st.caption("감지된 문서 종류: " + (", ".join(requested) if requested else "없음 · PI/PO/CI/PL/계약서를 명시하세요"))
     language = st.radio("계약서 언어", ["한국어", "English"], horizontal=True,
                         key="ai_intake_language")
@@ -1505,6 +1529,14 @@ def render_ai_intake(principal: str):
         if repaired != current_bundle:
             _remember_candidate_bundle(digest, repaired, replace_editor=True)
             candidates = st.session_state.get("ai_intake_candidates")
+        if mail_mode:
+            directory_status = st.session_state.get("master_company_directory_status")
+            if directory_status == "connected":
+                st.caption("KE KOREA 거래처 DB 연결 완료 · Buyer/Seller는 기존 에이전트의 회사정보 자동입력 규칙으로 처리합니다.")
+            elif directory_status:
+                st.warning("KE KOREA 거래처 DB를 불러오지 못했습니다 (" +
+                           directory_status + "). Buyer/Seller는 확인되지 않은 상태이며 "
+                           "임의의 회사정보를 생성하지 않습니다.")
         catalog_status = st.session_state.get("master_eclado_catalog_status")
         if catalog_status == "connected":
             st.caption("ECLADO 가격표 연결 완료 · 기존 앱과 동일한 상품/SKU 및 거래처별 매입·판매 단가 정책 사용 "
