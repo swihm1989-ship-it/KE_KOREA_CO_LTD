@@ -152,7 +152,7 @@ def _render_master_trade(kind: str, source: Mapping, env: Mapping[str, str], *, 
                                  seal_path=actual_seal, **({"final": True} if final else {}))
         except (ValueError, TypeError, KeyError, AttributeError, OSError) as exc:
             import logging
-            logging.getLogger("master.trade_final_pdf").exception(
+            logging.getLogger("master.trade_final_pdf").error(
                 "Legacy renderer failure: kind=%s, final=%s, error_type=%s",
                 kind, final, type(exc).__name__)
             # Never leak raw document data, bank credentials or third-party
