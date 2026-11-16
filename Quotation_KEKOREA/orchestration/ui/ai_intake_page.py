@@ -17,7 +17,7 @@ from Quotation_KEKOREA.orchestration.workflows.mail_intake import (
     extract_mail_candidates, consume_pending, fingerprint as mail_fingerprint,
 )
 from Quotation_KEKOREA.orchestration.router import DOC_TYPES, classify
-from Quotation_KEKOREA.orchestration.workflows.commercial_values import normalize_trade_values
+from Quotation_KEKOREA.orchestration.workflows.commercial_values import (normalize_trade_values, apply_default_list_prices)
 from Quotation_KEKOREA.orchestration.workflows.label_typos import canonical_label
 from Quotation_KEKOREA.orchestration.workflows.ai_intake import (
     extract_candidate,
@@ -202,7 +202,7 @@ def _model_config():
     )}
 
 
-_MASTER_ECLADO_CATALOG_REVISION = "mail-directory-plus-catalog-20261116-v2"
+_MASTER_ECLADO_CATALOG_REVISION = "master-item-list-price-20261116-v3"
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -353,6 +353,7 @@ def _remember_candidate_bundle(digest: str, candidate_map: dict, *, replace_edit
     candidate_map = {kind: normalize_trade_values(data) if kind in {"PI", "PO", "CI", "PL"} else data
                      for kind, data in candidate_map.items()}
     candidate_map = _master_catalog_pricing(candidate_map)
+    candidate_map = apply_default_list_prices(candidate_map)
     st.session_state["ai_intake_catalog_revision"] = _MASTER_ECLADO_CATALOG_REVISION
     st.session_state["ai_intake_candidates"] = (digest, candidate_map)
     _invalidate_document_outputs()
@@ -663,6 +664,111 @@ def _apply_scoped_item(digest: str, kind: str, index: int,
     _clear_input_error(widget)
     st.session_state["ai_intake_last_answer"] = (
         kind + " · 상품 " + str(index + 1) + " · " + field)
+    st.session_state.pop("ai_intake_followup_error", None)
+
+
+
+def _discount_option(kind: str, item: dict) -> str:
+    """Choose a readable per-item setting without changing user-entered rates."""
+    from decimal import Decimal, InvalidOperation
+    raw = str(item.get("discount_percent") if item.get("discount_percent") is not None else "").strip()
+    if not raw:
+        return "미확인" if kind == "CI" else "정가 (0%)"
+    try:
+        value = Decimal(raw)
+    except (InvalidOperation, ValueError):
+        return "직접 입력"
+    for known, label in (("0", "정가 (0%)"), ("5", "5%"), ("10", "10%")):
+        if value == Decimal(known):
+            return label
+    return "직접 입력"
+
+
+def _promotion_option(item: dict) -> str:
+    from Quotation_KEKOREA.agent.promotions import normalize_promotion
+    raw = str(item.get("promotion") or "").strip()
+    if not raw:
+        return "행사 없음"
+    value = normalize_promotion(raw)
+    return value if value in {"1+1", "2+1", "3+1", "4+1", "3+2", "4+3"} else "직접 입력"
+
+
+def _apply_scoped_trade_term(digest: str, kind: str, index: int,
+                             field: str, widget: str) -> None:
+    """Commit only the selected document and item; preserve pricing provenance.
+
+    Existing source prices are not modified. A user-selected gift ratio
+    recomputes free/shipped quantity from paid quantity. All previous PDF
+    approvals are revoked by _remember_candidate_bundle.
+    """
+    saved = st.session_state.get("ai_intake_candidates")
+    if not saved or saved[0] != digest or not _is_current_shared_widget(digest, widget):
+        return
+    doc = saved[1].get(kind)
+    if kind not in {"PI", "PO", "CI"} or not isinstance(doc, dict):
+        return
+    items = doc.get("items") or []
+    if not isinstance(index, int) or index < 0 or index >= len(items):
+        return
+    raw = str(st.session_state.get(widget) or "").strip()
+    if raw == "직접 입력":
+        return
+    if field.startswith("promotion") and kind not in {"PI", "PO"}:
+        return
+    revised = deepcopy(saved[1])
+    try:
+        if field in {"discount_choice", "discount_custom"}:
+            if field == "discount_choice":
+                options = {"정가 (0%)": "0", "5%": "5", "10%": "10", "미확인": ""}
+                if raw not in options:
+                    return
+                raw = options[raw]
+            revised[kind] = apply_answer(
+                {kind: doc}, f"item.{index}.discount_percent",
+                raw, allow_blank=True)[kind]
+        elif field in {"promotion_choice", "promotion_custom"}:
+            from Quotation_KEKOREA.agent.promotions import normalize_promotion
+            from Quotation_KEKOREA.agent.trade_documents import apply_promotion
+            if field == "promotion_choice":
+                options = {"행사 없음", "1+1", "2+1", "3+1", "4+1", "3+2", "4+3"}
+                if raw not in options:
+                    return
+                rule = None if raw == "행사 없음" else raw
+            else:
+                if not re.fullmatch(r"[1-9]\\d*\\s*\\+\\s*[1-9]\\d*", raw):
+                    raise ValueError("행사 비율은 2+1 또는 5+2처럼 입력하세요.")
+                rule = normalize_promotion(raw)
+                if not rule:
+                    raise ValueError("행사 비율을 확인해 주세요.")
+            row = revised[kind]["items"][index]
+            previously_promoted = bool(row.get("promotion"))
+            if rule:
+                row["promotion"] = rule
+            else:
+                row.pop("promotion", None)
+            paid = row.get("paid_quantity")
+            if paid in (None, ""):
+                paid = row.get("quantity")
+            if paid not in (None, ""):
+                if rule or previously_promoted:
+                    numbers = apply_promotion(str(paid), rule)
+                    row.update(numbers)
+                    row["quantity"] = numbers["paid_quantity"]
+                    row["display_quantity"] = numbers["shipped_quantity"]
+            elif rule or previously_promoted:
+                row["free_quantity"] = None if rule else "0"
+                row["shipped_quantity"] = None
+                row.pop("display_quantity", None)
+        else:
+            return
+    except (ValueError, TypeError, KeyError, RuntimeError) as exc:
+        _record_input_error(digest, f"{kind}.item.{index}.{field}", widget, str(exc))
+        return
+    _clear_input_error(widget)
+    _remember_candidate_bundle(digest, revised)
+    st.session_state["ai_intake_last_answer"] = (
+        kind + " · 상품 " + str(index + 1) + " · " +
+        ("할인율" if field.startswith("discount") else "증정행사"))
     st.session_state.pop("ai_intake_followup_error", None)
 
 
