@@ -735,7 +735,7 @@ def _apply_scoped_trade_term(digest: str, kind: str, index: int,
                     return
                 rule = None if raw == "행사 없음" else raw
             else:
-                if not re.fullmatch(r"[1-9]\\d*\\s*\\+\\s*[1-9]\\d*", raw):
+                if not re.fullmatch(r"[1-9]\d*\s*\+\s*[1-9]\d*", raw):
                     raise ValueError("행사 비율은 2+1 또는 5+2처럼 입력하세요.")
                 rule = normalize_promotion(raw)
                 if not rule:
