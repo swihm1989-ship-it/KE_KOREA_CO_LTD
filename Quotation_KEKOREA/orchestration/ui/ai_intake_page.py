@@ -612,6 +612,28 @@ def _apply_extra_item(digest: str, index: int, field: str, widget: str) -> None:
     st.session_state.pop("ai_intake_followup_error", None)
 
 
+def _apply_bulk_zero_discount(digest: str, kind: str) -> None:
+    """Owner-approved single action: fill only absent line discounts with 0%.
+
+    Never overwrite an explicitly supplied positive discount and never assume
+    that a blank discount is zero without this action. Each document is scoped
+    independently (a PO and PI can have different commercial terms).
+    """
+    from Quotation_KEKOREA.agent.review_fields import _missing
+    saved = st.session_state.get("ai_intake_candidates")
+    if not saved or saved[0] != digest or kind not in {"PI", "PO", "CI"}:
+        return
+    candidate = saved[1].get(kind)
+    if not isinstance(candidate, dict):
+        return
+    updated = deepcopy(saved[1])
+    for row in updated[kind].get("items") or []:
+        if isinstance(row, dict) and _missing(row.get("discount_percent"), True):
+            row["discount_percent"] = "0"
+    _remember_candidate_bundle(digest, updated)
+    st.session_state["ai_intake_last_answer"] = kind + " · 미입력 할인율 0% 적용"
+
+
 def _edit_contract_fact(digest: str, section: str, identity: str,
                         field: str, widget: str) -> None:
     """Edit contract-specific facts in the same input card; revoke AI clauses."""
