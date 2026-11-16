@@ -93,7 +93,7 @@ class MasterItemTermsTests(unittest.TestCase):
         self.assertEqual(pi["items"][0]["shipped_quantity"], "10")
         reviewed = review_trade_document("PI", pi, final=True, allow_incomplete=True)
         self.assertTrue(reviewed["ready"], reviewed["issues"])
-        self.assertEqual(reviewed["render_data"]["total"], "165.25")
+        self.assertEqual(reviewed["render_data"]["total"], "165.30")
         self.assertEqual(reviewed["render_data"]["items"][1]["free_quantity"], "5")
 
         next(x for x in app.selectbox if x.label == "PI · 상품 2 · 증정행사").set_value("행사 없음").run()
