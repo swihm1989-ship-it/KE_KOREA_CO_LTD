@@ -12,7 +12,7 @@ from Quotation_KEKOREA.agent.ci_import import ci_import_issues
 from .commercial_values import normalize_trade_values
 from .intake_followups import format_field_label
 
-TRADE_REVIEW_REVISION = 'payment-conflict-reconcile-20261116-v3'
+TRADE_REVIEW_REVISION = 'historical-image-review-20261116-v4'
 
 
 class TradeExportValidationError(ValueError):
