@@ -36,6 +36,25 @@ def _mentioned(prompt, profile):
     return False
 
 
+
+def apply_ke_korea_company_defaults(draft, document_type):
+    """Shared original KE KOREA party profile; never overwrite entered facts."""
+    role = "buyer" if document_type == "PO" else "seller"
+    party = dict(draft.get(role) or {})
+    defaults = {
+        "legal_name": "KE Korea Co. LTD",
+        "address": "#1510, 157 Yangpyung Ro, Yungdeungpo Gu, Seoul, South Korea",
+        "contact": "Representative: DAVID, SEOKWON IHM",
+        "phone": "+82 10 9823 0029",
+        "email": "david.ihm@ke-korea.com",
+    }
+    for field, value in defaults.items():
+        if not str(party.get(field) or "").strip():
+            party[field] = value
+    draft[role] = party
+    return draft
+
+
 def apply_company_profiles(draft, profiles, *, prompt=''):
     """Fill missing recipient fields; explicit order values always take priority."""
     dtype = draft.get('document_type')
