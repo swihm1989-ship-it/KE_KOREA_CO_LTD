@@ -129,6 +129,46 @@ _render_single_editor("po-retry", st.session_state["ai_intake_candidates"][1])
         self.assertEqual(po["items"][0]["unit_price"], "1000")
         self.assertTrue(po["items"][0]["master_price"])
 
+    def test_po_connected_catalog_but_unmatched_size_explains_unpriced_row(self):
+        from copy import deepcopy
+        from Quotation_KEKOREA.orchestration.tests.test_missing_document_details import complete_pi
+        from Quotation_KEKOREA.orchestration.workflows.document_assets import EXPECTED_PROJECT
+        env = {"SUPABASE_URL": "https://" + EXPECTED_PROJECT + ".supabase.co",
+               "SUPABASE_SECRET_KEY": "TEST-ONLY-SERVER-KEY"}
+        doc = complete_pi()
+        doc["document_type"] = "PO"
+        doc["product_family"] = "cosmetics"
+        doc["buyer"]["legal_name"] = "KE KOREA CO LTD"
+        doc["seller"]["legal_name"] = "ECLADO"
+        doc["items"][0].update(product_name="Cell Memory Cream", capacity=None,
+                               product_code=None, unit_price=None, quantity="10")
+        catalog = deepcopy(CATALOG)
+        catalog["products"].append({
+            "id": "synthetic-p2", "brand": "ECLADO", "source_code": "E-166",
+            "item_name": "Cell Memory Cream", "capacity": "30g",
+        })
+        catalog["purchase_prices"].append({
+            "product_id": "synthetic-p2", "supplier_key": "ECLADO",
+            "currency": "KRW", "unit_price": "700", "source_row": 5,
+        })
+        source = """import streamlit as st
+from Quotation_KEKOREA.orchestration.ui.ai_intake_page import (
+    _remember_candidate_bundle, _render_single_editor)
+st.session_state["ai_intake_instruction"] = "PO: Buyer KE KOREA, Supplier ECLADO"
+if "ai_intake_candidates" not in st.session_state:
+    _remember_candidate_bundle("po-ambiguous", {"PO": DATA}, replace_editor=True)
+_render_single_editor("po-ambiguous", st.session_state["ai_intake_candidates"][1])
+""".replace("DATA", repr(doc))
+        with (patch.object(ai_intake_page, "document_export_env", return_value=env),
+              patch.object(ai_intake_page, "_cached_master_eclado_catalog",
+                           return_value=catalog)):
+            app = AppTest.from_string(source, default_timeout=25).run()
+        self.assertFalse(app.exception, [e.message for e in app.exception])
+        po = app.session_state["ai_intake_candidates"][1]["PO"]
+        self.assertIsNone(po["items"][0]["unit_price"])
+        self.assertTrue(any("용량" in x.message or "SKU" in x.message
+                            for x in app.warning))
+
     def test_no_secrets_preserves_user_trade_price_without_network(self):
         app, loader = self.app({"PI": trade("PI", price="19.99")}, {})
         loader.assert_not_called()
