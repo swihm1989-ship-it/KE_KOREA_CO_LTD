@@ -81,9 +81,9 @@ class MasterItemTermsTests(unittest.TestCase):
         app = ui({"PI": document()})
         self.assertTrue(any(x.label == "PI · 상품 1 · 할인율" for x in app.selectbox))
         self.assertTrue(any(x.label == "PI · 상품 2 · 증정행사" for x in app.selectbox))
-        app.selectbox(key="master_item_terms_PI_0_discount").set_value("5%").run()
+        next(x for x in app.selectbox if x.label == "PI · 상품 1 · 할인율").set_value("5%").run()
         self.assertFalse(app.exception, [e.message for e in app.exception])
-        app.selectbox(key="master_item_terms_PI_1_promotion").set_value("2+1").run()
+        next(x for x in app.selectbox if x.label == "PI · 상품 2 · 증정행사").set_value("2+1").run()
         self.assertFalse(app.exception, [e.message for e in app.exception])
         pi = app.session_state["ai_intake_candidates"][1]["PI"]
         self.assertEqual([item["discount_percent"] for item in pi["items"]], ["5", "0"])
@@ -96,7 +96,7 @@ class MasterItemTermsTests(unittest.TestCase):
         self.assertEqual(reviewed["render_data"]["total"], "165.25")
         self.assertEqual(reviewed["render_data"]["items"][1]["free_quantity"], "5")
 
-        app.selectbox(key="master_item_terms_PI_1_promotion").set_value("행사 없음").run()
+        next(x for x in app.selectbox if x.label == "PI · 상품 2 · 증정행사").set_value("행사 없음").run()
         pi = app.session_state["ai_intake_candidates"][1]["PI"]
         self.assertFalse(pi["items"][1].get("promotion"))
         self.assertEqual(pi["items"][1]["free_quantity"], "0")
@@ -104,11 +104,11 @@ class MasterItemTermsTests(unittest.TestCase):
 
     def test_custom_discount_and_custom_promotion_are_per_line(self):
         app = ui({"PI": document()})
-        app.selectbox(key="master_item_terms_PI_0_discount").set_value("직접 입력").run()
+        next(x for x in app.selectbox if x.label == "PI · 상품 1 · 할인율").set_value("직접 입력").run()
         self.assertFalse(app.exception, [e.message for e in app.exception])
-        app.text_input(key="master_item_terms_PI_0_custom_discount").set_value("7.5").run()
-        app.selectbox(key="master_item_terms_PI_0_promotion").set_value("직접 입력").run()
-        app.text_input(key="master_item_terms_PI_0_custom_promotion").set_value("5+2").run()
+        next(x for x in app.text_input if x.label == "PI · 상품 1 · 직접 할인율 (%)").set_value("7.5").run()
+        next(x for x in app.selectbox if x.label == "PI · 상품 1 · 증정행사").set_value("직접 입력").run()
+        next(x for x in app.text_input if x.label == "PI · 상품 1 · 직접 증정행사 (예: 5+2)").set_value("5+2").run()
         self.assertFalse(app.exception, [e.message for e in app.exception])
         pi = app.session_state["ai_intake_candidates"][1]["PI"]
         self.assertEqual(pi["items"][0]["discount_percent"], "7.5")
@@ -125,7 +125,7 @@ class MasterItemTermsTests(unittest.TestCase):
         data = {"PI": document(), "PO": po}
         original_po = deepcopy(po)
         app = ui(data)
-        app.selectbox(key="master_item_terms_PI_0_discount").set_value("10%").run()
+        next(x for x in app.selectbox if x.label == "PI · 상품 1 · 할인율").set_value("10%").run()
         bundle = app.session_state["ai_intake_candidates"][1]
         self.assertEqual(bundle["PI"]["items"][0]["discount_percent"], "10")
         self.assertEqual(bundle["PO"]["items"][0]["discount_percent"], "0")
