@@ -12,7 +12,7 @@ from Quotation_KEKOREA.agent.ci_import import ci_import_issues
 from .commercial_values import normalize_trade_values
 from .intake_followups import format_field_label
 
-TRADE_REVIEW_REVISION = 'approved-blank-final-20261113-v1'
+TRADE_REVIEW_REVISION = 'prior-ai-notes-optional-20261116-v2'
 
 
 class TradeExportValidationError(ValueError):
@@ -263,8 +263,18 @@ def review_trade_document(kind, source, *, final=False, allow_optional_na=False,
         raise ValueError('Document type mismatch')
     candidate['document_type']=kind
     partial = final and allow_incomplete is True
+    prior_ai_notes = {
+        key: list(candidate.get(key) or [])
+        for key in ('missing_fields', 'conflicts')
+    } if partial else {}
     if partial:
         candidate = _blank_unknowns(candidate)
+        # Legacy AI prose is not a structured validation result. Once the user
+        # has reviewed the current transaction, do not require a second button
+        # for each old extraction note. Keep notes as non-blocking warnings;
+        # independent numeric, identity and CI-import checks still apply.
+        candidate['missing_fields'] = []
+        # Preserve unresolved conflicting terms as blockers; historical missing-field notes are informational.
     if allow_optional_na:
         for field in missing_review_fields(candidate):
             if not field.required:
@@ -314,6 +324,12 @@ def review_trade_document(kind, source, *, final=False, allow_optional_na=False,
             is_missing = (_number(candidate.get('declared_total_quantity')) is not None
                           and (not declared_unit or declared_unit in units or '' in units or not units))
         (warnings if is_missing else issues).append(entry)
+    if partial:
+        for category, notes in prior_ai_notes.items():
+            for note in notes:
+                if isinstance(note, str) and note.strip():
+                    warnings.append({'code': 'prior_ai_' + category, 'key': '',
+                                     'message': '이전 AI 추출 참고 (' + category + '): ' + note})
     for row in missing:
         (warnings if partial else issues).append({'code':'missing',**row})
     number=str(candidate.get('document_number') or '').strip()

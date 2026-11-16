@@ -44,7 +44,6 @@ class MailDocumentUiTests(unittest.TestCase):
 
     def start_analysis(self, app):
         self.begin_mail(app)
-        app.radio(key='ai_intake_mail_processing_mode').set_value('AI 자동 분석').run()
         app.checkbox(key='ai_intake_consent').check().run()
         app.button(key='ai_intake_extract').click().run()
         self.assertFalse(app.exception, [e.message for e in app.exception])
@@ -148,8 +147,7 @@ class MailDocumentUiTests(unittest.TestCase):
         with patch('Quotation_KEKOREA.orchestration.ui.ai_intake_page.extract_mail_candidates') as extract:
             app=self.mailbox()
             self.begin_mail(app)
-            self.assertEqual(app.radio(key='ai_intake_mail_processing_mode').value,
-                             '직접 수정 후 분석')
+            self.assertFalse(app.checkbox(key='ai_intake_edit_mail_before_analysis').value)
             self.assertTrue(app.button(key='ai_intake_extract').disabled)
             extract.assert_not_called()
 
@@ -158,7 +156,6 @@ class MailDocumentUiTests(unittest.TestCase):
                 'Quotation_KEKOREA.orchestration.ui.ai_intake_page.extract_mail_candidates') as extract:
             app=self.mailbox()
             self.begin_mail(app)
-            app.radio(key='ai_intake_mail_processing_mode').set_value('AI 자동 분석').run()
             app.checkbox(key='ai_intake_consent').check().run()
             self.assertTrue(app.button(key='ai_intake_extract').disabled)
             self.assertFalse(app.exception,[e.message for e in app.exception])

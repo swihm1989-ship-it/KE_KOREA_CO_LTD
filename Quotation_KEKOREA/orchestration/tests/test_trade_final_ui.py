@@ -92,7 +92,7 @@ render_ai_intake('synthetic@example.test')
         app=self.app(doc)
         self.assertTrue(next(b for b in app.button if b.label=='PI 최종 PDF 생성').disabled)
         self.assertFalse(next(c for c in app.checkbox if c.label.startswith('PI · 최종 출력')).disabled)
-        self.assertTrue(any('Buyer email' in t.value for t in app.text))
+        self.assertFalse(any(b.label == '해소 확인' for b in app.button))
         self.assertEqual(app.session_state['ai_intake_candidates'][1]['PI']['missing_fields'],
                          ['Buyer email','Seller phone'])
         self.approve(app)
@@ -134,11 +134,11 @@ render_ai_intake('synthetic@example.test')
         self.assertEqual(current['buyer']['address'],'SYNTHETIC VERIFIED ADDRESS')
         self.assertEqual(current['missing_fields'],['Unmapped old extraction note'])
         self.assertFalse(any('구매자 법인 주소' in w.value for w in app.warning))
-        self.assertTrue(any('Unmapped old extraction note' in t.value for t in app.text))
+        self.assertFalse(any(b.label == '해소 확인' for b in app.button))
         self.approve(app)
         self.assertFalse(next(b for b in app.button if b.label=='PI 최종 PDF 생성').disabled)
 
-    def test_other_document_missing_facts_do_not_block_pi_and_conflicts_stay_blocked(self):
+    def test_other_document_unresolved_conflict_still_blocks_po_not_pi(self):
         pi=self.doc();pi['buyer']['email']=''
         po=deepcopy(pi);po['document_type']='PO';po['document_number']=''
         po['conflicts']=['Supplier quantity conflicts with source invoice']
@@ -149,7 +149,7 @@ render_ai_intake('synthetic@example.test')
         self.assertTrue(next(c for c in app.checkbox if c.label.startswith('PO · 최종 출력')).disabled)
         self.approve(app)
         self.assertFalse(next(b for b in app.button if b.label=='PI 최종 PDF 생성').disabled)
-        self.assertTrue(next(b for b in app.button if b.label=='PO 최종 PDF 생성').disabled)
+        self.assertTrue(next(b for b in app.button if b.label=='PO 최종 PDF 생성').disabled)  # still needs separate approval
 
     def test_withdrawn_approval_revokes_existing_download(self):
         with self.seal():
