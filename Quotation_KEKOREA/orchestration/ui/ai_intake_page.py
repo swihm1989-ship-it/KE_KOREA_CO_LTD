@@ -36,8 +36,8 @@ FOLLOWUP_MODULE = "Quotation_KEKOREA.orchestration.workflows.intake_followups"
 PDF_EXPORT_MODULE = "Quotation_KEKOREA.orchestration.workflows.legacy_document_exports"
 PDF_EXPORT_REVISION = "review-pdf-safe-loader-20261113-v4"
 TRADE_REVIEW_MODULE = "Quotation_KEKOREA.orchestration.workflows.trade_export_review"
-TRADE_REVIEW_REVISION = "payment-conflict-reconcile-20261116-v3"
-AI_INTAKE_REVISION = "master-mail-party-catalog-20261116-v11"
+TRADE_REVIEW_REVISION = "historical-image-review-20261116-v4"
+AI_INTAKE_REVISION = "master-compact-20item-review-20261116-v12"
 
 _PDF_LOGGER = logging.getLogger("master.trade_final_pdf")
 
