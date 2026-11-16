@@ -510,7 +510,11 @@ def _document_row(item, is_packing_list, currency, *, paid_promotion=False, fina
                                   ("volume_lines", item.get("volume_cbm"), 13)):
             row[key] = _wrap(str(value) if value not in (None, "") else ("" if final else "-"), width)
     if not is_packing_list:
-        row["price"] = _formatted_money(item.get("final_unit_price", item.get("unit_price", "")), currency, final=final)
+        from .renderers import _display_unit_price
+        unit_price, list_price_only = _display_unit_price(item, final=final)
+        row["price"] = _formatted_money(unit_price, currency, final=final)
+        if list_price_only and row["price"]:
+            row["price"] += " (LIST)"
         row["amount"] = _formatted_money(item.get("line_total", ""), currency, final=final)
         if currency in {"KRW", "EUR", "CNY"} and row["price"].startswith(currency + " "):
             row["price"] = row["price"][len(currency) + 1:]
