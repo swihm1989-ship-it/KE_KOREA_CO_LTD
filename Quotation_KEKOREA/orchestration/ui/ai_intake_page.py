@@ -163,6 +163,9 @@ def _formal_pdf_hold_reason(kind: str, error: Exception, env: dict) -> str:
     The strict existing renderer remains authoritative for actual issuance.
     """
     message = str(error)
+    if message.startswith("PDF_RENDER_STAGE:"):
+        return ("기존 PDF 렌더러 내부에서 오류가 발생했습니다. "
+                "거래정보 승인 단계는 통과했으며, 서버의 PDF 렌더러 처리를 점검해야 합니다.")
     if message.startswith("문서 생성 전 누락 정보"):
         return "문서 생성 전 누락 정보가 있습니다. 위 거래정보 입력창에서 연락처 등 표시된 항목을 입력하세요."
     if message.startswith("거래조건을 먼저 보완하세요:"):
