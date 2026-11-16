@@ -664,10 +664,10 @@ def _render_contract_confirmations(digest: str, snapshot: dict) -> None:
              "trade_commission": ("client", "intermediary", "commission_payer"),
              "investment_commission": ("client", "fundraiser", "commission_payer")}
     required_roles = roles.get(snapshot.get("contract_type"), ())
-    with st.expander("계약서 전용 조건 입력 · 개별 확정 (FINAL 발행 전)", expanded=False):
-        st.caption("입력값은 AI 제안 상태이며 자동으로 확정되지 않습니다. "
-                   "각 조건을 원문과 확인한 뒤 '확정'을 누르세요. "
-                   "계약조건을 수정하면 AI 작성 조항은 다시 생성해야 합니다.")
+    with st.expander("계약서 조건 수정 및 개별 검토 (선택)", expanded=False):
+        st.caption("조건을 수정하면 AI 작성 조항은 다시 생성해야 합니다. "
+                   "개별 확인 기능은 선택 사항이며, 기존 KE KOREA 앱과 동일하게 "
+                   "FINAL은 계약 본문 전체 검토 및 승인으로 판단합니다.")
         parties = snapshot.get("parties") or []
         for role in required_roles:
             match = next(((i, p) for i, p in enumerate(parties)
@@ -1022,18 +1022,38 @@ def _render_original_contract_final(principal: str, snapshot: dict,
     env = document_export_env(st.secrets, os.environ)
     try:
         fingerprint = contract_fingerprint(snapshot)
-        blockers = contract_final_blockers(snapshot, env)
+        strict_blockers = contract_final_blockers(snapshot, env)
+        # The legacy workspace displays AI/rule review findings as ADVISORY
+        # and does not require individual statuses to become confirmed.
+        from Quotation_KEKOREA.contracts.rules import validate_snapshot as advisory_review
+        advisories = advisory_review(snapshot, for_export=True, env=env)
     except (TypeError, ValueError, KeyError):
         st.error("최종 계약서 형식 검증에 실패했습니다. 현재 조건을 확인하세요.")
         return
+    has_unresolved = any("BOX 3에 임시 확인 문구" in reason
+                         for reason in strict_blockers)
+    allow_unresolved = False
+    if has_unresolved:
+        st.warning("본문에 [서명 전 확인] 등 미확정 문구가 있습니다. "
+                   "기존 KE KOREA 앱과 동일하게 별도 동의가 있어야 그대로 출력합니다.")
+        allow_unresolved = st.checkbox(
+            "미확정 문구가 남은 현재 계약 본문을 그대로 최종 파일로 출력하는 데 동의합니다.",
+            key="master_contract_final_allow_unresolved_" + fingerprint[:20])
+    blockers = contract_final_blockers(
+        snapshot, env, allow_unresolved_text=allow_unresolved)
+    if advisories:
+        st.caption("AI·거래조건 검토사항 " + str(len(advisories)) +
+                   "건은 기존 앱과 동일하게 권고사항입니다. "
+                   "각 AI 제안을 개별 확정할 필요는 없으며 현재 계약 본문을 직접 검토하세요.")
     if blockers:
-        st.warning("FINAL 발행 전 미확정 조건 " + str(len(blockers)) + "건")
+        st.warning("FINAL 발행 전 본문·서명 검증 " + str(len(blockers)) + "건")
         with st.expander("발행 전 확인 및 보완 사항", expanded=True):
             for reason in blockers[:50]:
                 st.write("• " + str(reason))
     else:
-        st.success("계약조건과 원본 FINAL 엔진의 발행 검증을 통과했습니다.")
-    approval_key = "master_contract_final_approved_" + fingerprint[:20]
+        st.success("기존 KE KOREA FINAL 엔진의 본문 검증을 통과했습니다.")
+    approval_key = ("master_contract_final_approved_" + fingerprint[:20] +
+                    ("_unresolved" if allow_unresolved else ""))
     approved = st.checkbox(
         "현재 계약서의 모든 조항·당사자·거래조건을 원문과 확인하고 이 버전의 FINAL 생성을 승인합니다.",
         key=approval_key)
@@ -1064,7 +1084,8 @@ def _render_original_contract_final(principal: str, snapshot: dict,
         try:
             results = render_original_final(
                 snapshot, env, principal=principal, approved=approved,
-                authorized=authorized, expected_fingerprint=fingerprint)
+                authorized=authorized, expected_fingerprint=fingerprint,
+                allow_unresolved_text=allow_unresolved)
         except (ImportError, ValueError, RuntimeError, TypeError,
                 PermissionError, OSError) as exc:
             # Raw third-party errors must not expose secret PNGs or account data.
