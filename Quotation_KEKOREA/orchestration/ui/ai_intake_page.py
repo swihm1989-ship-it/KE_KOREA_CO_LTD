@@ -36,7 +36,7 @@ PDF_EXPORT_MODULE = "Quotation_KEKOREA.orchestration.workflows.legacy_document_e
 PDF_EXPORT_REVISION = "review-pdf-safe-loader-20261113-v4"
 TRADE_REVIEW_MODULE = "Quotation_KEKOREA.orchestration.workflows.trade_export_review"
 TRADE_REVIEW_REVISION = "payment-conflict-reconcile-20261116-v3"
-AI_INTAKE_REVISION = "ai-intake-hot-reload-20261113-v9"
+AI_INTAKE_REVISION = "master-eclado-catalog-20261116-v10"
 
 _PDF_LOGGER = logging.getLogger("master.trade_final_pdf")
 
@@ -201,6 +201,52 @@ def _model_config():
     )}
 
 
+_MASTER_ECLADO_CATALOG_REVISION = "reuse-legacy-catalog-20261116-v1"
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _cached_master_eclado_catalog(project_url: str, _secret_key: str) -> dict:
+    """Use the exact original ECLADO Supabase price loader, server-side only."""
+    from Quotation_KEKOREA.agent.pricing import load_supabase_catalog
+    return load_supabase_catalog({
+        "SUPABASE_URL": project_url,
+        "SUPABASE_SECRET_KEY": _secret_key,
+    })
+
+
+def _master_catalog_pricing(candidates: dict) -> dict:
+    """Enrich selected MASTER candidates with original, authorized pricing.
+
+    No catalog means no invented price. Original email/unit prices remain
+    unchanged and unverified; bank/contract/CI source rules are untouched.
+    """
+    from urllib.parse import urlparse
+    from Quotation_KEKOREA.orchestration.workflows.legacy_catalog_bridge import (
+        requires_eclado_catalog, reuse_legacy_catalog,
+    )
+    if not requires_eclado_catalog(candidates):
+        st.session_state.pop("master_eclado_catalog_status", None)
+        return candidates
+    env = document_export_env(st.secrets, os.environ)
+    url, key = env.get("SUPABASE_URL", ""), env.get("SUPABASE_SECRET_KEY", "")
+    if not url or not key:
+        st.session_state["master_eclado_catalog_status"] = "not_configured"
+        return candidates
+    from Quotation_KEKOREA.orchestration.workflows.document_assets import EXPECTED_PROJECT
+    if urlparse(url).hostname != EXPECTED_PROJECT + ".supabase.co":
+        st.session_state["master_eclado_catalog_status"] = "wrong_project"
+        return candidates
+    try:
+        catalog = _cached_master_eclado_catalog(url, key)
+        updated = reuse_legacy_catalog(candidates, catalog)
+    except (RuntimeError, ValueError, KeyError, TypeError, OSError):
+        st.session_state["master_eclado_catalog_status"] = "unavailable"
+        return candidates
+    st.session_state["master_eclado_catalog_status"] = "connected"
+    st.session_state["master_eclado_catalog_products"] = len(catalog.get("products", []))
+    return updated
+
+
 def _invalidate_document_outputs() -> None:
     """Every accepted or rejected visible edit revokes previous output approval."""
     for key in ("ai_intake_drafts", "master_legacy_files",
@@ -267,6 +313,8 @@ def _remember_candidate_bundle(digest: str, candidate_map: dict, *, replace_edit
         st.session_state.pop("ai_intake_followup_error", None)
     candidate_map = {kind: normalize_trade_values(data) if kind in {"PI", "PO", "CI", "PL"} else data
                      for kind, data in candidate_map.items()}
+    candidate_map = _master_catalog_pricing(candidate_map)
+    st.session_state["ai_intake_catalog_revision"] = _MASTER_ECLADO_CATALOG_REVISION
     st.session_state["ai_intake_candidates"] = (digest, candidate_map)
     _invalidate_document_outputs()
 
@@ -1388,9 +1436,24 @@ def render_ai_intake(principal: str):
                     if kind in {"PI", "PO", "CI", "PL"} and isinstance(value, dict)
                     else value
                     for kind, value in current_bundle.items()}
+        # Backfill existing logged-in sessions once after a code deployment.
+        if (st.session_state.get("ai_intake_catalog_revision")
+                != _MASTER_ECLADO_CATALOG_REVISION):
+            _remember_candidate_bundle(digest, repaired, replace_editor=True)
+            candidates = st.session_state.get("ai_intake_candidates")
+            current_bundle = candidates[1]
+            repaired = current_bundle
         if repaired != current_bundle:
             _remember_candidate_bundle(digest, repaired, replace_editor=True)
             candidates = st.session_state.get("ai_intake_candidates")
+        catalog_status = st.session_state.get("master_eclado_catalog_status")
+        if catalog_status == "connected":
+            st.caption("ECLADO 가격표 연결 완료 · 기존 앱과 동일한 상품/SKU 및 거래처별 매입·판매 단가 정책 사용 "
+                       "(" + str(st.session_state.get("master_eclado_catalog_products", 0)) + "개 상품).")
+        elif catalog_status:
+            st.warning("ECLADO 가격표는 현재 조회할 수 없습니다 (" + catalog_status +
+                       "). 이메일에 기재된 단가를 검증된 ECLADO 가격으로 간주하지 않습니다. "
+                       "MASTER 서버의 동일 Supabase 프로젝트 설정을 확인하세요.")
         _render_single_editor(digest, candidates[1])
         candidates = st.session_state.get("ai_intake_candidates")
         editor_matches = not bool(_pending_input_errors(digest))
