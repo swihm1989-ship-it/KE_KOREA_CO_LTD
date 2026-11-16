@@ -79,6 +79,27 @@ def normalize_trade_values(source):
     return result
 
 
+
+def apply_default_list_prices(candidates):
+    """Use undiscounted price for omitted PI/PO discounts, never invent a price.
+
+    A blank discount is the owner's explicit instruction to use 0% (list
+    price). Existing negotiated discounts, free-goods promotions, source PI
+    invoices and every catalog-sourced price remain untouched.
+    """
+    result = deepcopy(dict(candidates))
+    for kind, document in result.items():
+        if kind not in {'PI', 'PO'} or not isinstance(document, dict):
+            continue
+        for item in document.get('items') or []:
+            if (isinstance(item, dict)
+                    and (item.get('discount_percent') is None
+                         or isinstance(item.get('discount_percent'), str)
+                         and not item['discount_percent'].strip())):
+                item['discount_percent'] = '0'
+    return result
+
+
 def normalize_analysis_values(analysis):
     """Normalize extracted terms while keeping suggested status and source refs."""
     result = deepcopy(analysis)
