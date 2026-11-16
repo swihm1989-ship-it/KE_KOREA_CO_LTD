@@ -12,7 +12,7 @@ from Quotation_KEKOREA.agent.ci_import import ci_import_issues
 from .commercial_values import normalize_trade_values
 from .intake_followups import format_field_label
 
-TRADE_REVIEW_REVISION = 'historical-image-review-20261116-v4'
+TRADE_REVIEW_REVISION = 'image-advisory-schema-fix-20261116-v5'
 
 
 class TradeExportValidationError(ValueError):
@@ -276,31 +276,27 @@ def _reconciled_payment_timing_note(note, candidate):
 
 
 def _historical_image_review_note(note, candidate):
-    """Treat source-image verification reminders as advice on owner approval.
+    """Recognize two exact *advisory* phrases, never a factual contradiction.
 
-    A request to *visually confirm* image-extracted facts is not itself a
-    contradiction. The actual extracted facts still go through the original
-    quantity, price, SKU, currency and source-PI checks below. Do not suppress
-    conflicting numerical values or any generic AI conflict text.
+    OpenAI's trade-extraction JSON schema does NOT contain
+    source_image_attached, and mail_intake._safe_trade drops unknown keys.
+    Checking that missing flag made every real emailed photo fail FINAL,
+    although synthetic tests had manually set it. These messages request a
+    human visual check, not correction of a specific conflicting fact.
+
+    In owner-approved incomplete FINAL, preserve them as history warnings.
+    All actual missing item fields, independent conflicts, numeric and
+    price-master checks still run against the CURRENT candidate.
     """
-    if not candidate.get("source_image_attached"):
-        return False
-    items = candidate.get("items") or []
-    if not items or any(
-            not str(row.get("product_name") or "").strip()
-            or _quantity(row, candidate.get("document_type")) is None
-            or not str(row.get("unit") or "").strip()
-            for row in items if isinstance(row, Mapping)):
-        return False
-    text = str(note or "").strip().lower()
-    return bool(
-        re.fullmatch(
-            r"order details were extracted from an image;\s*visually confirm "
-            r"product names, sizes, and quantities\.?|"
-            r"item \d+ has no verifiable exact quote from the prompt;\s*"
-            r"confirm its extracted facts\.?",
-            text)
-    )
+    text = str(note or "").strip()
+    text = re.sub(r'^Resolve conflicting information:\s*', '', text, flags=re.I)
+    return bool(re.fullmatch(
+        r"order details were extracted from an image;\s*visually confirm "
+        r"product names, sizes, and quantities\.?|"
+        r"item \d+ has no verifiable exact quote from the prompt;\s*"
+        r"confirm its extracted facts\.?",
+        text, flags=re.I,
+    ))
 
 
 def review_trade_document(kind, source, *, final=False, allow_optional_na=False, allow_incomplete=False):

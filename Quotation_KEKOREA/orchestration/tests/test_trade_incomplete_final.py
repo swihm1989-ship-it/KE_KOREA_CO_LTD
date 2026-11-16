@@ -111,7 +111,9 @@ class IncompleteFinalTests(unittest.TestCase):
         ]
         doc = deepcopy(self.doc)
         doc["product_family"] = "cosmetics"
-        doc["source_image_attached"] = True
+        # The real OpenAI extractor has no source_image_attached schema field;
+        # previously the test's invented True flag hid the production bug.
+        self.assertNotIn("source_image_attached", doc)
         doc["document_number"] = "DRAFT"
         doc["incoterms"] = ""
         doc["payment_terms"] = ""
@@ -148,16 +150,59 @@ class IncompleteFinalTests(unittest.TestCase):
         self.assertTrue(files["pdf"]["content"].startswith(b"%PDF"))
         self.assertTrue(files["pdf"]["final"])
 
-    def test_actual_image_trade_conflict_still_blocks_and_image_without_source_cannot_bypass(self):
+    def test_only_exact_image_advisory_phrases_are_nonblocking(self):
         doc = deepcopy(self.doc)
-        doc["source_image_attached"] = True
-        doc["conflicts"] = ["The image states 10 PCS but the email states 20 PCS"]
-        self.assertFalse(self.report(doc)["ready"])
-        doc["conflicts"] = [
+        self.assertNotIn("source_image_attached", doc)
+        benign = [
             "Order details were extracted from an image; visually confirm "
-            "product names, sizes, and quantities"]
-        doc["source_image_attached"] = False
-        self.assertFalse(self.report(doc)["ready"])
+            "product names, sizes, and quantities",
+            "Item 2 has no verifiable exact quote from the prompt; "
+            "confirm its extracted facts",
+        ]
+        # Image flag absent, False, or True must not alter classification of
+        # an explicitly worded request to visually review already-extracted data.
+        for image_flag in (None, False, True):
+            with self.subTest(image_flag=image_flag):
+                doc = deepcopy(self.doc)
+                if image_flag is not None:
+                    doc["source_image_attached"] = image_flag
+                doc["conflicts"] = deepcopy(benign)
+                prior = deepcopy(doc)
+                report = self.report(doc)
+                self.assertTrue(report["ready"], report["issues"])
+                self.assertFalse(report["render_data"]["conflicts"])
+                self.assertEqual(sum(
+                    row["code"] == "prior_ai_conflicts"
+                    for row in report["warnings"]), 2)
+                self.assertEqual(doc, prior)
+
+        # Real contradiction, even when text talks about image/OCR, remains
+        # blocking; generic notes are NOT converted to advice by keywords.
+        for issue in (
+            "The image states 10 PCS but the email states 20 PCS",
+            "Item 2 source price USD 3 differs from verified catalog USD 5",
+            "Order details were extracted from an image but item 2 quantity "
+            "conflicts with the email",
+        ):
+            with self.subTest(issue=issue):
+                doc = deepcopy(self.doc)
+                doc["conflicts"] = [issue] + benign
+                report = self.report(doc)
+                self.assertFalse(report["ready"])
+                self.assertTrue(any(row["code"] == "ai_conflict"
+                                    for row in report["issues"]))
+                self.assertEqual(report["render_data"]["conflicts"], [issue])
+
+    def test_prefixed_ai_review_note_not_reblocked_by_old_storage_shape(self):
+        doc = deepcopy(self.doc)
+        doc["conflicts"] = [
+            "Resolve conflicting information: Order details were extracted "
+            "from an image; visually confirm product names, sizes, and quantities"
+        ]
+        report = self.report(doc)
+        self.assertTrue(report["ready"], report["issues"])
+        self.assertTrue(any(row["code"] == "prior_ai_conflicts"
+                            for row in report["warnings"]))
 
     def test_placeholders_and_draft_number_become_blanks_not_optional_na(self):
         self.doc['document_number'] = 'DRAFT'
