@@ -141,5 +141,73 @@ class MasterItemTermsTests(unittest.TestCase):
         self.assertIsNone(result["items"][0]["discount_percent"])
 
 
+    def test_bulk_preset_buttons_overwrite_each_discount_and_restore_full_list_price(self):
+        pi = document()
+        pi["items"][0]["discount_percent"] = "10"
+        pi["items"][1]["discount_percent"] = "2.5"
+        app = ui({"PI": pi})
+        for label, rate, total in [
+            ("PI · 전체 5%", "5", "160.60"),
+            ("PI · 전체 10%", "10", "152.10"),
+            ("PI · 전체 0%", "0", "169.00"),
+        ]:
+            next(b for b in app.button if b.label == label).click().run()
+            self.assertFalse(app.exception, [e.message for e in app.exception])
+            current = app.session_state["ai_intake_candidates"][1]["PI"]
+            self.assertEqual([row["discount_percent"] for row in current["items"]], [rate, rate])
+            self.assertEqual([row["unit_price"] for row in current["items"]], ["7.50", "9.40"])
+            review = review_trade_document("PI", current, final=True, allow_incomplete=True)
+            self.assertTrue(review["ready"], review["issues"])
+            self.assertEqual(review["render_data"]["total"], total)
+
+    def test_bulk_discount_preserves_gifts_and_other_document_prices(self):
+        pi = document()
+        pi["items"][1]["promotion"] = "2+1"
+        pi["items"][1]["free_quantity"] = "5"
+        pi["items"][1]["shipped_quantity"] = "15"
+        po = document("PO")
+        po["items"][0]["discount_percent"] = "10"
+        po["items"][0]["unit_price"] = "1000"
+        po["currency"] = "KRW"
+        ci = document()
+        ci["document_type"] = "CI"
+        ci["items"][0]["discount_percent"] = "7.5"
+        app = ui({"PI": pi, "PO": po, "CI": ci})
+        next(b for b in app.button if b.label == "PI · 전체 5%").click().run()
+        data = app.session_state["ai_intake_candidates"][1]
+        self.assertEqual([x["discount_percent"] for x in data["PI"]["items"]], ["5", "5"])
+        self.assertEqual(data["PI"]["items"][1]["promotion"], "2+1")
+        self.assertEqual(data["PI"]["items"][1]["free_quantity"], "5")
+        self.assertEqual(data["PI"]["items"][1]["shipped_quantity"], "15")
+        self.assertEqual(data["PO"]["items"][0]["discount_percent"], "10")
+        self.assertEqual(data["PO"]["items"][0]["unit_price"], "1000")
+        self.assertEqual(data["CI"]["items"][0]["discount_percent"], "7.5")
+        next(x for x in app.selectbox if x.label == "PI · 상품 1 · 할인율").set_value("10%").run()
+        data = app.session_state["ai_intake_candidates"][1]
+        self.assertEqual([x["discount_percent"] for x in data["PI"]["items"]], ["10", "5"])
+
+    def test_custom_bulk_discount_and_invalid_value_do_not_reprice_items(self):
+        app = ui({"PI": document()})
+        entry = next(x for x in app.text_input if x.label == "PI · 할인율 직접 입력 (%)")
+        entry.set_value("7.5").run()
+        next(x for x in app.button if x.label == "PI · 입력 할인율 전체 적용").click().run()
+        self.assertFalse(app.exception, [e.message for e in app.exception])
+        current = app.session_state["ai_intake_candidates"][1]["PI"]
+        self.assertEqual([x["discount_percent"] for x in current["items"]], ["7.5", "7.5"])
+        self.assertEqual([x["unit_price"] for x in current["items"]], ["7.50", "9.40"])
+        next(x for x in app.text_input if x.label == "PI · 할인율 직접 입력 (%)").set_value("101").run()
+        next(x for x in app.button if x.label == "PI · 입력 할인율 전체 적용").click().run()
+        self.assertFalse(app.exception, [e.message for e in app.exception])
+        current = app.session_state["ai_intake_candidates"][1]["PI"]
+        self.assertEqual([x["discount_percent"] for x in current["items"]], ["7.5", "7.5"])
+        self.assertTrue(any("0~100" in x.message for x in app.error))
+
+    def test_bulk_discount_actions_not_offered_for_ci(self):
+        ci = document()
+        ci["document_type"] = "CI"
+        app = ui({"CI": ci})
+        self.assertFalse(any("전체 5%" in button.label for button in app.button))
+
+
 if __name__ == "__main__":
     unittest.main()
