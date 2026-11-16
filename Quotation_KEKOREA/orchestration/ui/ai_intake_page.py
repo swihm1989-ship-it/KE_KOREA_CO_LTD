@@ -37,7 +37,7 @@ PDF_EXPORT_MODULE = "Quotation_KEKOREA.orchestration.workflows.legacy_document_e
 PDF_EXPORT_REVISION = "review-pdf-safe-loader-20261113-v4"
 TRADE_REVIEW_MODULE = "Quotation_KEKOREA.orchestration.workflows.trade_export_review"
 TRADE_REVIEW_REVISION = "image-advisory-schema-fix-20261116-v5"
-AI_INTAKE_REVISION = "master-po-krw-catalog-recheck-20261117-v17"
+AI_INTAKE_REVISION = "master-vision-timeout-reliability-20261117-v18"
 # Detect a changed source file even when the cached module has the same revision.
 AI_INTAKE_SOURCE_MTIME_NS = os.stat(__file__).st_mtime_ns
 
@@ -47,6 +47,25 @@ def _log_trade_final_render_failure(kind: str, exc: Exception) -> None:
     """Record only the failure class, never document contents or credentials."""
     _PDF_LOGGER.error("MASTER %s FINAL PDF failed; exception_type=%s; stage=legacy_renderer", kind, type(exc).__name__)
 
+
+
+
+def _ensure_trade_extractor_current() -> bool:
+    """Reload the trade extractor if Streamlit retains the pre-deploy 90s code."""
+    module = importlib.import_module("Quotation_KEKOREA.agent.extractor")
+    expected_revision = "master-long-image-timeout-20261117-v1"
+    source_mtime = os.stat(module.__file__).st_mtime_ns
+    stale = (getattr(module, "TRADE_EXTRACTOR_REVISION", None) != expected_revision
+             or getattr(module, "TRADE_EXTRACTOR_SOURCE_MTIME_NS", None) != source_mtime)
+    if stale:
+        importlib.invalidate_caches()
+        module = importlib.reload(module)
+    if (getattr(module, "TRADE_EXTRACTOR_REVISION", None) != expected_revision
+            or getattr(module, "TRADE_EXTRACTOR_SOURCE_MTIME_NS", None)
+            != os.stat(module.__file__).st_mtime_ns):
+        raise RuntimeError(
+            "AI 추출 엔진의 버전이 일치하지 않습니다. 주문 내용을 보존하고 앱을 재시작하세요.")
+    return stale
 
 
 def _current_ai_workflow():
@@ -1835,7 +1854,7 @@ def render_ai_intake(principal: str):
     if not principal:
         raise PermissionError("로그인이 필요합니다.")
     st.subheader("AI 거래조건 추출 · 기존 문서 엔진 연결")
-    st.caption("화면 업데이트: 2026-11-17 · PO KRW 매입단가 재조회 + 상품별 할인·행사 선택")
+    st.caption("화면 업데이트: 2026-11-17 · AI 이미지·PDF 응답시간 보완 + PO 매입단가 재조회")
     st.caption("문서 작업은 이 화면에서 진행합니다. 검토용 초안과 최종 발행 문서는 기존 검증·승인 규칙에 따라 구분합니다.")
     st.caption("기존 계약서 분석 AI를 사용해 자연어에서 거래조건을 제안합니다. 확정·발행·전송은 자동으로 하지 않습니다.")
     st.info("AI 요청에는 아래 입력 내용과 직접 선택한 참고파일만 전송합니다. 저장된 계약서는 모델에 전달되지 않습니다.")
@@ -1926,16 +1945,13 @@ def render_ai_intake(principal: str):
     if consume_pending(st.session_state, instruction):
         st.info("메일 요청을 가져왔습니다. 문서 종류를 확인한 뒤 AI 거래조건 분석을 실행해 주세요.")
     if manual_extract and consent and ready and requested and attachments is not None:
-        # A new extraction must not inherit prior editable widget values.
-        for key in list(st.session_state):
-            if str(key).startswith("ai_intake_shared_"):
-                st.session_state.pop(key, None)
-        st.session_state.pop("ai_intake_result", None)
-        st.session_state.pop("ai_intake_candidates", None)
-        st.session_state.pop("ai_intake_drafts", None)
+        # Keep the prior order intact until the new API request succeeds.
+        # Previously an intermittent 90s timeout erased the last extracted
+        # candidate, draft and editor inputs before any result was available.
         try:
             with st.spinner("거래조건을 분석합니다."):
                 if mail_mode:
+                    _ensure_trade_extractor_current()
                     bundle=extract_mail_candidates(instruction,requested,config,consent=consent,
                         language='ko' if language=='한국어' else 'en',family=family,attachments=attachments)
                     extracted,candidate_map=bundle['analysis'],bundle['candidates']
@@ -1949,8 +1965,13 @@ def render_ai_intake(principal: str):
                         else:
                             candidate_map[kind] = make_trade_candidate(
                                 kind, extracted, product_family=family)
-            st.session_state["ai_intake_result"] = (digest, extracted)
+            # Only successful extraction replaces old document data/widgets.
+            for key in list(st.session_state):
+                if str(key).startswith("ai_intake_shared_"):
+                    st.session_state.pop(key, None)
+            st.session_state.pop("ai_intake_drafts", None)
             _remember_candidate_bundle(digest, candidate_map, replace_editor=True)
+            st.session_state["ai_intake_result"] = (digest, extracted)
         except (PermissionError, ValueError, RuntimeError, TypeError) as exc:
             st.error("AI 거래조건 추출 실패: " + str(exc)[:400])
 
