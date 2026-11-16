@@ -438,9 +438,13 @@ def render_inbox(messages, account):
                          if a.mime in {'application/pdf','image/png','image/jpeg','image/webp'}]
             chosen = []
             if available:
-                indexes = st.multiselect("AI에 함께 보낼 첨부파일 (선택)", [i for i,a in available],
-                    format_func=lambda i:selected.attachments[i].filename,
-                    key='whois_ai_attachments_'+selected.uid)
+                indexes = st.multiselect(
+                    "AI 업무 요청에 가져올 첨부파일 (최대 5개 · 가져오기로 AI 전송 안 함)",
+                    [i for i, a in available], default=[i for i, _ in available[:5]],
+                    format_func=lambda i: selected.attachments[i].filename,
+                    key='whois_ai_attachments_'+selected.uid,
+                    help="상품·수량이 이미지에만 있으면 이 원본 파일이 반드시 필요합니다. "
+                         "다음 화면에서 명시적으로 동의하고 분석을 실행하기 전에는 AI로 전송하지 않습니다.")
                 chosen = [{'name':selected.attachments[i].filename,
                            'mime_type':selected.attachments[i].mime,
                            'data':selected.attachments[i].content} for i in indexes]
@@ -455,4 +459,4 @@ def render_inbox(messages, account):
                 if _use_for_ai(selected, extract=False, attachments=chosen,
                                requested=chosen_kinds):
                     st.rerun(scope="app")
-            st.caption("이동 후 'AI 자동 분석' 또는 '직접 수정 후 분석'을 선택하고 동의·실행할 수 있습니다.")
+            st.caption("이동 후 첨부파일과 문서 종류를 확인하고 'AI 거래조건 분석'을 실행하세요.")
