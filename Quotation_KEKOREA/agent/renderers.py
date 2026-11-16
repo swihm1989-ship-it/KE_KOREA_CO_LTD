@@ -114,6 +114,25 @@ def format_currency_amount(value, currency, *, final=False):
     return f"${rendered}" if currency == "USD" else f"{currency} {rendered}".strip()
 
 
+def _display_unit_price(item, *, final=False):
+    """Display a verified catalog LIST price without inventing a discounted price.
+
+    When the discount remains unknown, the incomplete FINAL intentionally
+    clears final_unit_price and line_total. Only an explicitly verified master
+    price may still appear as a clearly labeled non-final list price.
+    """
+    if not final:
+        return item.get("final_unit_price", item.get("unit_price", "")), False
+    calculated = _final_number(item.get("final_unit_price"))
+    if calculated is not None:
+        return item["final_unit_price"], False
+    if (item.get("master_price") is True
+            and str(item.get("price_source") or "").startswith("Verified ECLADO catalog;")
+            and _final_number(item.get("unit_price")) is not None):
+        return item["unit_price"], True
+    return None, False
+
+
 def _rows(doc, *, final=False):
     if doc.get("document_type") == "PL":
         rows = [["Line", "Product", "Capacity / Specification", "Qty", "Unit", "Package Type", "Packages", "NW (KG)", "GW (KG)", "CBM", "HS Code"]]
@@ -129,11 +148,13 @@ def _rows(doc, *, final=False):
             price = "N/A"
             amount = "N/A"
         else:
-            price = item.get("final_unit_price", "")
+            price, list_price_only = _display_unit_price(item, final=final)
             amount = item.get("line_total", "")
             if doc.get("product_family") == "cosmetics":
                 price = format_currency_amount(price, doc.get("currency"), final=final)
                 amount = format_currency_amount(amount, doc.get("currency"), final=final)
+            if list_price_only and price:
+                price += " (LIST)"
         discount = item.get("discount_percent", "0")
         if final:
             discount = _format_quantity(item.get("discount_percent"), final=True)
