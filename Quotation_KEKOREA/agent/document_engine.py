@@ -14,6 +14,7 @@ from Quotation_KEKOREA.agent.counterparties import (
 from Quotation_KEKOREA.agent.promotions import apply_promotion_commands
 from Quotation_KEKOREA.agent.samples import ensure_sample_rows, is_manual_sample
 from Quotation_KEKOREA.agent.extractor import extract_trade_data, verify_item_quotes
+from Quotation_KEKOREA.agent.pricing import is_eclado_supplier
 from Quotation_KEKOREA.agent.ci_import import (
     prepare_ci_import, is_pi_import,
     apply_document_prices as apply_verified_eclado_prices,
@@ -292,7 +293,15 @@ def finalize_extracted_trade(draft, prompt, expected_type, image_inputs, catalog
     _synchronize_extracted_quantities(draft)
     _apply_ke_korea_company_defaults(draft, expected_type)
     apply_company_profiles(draft, company_profiles, prompt=prompt)
-    apply_verified_eclado_prices(draft, catalog)
+    supplier = draft.get("seller") or {}
+    supplier_name = (supplier.get("legal_name") or ""
+                     if isinstance(supplier, dict) else str(supplier))
+    # In the original app PO primarily means an ECLADO purchase order.
+    # MASTER supports unrelated PO transactions too. Never coerce their
+    # explicit USD/EUR/CNY values to KRW simply because a PO was requested.
+    # The *same* guarded pricing step is used by BOTH apps.
+    if expected_type != "PO" or is_eclado_supplier(supplier_name):
+        apply_verified_eclado_prices(draft, catalog)
     if is_pi_import(draft):
         return draft  # Printed PI prices/discounts remain transaction-specific.
     discount_rate, discount_issue = _discount_instruction(prompt)
