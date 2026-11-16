@@ -60,7 +60,12 @@ def _validated_analysis(analysis: Mapping[str, Any]) -> dict[str, Any]:
         if not isinstance(party, dict) or not isinstance(party.get("roles"), list):
             raise ValueError("당사자 형식이 유효하지 않습니다.")
         party["roles"] = [canonical_label(str(role)) or str(role).strip().casefold() for role in party["roles"]]
-        party["roles"] = [role for role in party["roles"] if role in {"buyer", "seller", "agent", "introducer", "payer", "payee"}]
+        # Preserve the EXACT roles supported by the original commission
+        # contract engine. Dropping client/intermediary/payer/fundraiser here
+        # caused MASTER commission candidates to lose their signatories.
+        supported_roles = {"buyer", "seller", "client", "intermediary",
+                           "commission_payer", "fundraiser", "investor"}
+        party["roles"] = [role for role in party["roles"] if role in supported_roles]
         for field in ("legal_name", "address", "country"):
             if party.get(field) is None:
                 party[field] = ""
