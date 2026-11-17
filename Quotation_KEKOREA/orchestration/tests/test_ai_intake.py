@@ -74,6 +74,20 @@ class AiIntakeTests(unittest.TestCase):
         self.assertEqual(pi["items"][0]["price_source"], "")  # verified provenance must be user-supplied
         self.assertNotIn("price_override_confirmed", pi["items"][0])
 
+    def test_other_product_family_supports_computer_components_for_pi(self):
+        """Master's natural-language PI intake must accept products beyond solar/cosmetics."""
+        computer = copy.deepcopy(self.ai)
+        for term in computer["terms"]:
+            if term["key"] == "products":
+                term["value"] = "USB-C Hub Model XH-100"
+            if term["key"] == "unit_price":
+                term["value"] = "18.50"
+        pi = make_trade_candidate("PI", computer, product_family="other")
+        self.assertEqual(pi["product_family"], "other")
+        self.assertEqual(pi["items"][0]["product_name"], "USB-C Hub Model XH-100")
+        self.assertEqual(pi["items"][0]["unit_price"], "18.50")
+        self.assertEqual(pi["items"][0]["quantity"], "100")
+
     def test_upstream_missing_terms_reach_trade_candidate_as_empty_fields(self):
         for absent in (None, ""):
             with self.subTest(value=absent):

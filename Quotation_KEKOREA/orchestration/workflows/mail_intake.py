@@ -173,7 +173,7 @@ def extract_mail_candidates(instruction,kinds,env,*,consent,language='ko',family
     kinds=classify('','',list(kinds))
     if not kinds:
         raise ValueError('준비할 문서 종류를 선택해 주세요.')
-    if family not in {'solar_cell','wafer','polysilicon','solar_module','cosmetics'}:
+    if family not in {'solar_cell','wafer','polysilicon','solar_module','cosmetics','other'}:
         raise ValueError('상품군을 확인해 주세요.')
     from Quotation_KEKOREA.agent.attachments import validate_attachments
     files=validate_attachments(list(attachments))

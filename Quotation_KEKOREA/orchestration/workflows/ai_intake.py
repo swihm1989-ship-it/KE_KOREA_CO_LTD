@@ -20,7 +20,7 @@ from Quotation_KEKOREA.orchestration.workflows.label_typos import normalize_trad
 _TERM_KEYS = {"products", "quantity", "unit", "unit_price", "currency", "delivery",
               "payment_trigger", "payment_deadline", "inspection_claims", "scope",
               "contract_date", "governing_law", "dispute_resolution"}
-_FAMILIES = {"polysilicon", "wafer", "solar_cell", "solar_module", "cosmetics"}
+_FAMILIES = {"polysilicon", "wafer", "solar_cell", "solar_module", "cosmetics", "other"}
 
 
 @traced('contract.analyze')

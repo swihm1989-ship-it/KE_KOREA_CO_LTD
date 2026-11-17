@@ -49,6 +49,31 @@ class MailIntakePolicyTests(unittest.TestCase):
         from Quotation_KEKOREA.agent.ci_import import ci_import_issues
         self.assertTrue(ci_import_issues(result['candidates']['CI']))
 
+    def test_other_family_mail_pi_extracts_multiple_computer_parts_without_catalog(self):
+        from Quotation_KEKOREA.orchestration.workflows.mail_intake import extract_mail_candidates
+        source = cases()[3]
+        raw = copy.deepcopy(source["trade"])
+        body = source["body"]
+        self.assertEqual(len(raw["items"]), 2)
+        for index, name in enumerate(("Wireless Mouse MX-200", "Mechanical Keyboard MK-400")):
+            old = raw["items"][index]["product_name"]
+            raw["items"][index]["product_name"] = name
+            raw["items"][index]["source"] = raw["items"][index]["source"].replace(old, name)
+            body = body.replace(old, name)
+        result = extract_mail_candidates(
+            body, ("PI",),
+            {"OPENAI_API_KEY": "SYNTHETIC", "OPENAI_MODEL": "gpt-6-luna"},
+            consent=True, family="other",
+            trade_opener=lambda *a, **kw: response(raw))
+        pi = result["candidates"]["PI"]
+        self.assertEqual(pi["product_family"], "other")
+        self.assertEqual([x["product_name"] for x in pi["items"]],
+                         ["Wireless Mouse MX-200", "Mechanical Keyboard MK-400"])
+        self.assertEqual([x["unit_price"] for x in pi["items"]], ["0.225", "0.225"])
+        self.assertEqual(pi["currency"], "KRW" if source["trade"]["currency"] == "KRW"
+                         else source["trade"]["currency"])
+        self.assertFalse(pi["items"][0].get("master_price", False))
+
     def test_one_shot_token_stale_edits_and_clear_previous_files(self):
         from Quotation_KEKOREA.orchestration.workflows.mail_intake import queue_handoff, consume_pending
         from Quotation_KEKOREA.orchestration.adapters.whois_mail import parse_message
