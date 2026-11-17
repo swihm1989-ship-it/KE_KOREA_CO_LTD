@@ -5,6 +5,7 @@ No polling, sends, database writes, automatic approvals or payload logging.
 from copy import deepcopy
 from dataclasses import dataclass
 from hashlib import sha256
+import importlib
 import os
 import re
 from uuid import uuid4
@@ -14,9 +15,35 @@ from Quotation_KEKOREA.orchestration.router import classify, DOC_TYPES
 from Quotation_KEKOREA.observability.core import traced
 
 # The Master mail wrapper must not retain pre-deploy product-family rules.
-MAIL_INTAKE_REVISION = "shared-ke-korea-family-20261117-v1"
+MAIL_INTAKE_REVISION = "shared-trade-payment-unit-20261117-v2"
 MAIL_INTAKE_SOURCE_MTIME_NS = os.stat(__file__).st_mtime_ns
 MAX_MAIL_CHARS=12000
+
+# MASTER never maintains independent discount/extraction rules. Long-lived
+# Streamlit sessions can retain an older imported KE KOREA document engine,
+# even after GitHub auto-deployment. Verify both version and on-disk source.
+_EXPECTED_TRADE_ENGINE_REVISION = "master-payment-discount-shared-20261117-v2"
+
+
+def _current_ke_trade_engine():
+    module = importlib.import_module("Quotation_KEKOREA.agent.document_engine")
+
+    def current():
+        return (
+            getattr(module, "SHARED_TRADE_ENGINE_REVISION", None)
+                == _EXPECTED_TRADE_ENGINE_REVISION
+            and getattr(module, "SHARED_TRADE_ENGINE_SOURCE_MTIME_NS", None)
+                == os.stat(module.__file__).st_mtime_ns
+            and callable(getattr(module, "finalize_extracted_trade", None))
+            and callable(getattr(module, "_discount_instruction", None))
+        )
+
+    if not current():
+        importlib.invalidate_caches()
+        module = importlib.reload(module)
+    if not current():
+        raise RuntimeError("KE KOREA 원본 무역 문서 엔진 버전이 일치하지 않습니다. 앱을 새로고침하세요.")
+    return module
 
 
 @dataclass(frozen=True)
@@ -125,7 +152,7 @@ def _safe_trade(raw, kind, instruction, family, attachments):
     these candidate facts; original doc/role-specific checks are shared.
     """
     from Quotation_KEKOREA.agent.extractor import _schema
-    from Quotation_KEKOREA.agent.document_engine import finalize_extracted_trade
+    finalize_extracted_trade = _current_ke_trade_engine().finalize_extracted_trade
     from Quotation_KEKOREA.agent.ci_import import ci_import_issues
     from Quotation_KEKOREA.orchestration.workflows.commercial_values import normalize_trade_values
     from .mail_trade_normalization import synchronize_nullable_quantities
