@@ -356,6 +356,7 @@ if raw:
         # field is the UNIT, not the amount. One user-confirmed selection
         # replaces dozens of per-row unit confirmations without guessing mass
         # or package units. Explicit source/user units always take precedence.
+        review_generation = st.session_state.get("trade_draft_generation") or "legacy"
         missing_units = [
             index for index, item in enumerate(data.get("items") or [])
             if isinstance(item, dict) and _missing(item.get("unit"), True)
@@ -376,7 +377,7 @@ if raw:
             ):
                 # Preserve typed but not-yet-applied per-row units, if any.
                 for index in missing_units:
-                    manual_key = f"review_missing_{page}_items_{index}_unit"
+                    manual_key = f"review_missing_{page}_{review_generation}_items_{index}_unit"
                     manual = st.session_state.get(manual_key)
                     if not _missing(manual, True):
                         data["items"][index]["unit"] = normalize_quantity_unit(manual)
@@ -385,7 +386,7 @@ if raw:
                     st.session_state["trade_draft"] = data
                     review_values = st.session_state.get(f"review_values_{page}", {})
                     for index in changed:
-                        manual_key = f"review_missing_{page}_items_{index}_unit"
+                        manual_key = f"review_missing_{page}_{review_generation}_items_{index}_unit"
                         st.session_state.pop(manual_key, None)
                         if isinstance(review_values, dict):
                             review_values.pop(manual_key, None)
@@ -416,7 +417,7 @@ if raw:
             other_fields = [field for field in editable if field not in unit_fields]
 
             def show_review_field(field, column):
-                widget_key = f"review_missing_{page}_" + "_".join(map(str, field.path))
+                widget_key = f"review_missing_{page}_{review_generation}_" + "_".join(map(str, field.path))
                 if widget_key not in st.session_state:
                     # DRAFT is an allowed document identifier, not a fabricated
                     # invoice number. Keep this field editable for a real number.
