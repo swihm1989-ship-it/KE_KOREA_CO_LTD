@@ -29,5 +29,8 @@ jobs:
         run: python -m compileall -q Quotation_KEKOREA/contracts Quotation_KEKOREA/tests
       - name: Source reference recovery tests
         run: python -m unittest Quotation_KEKOREA.tests.test_contract_source_refs_recovery -v
+      - name: Public KE KOREA PI quantity-unit and review regressions
+        run: |
+          python -m unittest Quotation_KEKOREA.tests.test_quantity_unit_bulk Quotation_KEKOREA.tests.test_review_fields Quotation_KEKOREA.tests.test_review_ui Quotation_KEKOREA.tests.test_payment_not_discount -v
       - name: Full contract regression suite
         run: python -m unittest discover -s Quotation_KEKOREA/tests -p 'test_contract*.py' -q

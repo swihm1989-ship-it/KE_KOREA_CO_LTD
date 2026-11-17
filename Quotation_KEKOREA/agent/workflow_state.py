@@ -5,8 +5,8 @@ from dataclasses import dataclass
 from uuid import uuid4
 
 
-COMMON_KEYS = ('trade_draft', 'trade_draft_page', 'rendered_paths',
-               'rendered_json', 'download_format')
+COMMON_KEYS = ('trade_draft', 'trade_draft_page', 'trade_draft_generation',
+               'rendered_paths', 'rendered_json', 'download_format')
 
 
 def review_key(key, page):
@@ -118,7 +118,10 @@ class DocumentWorkspaces:
                 for key in list(values):
                     if review_key(key, page) or key in COMMON_KEYS:
                         del values[key]
-                values.update(trade_draft=result, trade_draft_page=page, rendered_paths={})
+                # A new extracted draft requires new Streamlit review widget IDs:
+                # cached browser widget values must never repopulate a new order.
+                values.update(trade_draft=result, trade_draft_page=page,
+                              trade_draft_generation=uuid4().hex[:12], rendered_paths={})
                 if page == self.active:
                     for key in list(state):
                         if review_key(key, page) or key in COMMON_KEYS:
