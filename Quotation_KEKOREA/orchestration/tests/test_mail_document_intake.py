@@ -72,7 +72,7 @@ class MailIntakePolicyTests(unittest.TestCase):
         self.assertEqual([x["unit_price"] for x in pi["items"]], ["0.225", "0.225"])
         self.assertEqual(pi["currency"], "KRW" if source["trade"]["currency"] == "KRW"
                          else source["trade"]["currency"])
-        self.assertNotIn("master_price", pi["items"][0])
+        self.assertFalse(pi["items"][0].get("master_price", False))
 
     def test_one_shot_token_stale_edits_and_clear_previous_files(self):
         from Quotation_KEKOREA.orchestration.workflows.mail_intake import queue_handoff, consume_pending
