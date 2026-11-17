@@ -218,7 +218,11 @@ class ReviewUiTests(unittest.TestCase):
             delivery.set_value('CIF Singapore').run(timeout=20)
             self.assertFalse(pdf_button().disabled)
             new_doc = copy.deepcopy(doc)
-            with patch('Quotation_KEKOREA.agent.extractor.extract_trade_data', return_value=new_doc):
+            # _extract_draft uses the shared document_engine import, not the
+            # original extractor module attribute. Patch the true worker target
+            # so the test actually exercises a successful second extraction.
+            with patch('Quotation_KEKOREA.agent.document_engine.extract_trade_data',
+                       return_value=new_doc) as extracted:
                 at.text_area[0].set_value('Create a PI. Cell quantity 10 PCS at USD 1 per PCS. No discount.').run(timeout=20)
                 at.button[0].click().run(timeout=20)
                 # Extraction uses a thread. Do not race the old editor state:
@@ -227,6 +231,7 @@ class ReviewUiTests(unittest.TestCase):
                 if job:
                     job.future.result(timeout=5)
                     at.run(timeout=20)
+                self.assertTrue(extracted.called, "The shared extractor must run for this test")
             self.assertFalse(at.exception)
             delivery = next(entry for entry in at.text_input if entry.label.startswith('Delivery terms'))
             self.assertEqual(delivery.value, '')
