@@ -1957,7 +1957,7 @@ def render_ai_intake(principal: str):
     language = st.radio("계약서 언어", ["한국어", "English"], horizontal=True,
                         key="ai_intake_language")
     family = st.selectbox("무역서류 상품군", ["solar_cell", "wafer", "polysilicon",
-                                            "solar_module", "cosmetics"], key="ai_intake_family")
+                                            "solar_module", "cosmetics", "other"], key="ai_intake_family")
     config = _model_config()
     ready = bool(config.get("OPENAI_API_KEY") and
                  (config.get("OPENAI_MODEL") or config.get("CONTRACT_OPENAI_MODEL")))
