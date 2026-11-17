@@ -1,46 +1,46 @@
-"""New structured preview UI must render a guarded trade draft."""
+"""Original deterministic document previews remain testable, sidebar page hidden."""
 import unittest
 from unittest.mock import patch
+from streamlit.testing.v1 import AppTest
 from pathlib import Path
-
-try:
-    from streamlit.testing.v1 import AppTest
-except ImportError:
-    AppTest = None
 
 UI = Path(__file__).resolve().parents[1] / "ui" / "streamlit_page.py"
 
 
-@unittest.skipUnless(AppTest is not None, "Streamlit AppTest unavailable")
 class PreviewUITest(unittest.TestCase):
-    def setUp(self):
-        # Only fake UI identity inside tests; never a production auth bypass.
-        gate = patch("Quotation_KEKOREA.orchestration.security.auth_gate.require_authentication",
-                     return_value="test@example.com")
-        gate.start()
-        self.addCleanup(gate.stop)
-        news = patch("Quotation_KEKOREA.orchestration.ui.market_news_page._cached_news",
-                     return_value=([], None))
-        news.start()
-        self.addCleanup(news.stop)
+    def test_trade_demo_preview_is_draft(self):
+        from Quotation_KEKOREA.orchestration.workflows.document_preview import build_preview
+        doc = {
+            "document_type": "PI", "product_family": "solar_cell", "currency": "USD",
+            "document_number": "DRAFT", "seller": {"legal_name": "KE KOREA CO. LTD", "address": "Example Street"},
+            "buyer": {"legal_name": "Demo Buyer LLC", "address": "Example Street"},
+            "incoterms": "EXW Seoul", "payment_terms": "To confirm",
+            "items": [{"product_name": "M10 test cell", "quantity": "100",
+                       "unit": "PCS", "unit_price": "0.2", "price_basis": "PCS",
+                       "price_source": "demo"}],
+        }
+        preview = build_preview("PI", doc)
+        self.assertEqual(preview.watermark, "DRAFT - NOT FOR ISSUE")
+        self.assertFalse(preview.final)
+        self.assertTrue(preview.items)
 
-    def test_trade_demo_preview_never_marks_final_or_sends(self):
-        app = AppTest.from_file(str(UI), default_timeout=20).run()
-        app.radio[0].set_value("문서 초안 미리보기").run()
-        self.assertFalse(app.exception, [str(x.message) for x in app.exception])
-        app.button(key="build_readonly_preview").click().run()
-        self.assertFalse(app.exception, [str(x.message) for x in app.exception])
-        self.assertEqual(app.session_state["preview_current"].watermark, "DRAFT - NOT FOR ISSUE")
-        self.assertTrue(any("발송 권한 없음" in x.value for x in app.caption))
-        self.assertTrue(any("20.00" in str(x.value) for x in app.metric))
+    def test_empty_contract_is_not_approved(self):
+        from Quotation_KEKOREA.orchestration.workflows.document_preview import build_preview
+        preview = build_preview("CONTRACT", {
+            "contract_id": "DRAFT-DEMO", "contract_type": "sale", "language": "ko",
+            "revision": 1, "parties": [], "terms": [], "clauses": [], "issues": [],
+        })
+        self.assertTrue(preview.blockers)
+        self.assertFalse(preview.final)
 
-    def test_empty_contract_does_not_invent_language(self):
-        app = AppTest.from_file(str(UI), default_timeout=20).run()
-        app.radio[0].set_value("문서 초안 미리보기").run()
-        app.selectbox[0].set_value("CONTRACT").run()
-        app.button(key="build_readonly_preview").click().run()
-        self.assertFalse(app.exception, [str(x.message) for x in app.exception])
-        self.assertTrue(any("미확정 항목" in x.label for x in app.expander))
+    def test_sidebar_preview_option_hidden(self):
+        with patch("Quotation_KEKOREA.orchestration.security.auth_gate.require_authentication",
+                   return_value="synthetic@example.test"), patch(
+            "Quotation_KEKOREA.orchestration.ui.market_news_page._cached_news",
+            return_value=([], None)
+        ):
+            app = AppTest.from_file(str(UI)).run()
+        self.assertNotIn("문서 초안 미리보기", list(app.radio[0].options))
 
 
 if __name__ == "__main__":
