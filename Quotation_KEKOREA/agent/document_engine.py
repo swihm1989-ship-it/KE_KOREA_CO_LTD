@@ -37,6 +37,13 @@ def _synchronize_extracted_quantities(draft):
     for item in draft.get("items", []):
         if draft.get("product_family") == "cosmetics" and not item.get("unit"):
             item["unit"] = "PCS"
+        elif draft.get("product_family") == "other" and not item.get("unit"):
+            # A declared per-piece PRICE BASIS is evidence of a countable unit.
+            # Do not use bare USD amounts or mass/Wp bases to guess quantity
+            # units; mixed orders without such evidence need one user choice.
+            basis = re.sub(r"\s+", " ", str(item.get("price_basis") or "").strip().upper())
+            if re.fullmatch(r"(?:(?:USD|KRW|EUR|CNY)\s*/\s*|PER\s+)?(?:PCS?|PIECES?|UNITS?)", basis):
+                item["unit"] = "PCS"
         # The order quantity is the source of truth unless a promotion explicitly
         # separates paid units from free units. The validator calculates totals
         # from paid_quantity, so keep both quantity fields synchronized.
