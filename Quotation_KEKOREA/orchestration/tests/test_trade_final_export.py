@@ -61,6 +61,43 @@ class TradeReviewTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'변경'):
             exports.render_master_trade_final('PI',self.doc,{},approved=True,expected_fingerprint=digest,allow_optional_na=True)
 
+    def test_other_family_three_computer_parts_generate_real_final_pi_pdf(self):
+        from PIL import Image
+        import pymupdf
+        from Quotation_KEKOREA.orchestration.workflows import legacy_document_exports as exports
+        pi = deepcopy(self.doc)
+        pi["product_family"] = "other"
+        pi["document_number"] = "PI-SYNTHETIC-HARDWARE-001"
+        pi["items"] = [
+            {"product_name": name, "quantity": str(qty), "unit": "PCS",
+             "unit_price": str(price), "price_basis": "PCS", "discount_percent": "0"}
+            for name, qty, price in (
+                ("Wireless Mouse MX-200", 10, "12.00"),
+                ("Mechanical Keyboard MK-400", 5, "32.50"),
+                ("USB-C Hub XH-100", 2, "19.90"),
+            )
+        ]
+        report = self.review.review_trade_document(
+            "PI", pi, final=True, allow_optional_na=True)
+        self.assertEqual(report["issues"], [], report["issues"])
+        self.assertEqual(report["render_data"]["total"], "322.30")
+        seal = BytesIO()
+        Image.new("RGB", (2, 2), "red").save(seal, format="PNG")
+        env = {"KEKOREA_USD_" + key: "SYNTHETIC " + key for key in exports.BANK_KEYS}
+        expected = self.review.trade_export_fingerprint("PI", pi, allow_optional_na=True)
+        with patch.object(exports, "resolve_company_seal",
+                          return_value=(Path("/missing/seal.png"), seal.getvalue(), None)):
+            files = exports.render_master_trade_final(
+                "PI", pi, env, approved=True,
+                expected_fingerprint=expected, allow_optional_na=True)
+        self.assertTrue(files["pdf"]["content"].startswith(b"%PDF"))
+        with pymupdf.open(stream=files["pdf"]["content"], filetype="pdf") as pdf:
+            printed = "\n".join(page.get_text() for page in pdf)
+        for product in ("Wireless Mouse MX-200", "Mechanical Keyboard MK-400",
+                        "USB-C Hub XH-100"):
+            self.assertIn(product, printed)
+        self.assertIn("322.30", printed)
+
     def test_approved_final_uses_original_pdf_and_unapproved_draft_stays_draft(self):
         from PIL import Image
         import pymupdf
