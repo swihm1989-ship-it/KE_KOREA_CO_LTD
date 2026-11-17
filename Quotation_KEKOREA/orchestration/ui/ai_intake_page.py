@@ -578,8 +578,12 @@ def _apply_bulk_missing_units(digest: str, kind: str, widget: str) -> None:
     from Quotation_KEKOREA.agent.review_fields import apply_common_quantity_unit
     unit = str(st.session_state.get(widget) or "").strip()
     updated = deepcopy(saved[1])
+    # Only rows represented by the visible bulk button are affected. A row
+    # with an unknown product or price still needs its own factual review.
+    eligible = [item for item in (updated[kind].get("items") or [])
+                if _item_only_missing_unit(kind, item)]
     try:
-        changed = apply_common_quantity_unit(updated[kind], unit)
+        changed = apply_common_quantity_unit({"items": eligible}, unit)
     except (ValueError, TypeError) as exc:
         st.session_state["ai_intake_followup_error"] = str(exc)
         return
