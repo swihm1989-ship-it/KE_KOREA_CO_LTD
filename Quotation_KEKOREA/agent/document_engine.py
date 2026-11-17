@@ -119,18 +119,49 @@ def _discount_instruction(prompt):
     list_price_instruction = re.search(
         r"\b(?:at\s+(?:the\s+)?list\s+price|full\s+price|regular\s+price|no\s+discount|without\s+discount)\b|정가(?:로|격으로)",
         text, re.IGNORECASE)
-    rates = re.findall(r"(?<![\w.])(\d+(?:\.\d+)?)\s*%", remaining_text)
+    # A payment schedule is not a price discount. In the original
+    # implementation every percentage in the WHOLE instruction was treated as
+    # a discount. The unrelated words "모델 변경" then made the last number
+    # (T/T 잔금 70%) win over the explicit "추가 할인율 0%".
+    #
+    # Accept only percentages immediately associated with a discount label;
+    # percentages attached to deposit/balance/shipping/payment are ignored.
+    discount_word = re.compile(r"할인(?:율|가|액)?|discount(?:\s+rate)?\b", re.IGNORECASE)
+    rate_before = re.compile(
+        r"(?<![\w.])(?P<rate>\d+(?:\.\d+)?)\s*%[ \t]*(?:를|을|의)?[ \t]*(?:추가[ \t]*)?$",
+        re.IGNORECASE)
+    rate_after = re.compile(
+        r"^[ \t]*(?:(?:은|는|을|이|가|로|으로|:|=|-|is|at|of|by)[ \t]*){0,3}"
+        r"(?P<rate>\d+(?:\.\d+)?)\s*%",
+        re.IGNORECASE)
+    correction_after = re.compile(
+        r"^[ \t]*(?:에서|to|->|→)[ \t]*(?P<rate>\d+(?:\.\d+)?)\s*%"
+        r"[ \t]*(?:로|으로)?[ \t]*(?:수정|변경|revised|changed)?",
+        re.IGNORECASE)
+    rates = []
+    for label in discount_word.finditer(remaining_text):
+        before = remaining_text[max(0, label.start() - 30):label.start()]
+        preceding = rate_before.search(before)
+        following = remaining_text[label.end():label.end() + 60]
+        succeeding = rate_after.match(following)
+        if preceding:
+            rates.append(preceding.group("rate"))
+        if succeeding:
+            rate = succeeding.group("rate")
+            # A local correction ("할인율 10%에서 5%로 수정") is explicit.
+            # A remote "모델 변경" is NOT a discount correction.
+            correction = correction_after.match(following[succeeding.end():])
+            rates.append(correction.group("rate") if correction else rate)
     if not rates and (denied_spans or list_price_instruction):
         return "0", None
     if not rates:
         if re.search(r"할인\s*없|할인율\s*미적용|할인\s*미적용|할인\s*없이", text, re.IGNORECASE):
             return "0", None
         return None, "Discount was mentioned without a percentage; specify a single discount rate."
-    correction = re.search(r"not|instead|rather than|아니라|아닌|대신|수정|변경", text, re.IGNORECASE)
     if len(set(rates)) == 1:
         return rates[-1], None
-    if correction:
-        return rates[-1], None
+    # Never guess between two genuine discount rates; payment percentages
+    # have already been excluded and cannot create a false conflict.
     return None, "Multiple discount rates were requested; specify one rate for this invoice."
 
 
