@@ -6,11 +6,14 @@ No writing to repository, no automatic approval, finalization, or SMTP.
 """
 from __future__ import annotations
 
-AI_WORKFLOW_REVISION = "trade-missing-terms-20261113-v2"
+import os
+AI_WORKFLOW_REVISION = "shared-ke-korea-family-20261117-v3"
+AI_WORKFLOW_SOURCE_MTIME_NS = os.stat(__file__).st_mtime_ns
 from Quotation_KEKOREA.observability.core import traced
 from copy import deepcopy
 from typing import Any, Mapping
 from uuid import uuid4
+from Quotation_KEKOREA.agent.trade_documents import FAMILIES as _FAMILIES
 from Quotation_KEKOREA.orchestration.workflows.commercial_values import normalize_analysis_values
 
 from Quotation_KEKOREA.orchestration.router import DOC_TYPES
@@ -20,7 +23,7 @@ from Quotation_KEKOREA.orchestration.workflows.label_typos import normalize_trad
 _TERM_KEYS = {"products", "quantity", "unit", "unit_price", "currency", "delivery",
               "payment_trigger", "payment_deadline", "inspection_claims", "scope",
               "contract_date", "governing_law", "dispute_resolution"}
-_FAMILIES = {"polysilicon", "wafer", "solar_cell", "solar_module", "cosmetics", "other"}
+# Product-family policy is owned by the existing KE KOREA trade engine.
 
 
 @traced('contract.analyze')
