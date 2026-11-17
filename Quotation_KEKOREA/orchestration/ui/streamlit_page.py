@@ -57,7 +57,7 @@ with st.sidebar:
 # a top-level ImportError would otherwise prevent the entire Master from loading.
 if st.session_state.pop("master_mail_navigation_pending", False):
     st.session_state["master_page"] = "AI 업무 요청"
-page = st.sidebar.radio("업무 메뉴", ["시장 뉴스", "업무 대시보드", "메일함", "AI 업무 요청", "통합 업무 흐름", "문서 검토", "발송 대기", "엔진 사전검증", "문서 초안 미리보기", "저장된 계약서", "실행 기록", "관리자 모니터링"], label_visibility="collapsed", key="master_page")
+page = st.sidebar.radio("업무 메뉴", ["시장 뉴스", "메일함", "AI 업무 요청", "통합 업무 흐름", "문서 검토", "발송 대기", "저장된 계약서"], label_visibility="collapsed", key="master_page")
 st.sidebar.divider()
 st.sidebar.caption("접속 계정: " + _authenticated_principal)
 if st.sidebar.button("로그아웃", key="master_logout"):
@@ -249,8 +249,12 @@ elif page == "통합 업무 흐름":
                 st.write(item)
 
 elif page == "저장된 계약서":
-    from Quotation_KEKOREA.orchestration.ui.saved_contracts import render_saved_contracts
-    render_saved_contracts(_authenticated_principal)
+    from Quotation_KEKOREA.orchestration.ui.pdf_archive_page import render_pdf_archive
+    render_pdf_archive(_authenticated_principal, "final")
+
+elif page == "발송 대기":
+    from Quotation_KEKOREA.orchestration.ui.pdf_archive_page import render_pdf_archive
+    render_pdf_archive(_authenticated_principal, "draft")
 
 elif page == "엔진 사전검증":
     st.subheader("기존 엔진 사전검증 · 읽기 전용")
