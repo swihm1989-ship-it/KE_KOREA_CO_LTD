@@ -57,7 +57,10 @@ with st.sidebar:
 # a top-level ImportError would otherwise prevent the entire Master from loading.
 if st.session_state.pop("master_mail_navigation_pending", False):
     st.session_state["master_page"] = "AI 업무 요청"
-page = st.sidebar.radio("업무 메뉴", ["시장 뉴스", "메일함", "AI 업무 요청", "통합 업무 흐름", "문서 검토", "발송 대기", "저장된 계약서"], label_visibility="collapsed", key="master_page")
+_master_menu = ["시장 뉴스", "메일함", "AI 업무 요청", "통합 업무 흐름", "문서 검토", "발송 대기", "저장된 계약서"]
+if st.session_state.get("master_page") not in (None, *_master_menu):
+    st.session_state["master_page"] = "AI 업무 요청"
+page = st.sidebar.radio("업무 메뉴", _master_menu, label_visibility="collapsed", key="master_page")
 st.sidebar.divider()
 st.sidebar.caption("접속 계정: " + _authenticated_principal)
 if st.sidebar.button("로그아웃", key="master_logout"):
