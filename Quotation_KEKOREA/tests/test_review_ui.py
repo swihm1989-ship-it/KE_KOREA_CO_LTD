@@ -221,6 +221,12 @@ class ReviewUiTests(unittest.TestCase):
             with patch('Quotation_KEKOREA.agent.extractor.extract_trade_data', return_value=new_doc):
                 at.text_area[0].set_value('Create a PI. Cell quantity 10 PCS at USD 1 per PCS. No discount.').run(timeout=20)
                 at.button[0].click().run(timeout=20)
+                # Extraction uses a thread. Do not race the old editor state:
+                # wait for the new result before asserting widget reset.
+                job = at.session_state['_document_workspaces'].jobs.get(('PI 만들기', 'extract'))
+                if job:
+                    job.future.result(timeout=5)
+                    at.run(timeout=20)
             self.assertFalse(at.exception)
             delivery = next(entry for entry in at.text_input if entry.label.startswith('Delivery terms'))
             self.assertEqual(delivery.value, '')
