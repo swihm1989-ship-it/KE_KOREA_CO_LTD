@@ -251,6 +251,9 @@ elif page == "통합 업무 흐름":
 elif page == "저장된 계약서":
     from Quotation_KEKOREA.orchestration.ui.pdf_archive_page import render_pdf_archive
     render_pdf_archive(_authenticated_principal, "final")
+    with st.expander("기존 KE KOREA 계약서 원본 및 리비전 조회", expanded=False):
+        from Quotation_KEKOREA.orchestration.ui.saved_contracts import render_saved_contracts
+        render_saved_contracts(_authenticated_principal)
 
 elif page == "발송 대기":
     from Quotation_KEKOREA.orchestration.ui.pdf_archive_page import render_pdf_archive
