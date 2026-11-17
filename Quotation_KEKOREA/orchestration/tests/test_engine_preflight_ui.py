@@ -16,11 +16,8 @@ class EnginePreflightUITest(unittest.TestCase):
 
     def test_contract_preflight_engine_retained_without_menu(self):
         from Quotation_KEKOREA.orchestration.adapters.engine_bridge import evaluate_contract_candidate
-        result = evaluate_contract_candidate({
-            "contract_id": "DEMO-001", "revision": 1,
-            "contract_type": "sale", "language": "ko", "parties": [],
-            "terms": [], "clauses": [], "issues": [], "omissions": {},
-        })
+        from Quotation_KEKOREA.contracts.models import new_snapshot
+        result = evaluate_contract_candidate(new_snapshot("DEMO-001", "sale", "ko"))
         self.assertEqual(result.status, "needs_input")
         self.assertTrue(result.blockers)
 
