@@ -29,7 +29,8 @@ from Quotation_KEKOREA.agent.ci_import import (prepare_ci_import, is_pi_import, 
 from Quotation_KEKOREA.agent.packing_review import (reconcile_packing, normalize_packing_inputs, packing_total_changes,
                                            apply_approved_packing_totals, PACKING_SOURCE_FIELDS)
 from Quotation_KEKOREA.agent.renderers import format_currency_amount, render_files
-from Quotation_KEKOREA.agent.review_fields import missing_review_fields, apply_review_value
+from Quotation_KEKOREA.agent.review_fields import (missing_review_fields, apply_review_value,
+                                                      apply_common_quantity_unit, _missing)
 from Quotation_KEKOREA.agent.trade_documents import apply_promotion, current_issue_date, normalize_quantity_unit, validate_and_calculate
 
 
@@ -351,6 +352,50 @@ if raw:
                     key=f"product_double_check_{page}_{index}")
             apply_verified_eclado_prices(data, active_catalog)
         sample_review_paths = edit_sample_rows(data, page)
+        # Quantity is already numeric in imported laptop orders; the missing
+        # field is the UNIT, not the amount. One user-confirmed selection
+        # replaces dozens of per-row unit confirmations without guessing mass
+        # or package units. Explicit source/user units always take precedence.
+        missing_units = [
+            index for index, item in enumerate(data.get("items") or [])
+            if isinstance(item, dict) and _missing(item.get("unit"), True)
+        ]
+        if missing_units:
+            st.markdown(f"**수량 단위 미확정: {len(missing_units)}개 품목**")
+            st.caption("수량·단가는 이미 인식됐습니다. 단위가 명시되지 않은 품목만 선택한 단위로 채웁니다. 서로 다른 단위가 섞여 있다면 아래 개별 수정란을 사용하세요.")
+            bulk_unit_col, bulk_action_col = st.columns([1, 3])
+            common_unit = bulk_unit_col.selectbox(
+                "미확정 품목에 적용할 수량 단위",
+                ("PCS", "SET", "KG", "MT", "BOX", "CTN", "PALLET", "ROLL", "DRUM", "G", "L", "W", "WP"),
+                key=f"bulk_unit_choice_{page}",
+            )
+            if bulk_action_col.button(
+                f"빈 수량 단위 일괄 적용 ({len(missing_units)}개)",
+                key=f"bulk_unit_apply_{page}",
+                help="확인 후 선택한 단위를 누락 품목에만 적용합니다. 수량·가격·할인율은 변경되지 않습니다.",
+            ):
+                # Preserve typed but not-yet-applied per-row units, if any.
+                for index in missing_units:
+                    manual_key = f"review_missing_{page}_items_{index}_unit"
+                    manual = st.session_state.get(manual_key)
+                    if not _missing(manual, True):
+                        data["items"][index]["unit"] = normalize_quantity_unit(manual)
+                changed = apply_common_quantity_unit(data, common_unit)
+                if changed:
+                    st.session_state["trade_draft"] = data
+                    review_values = st.session_state.get(f"review_values_{page}", {})
+                    for index in changed:
+                        manual_key = f"review_missing_{page}_items_{index}_unit"
+                        st.session_state.pop(manual_key, None)
+                        if isinstance(review_values, dict):
+                            review_values.pop(manual_key, None)
+                    # A previous rendered file cannot survive changed units.
+                    st.session_state["rendered_paths"] = {}
+                    st.session_state.pop("rendered_json", None)
+                    st.session_state.pop("download_format", None)
+                    st.rerun()
+                else:
+                    st.info("입력한 개별 품목 단위가 이미 모두 적용되어 있습니다.")
         review_fields = missing_review_fields(data)
         if expected_type == "CI" and not is_pi_import(data):
             review_fields = [field for field in review_fields if not (
@@ -364,17 +409,33 @@ if raw:
         if review_fields:
             st.markdown("### 문서 생성 전 누락 정보 입력")
             st.caption("빈 항목을 영문으로 입력해 주세요. * 항목은 필수입니다. 선택 항목이 해당 없으면 N/A를 직접 입력해 주세요.")
-            review_columns = st.columns(2)
             review_values = st.session_state.setdefault(f"review_values_{page}", {})
-            for index, field in enumerate(field for field in review_fields if field.path not in existing_review_paths):
+            editable = [field for field in review_fields if field.path not in existing_review_paths]
+            unit_fields = [field for field in editable
+                           if len(field.path) == 3 and field.path[0] == "items" and field.path[-1] == "unit"]
+            other_fields = [field for field in editable if field not in unit_fields]
+
+            def show_review_field(field, column):
                 widget_key = f"review_missing_{page}_" + "_".join(map(str, field.path))
                 if widget_key not in st.session_state:
                     st.session_state[widget_key] = review_values.get(widget_key, "")
-                value = review_columns[index % 2].text_input(
+                value = column.text_input(
                     field.label + (" *" if field.required else ""), key=widget_key,
                     help="Enter the confirmed value in English." if field.required else "Enter the value, or N/A if not applicable.")
                 review_values[widget_key] = value
                 apply_review_value(data, field, value)
+
+            if other_fields:
+                review_columns = st.columns(2)
+                for index, field in enumerate(other_fields):
+                    show_review_field(field, review_columns[index % 2])
+            if unit_fields:
+                # Keep individual correction available for mixed KG/PCS orders,
+                # but do not expand 49 duplicate inputs by default.
+                with st.expander(f"품목별 수량 단위 수정 ({len(unit_fields)}개)", expanded=len(unit_fields) <= 3):
+                    unit_columns = st.columns(2)
+                    for index, field in enumerate(unit_fields):
+                        show_review_field(field, unit_columns[index % 2])
             apply_company_profiles(data, active_company_profiles)
             apply_verified_eclado_prices(data, active_catalog)
         data = recalculate_order_promotions(data)
@@ -383,7 +444,14 @@ if raw:
             verified_count = sum(item.get("master_price") is True for item in data.get("items", []))
             st.caption(f"PO는 ECLADO KRW 매입 카탈로그 기준 · 확인된 가격 적용: {verified_count}/{len(data.get('items', []))}개 상품")
         if pending_review_fields:
-            st.warning("PDF/Excel 생성 전에 다음 항목을 입력해 주세요: " + "; ".join(field.label for field in pending_review_fields))
+            unit_count = sum(len(field.path) == 3 and field.path[0] == "items"
+                             and field.path[-1] == "unit" for field in pending_review_fields)
+            other_missing = [field.label for field in pending_review_fields
+                             if not (len(field.path) == 3 and field.path[0] == "items"
+                                     and field.path[-1] == "unit")]
+            summary = ([f"품목 수량 단위 {unit_count}개 (위에서 일괄 적용하거나 개별 수정)"]
+                       if unit_count else []) + other_missing
+            st.warning("PDF/Excel 생성 전 확인할 항목: " + "; ".join(summary))
         result = validate_and_calculate(data)
         packing_check = reconcile_packing(data) if expected_type == "PL" else None
         if packing_check and packing_check["issues"]:
