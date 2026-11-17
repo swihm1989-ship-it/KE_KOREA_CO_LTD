@@ -33,7 +33,7 @@ class SharedProductFamilyHandoffTests(unittest.TestCase):
                            side_effect=ValueError("상품군을 확인해 주세요."))):
             module = ai_intake_page._current_mail_intake()
             self.assertEqual(module.MAIL_INTAKE_REVISION,
-                             "shared-ke-korea-family-20261117-v1")
+                             "shared-trade-payment-unit-20261117-v2")
             self.assertIn("other", module.FAMILIES)
             self.assertTrue(callable(module.extract_mail_candidates))
             self.assertNotIn("mock", module.extract_mail_candidates.__module__)

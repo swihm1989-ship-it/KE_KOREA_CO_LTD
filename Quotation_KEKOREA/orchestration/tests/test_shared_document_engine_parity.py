@@ -44,7 +44,7 @@ class SharedDocumentEngineParity(unittest.TestCase):
         self.assertNotIn("def _extract_draft(", app_source)
         self.assertIn("finalize_extracted_trade", document_engine.__dict__)
         self.assertEqual(document_engine.SHARED_TRADE_ENGINE_REVISION,
-                         "ke-korea-postprocessor-20261116-v1")
+                         "master-payment-discount-shared-20261117-v2")
 
     def test_master_mail_and_original_app_share_source_for_pi(self):
         raw = trade_source("PI")
