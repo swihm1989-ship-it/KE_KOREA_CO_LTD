@@ -418,7 +418,10 @@ if raw:
             def show_review_field(field, column):
                 widget_key = f"review_missing_{page}_" + "_".join(map(str, field.path))
                 if widget_key not in st.session_state:
-                    st.session_state[widget_key] = review_values.get(widget_key, "")
+                    # DRAFT is an allowed document identifier, not a fabricated
+                    # invoice number. Keep this field editable for a real number.
+                    default = "DRAFT" if field.path == ("document_number",) else ""
+                    st.session_state[widget_key] = review_values.get(widget_key) or default
                 value = column.text_input(
                     field.label + (" *" if field.required else ""), key=widget_key,
                     help="Enter the confirmed value in English." if field.required else "Enter the value, or N/A if not applicable.")
@@ -443,15 +446,23 @@ if raw:
         if expected_type == "PO":
             verified_count = sum(item.get("master_price") is True for item in data.get("items", []))
             st.caption(f"PO는 ECLADO KRW 매입 카탈로그 기준 · 확인된 가격 적용: {verified_count}/{len(data.get('items', []))}개 상품")
-        if pending_review_fields:
+        # Only genuinely required values prevent DRAFT file creation. Optional
+        # origin/shipment/contact details in a PI remain visibly incomplete,
+        # not invented or silently recorded as confirmed.
+        required_review_fields = [field for field in pending_review_fields if field.required]
+        optional_review_fields = [field for field in pending_review_fields if not field.required]
+        if required_review_fields:
             unit_count = sum(len(field.path) == 3 and field.path[0] == "items"
-                             and field.path[-1] == "unit" for field in pending_review_fields)
-            other_missing = [field.label for field in pending_review_fields
+                             and field.path[-1] == "unit" for field in required_review_fields)
+            other_missing = [field.label for field in required_review_fields
                              if not (len(field.path) == 3 and field.path[0] == "items"
                                      and field.path[-1] == "unit")]
             summary = ([f"품목 수량 단위 {unit_count}개 (위에서 일괄 적용하거나 개별 수정)"]
                        if unit_count else []) + other_missing
-            st.warning("PDF/Excel 생성 전 확인할 항목: " + "; ".join(summary))
+            st.warning("PDF/Excel 생성 전 필수 확인: " + "; ".join(summary))
+        if optional_review_fields:
+            st.caption("선택적 미확정 정보 " + str(len(optional_review_fields)) +
+                       "건 · 입력하지 않아도 DRAFT 출력 가능 (출력 전 확인 권장)")
         result = validate_and_calculate(data)
         packing_check = reconcile_packing(data) if expected_type == "PL" else None
         if packing_check and packing_check["issues"]:
@@ -684,7 +695,7 @@ if raw:
                                       ("promotion rule", "promotion quantity", "promotion command"))]
                               if expected_type in {"PO", "PI"} else [])
         sample_blockers = [issue for issue in result["blocking_issues"] if issue.startswith("Sample ")]
-        export_blocked = bool((expected_type in {"PO", "PI"} and unconfirmed_product_matches) or pending_review_fields or financial_blockers or bank_blockers or seal_blockers or
+        export_blocked = bool((expected_type in {"PO", "PI"} and unconfirmed_product_matches) or required_review_fields or financial_blockers or bank_blockers or seal_blockers or
                               promotion_blockers or sample_blockers or source_import_blockers or (packing_check and packing_check["issues"]) or not packing_image_confirmed)
         if sample_blockers:
             st.error("샘플 입력값을 확인해 주세요: " + "; ".join(sample_blockers))
