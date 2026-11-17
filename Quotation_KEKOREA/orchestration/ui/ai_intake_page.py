@@ -1949,7 +1949,7 @@ def render_ai_intake(principal: str):
     if not principal:
         raise PermissionError("로그인이 필요합니다.")
     st.subheader("AI 거래조건 추출 · 기존 문서 엔진 연결")
-    st.caption("화면 업데이트: 2026-11-17 · 기타 제품(other) PI·PO 지원 + 기존 단가·문서 엔진 유지")
+    st.caption("화면 업데이트: 2026-11-17 · KE KOREA 원본 문서 엔진 위임 · 기타 상품 PI·PO 오류 수정")
     st.caption("문서 작업은 이 화면에서 진행합니다. 검토용 초안과 최종 발행 문서는 기존 검증·승인 규칙에 따라 구분합니다.")
     st.caption("기존 계약서 분석 AI를 사용해 자연어에서 거래조건을 제안합니다. 확정·발행·전송은 자동으로 하지 않습니다.")
     st.info("AI 요청에는 아래 입력 내용과 직접 선택한 참고파일만 전송합니다. 저장된 계약서는 모델에 전달되지 않습니다.")
@@ -2018,8 +2018,13 @@ def render_ai_intake(principal: str):
     st.caption("감지된 문서 종류: " + (", ".join(requested) if requested else "없음 · PI/PO/CI/PL/계약서를 명시하세요"))
     language = st.radio("계약서 언어", ["한국어", "English"], horizontal=True,
                         key="ai_intake_language")
-    family = st.selectbox("무역서류 상품군", ["solar_cell", "wafer", "polysilicon",
-                                            "solar_module", "cosmetics", "other"], key="ai_intake_family")
+    # UI presentation order is fixed, but product-family *policy* is entirely
+    # the original KE KOREA document engine's single authoritative set.
+    from Quotation_KEKOREA.agent.trade_documents import FAMILIES as trade_families
+    order = ("solar_cell", "wafer", "polysilicon", "solar_module", "cosmetics", "other")
+    options = [value for value in order if value in trade_families]
+    options += sorted(trade_families - set(order))
+    family = st.selectbox("무역서류 상품군", options, key="ai_intake_family")
     config = _model_config()
     ready = bool(config.get("OPENAI_API_KEY") and
                  (config.get("OPENAI_MODEL") or config.get("CONTRACT_OPENAI_MODEL")))
