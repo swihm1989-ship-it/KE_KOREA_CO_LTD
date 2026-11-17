@@ -70,7 +70,7 @@ class MasterPdfArchiveTests(TestCase):
     def test_download_verifies_authenticated_row_and_checksum(self):
         ident = "18d53c20-c2bc-493d-b992-6a1611f99857"
         self.repo.request.return_value = [{
-            "id": ident, "storage_path": "hashed/record.pdf",
+            "id": ident, "storage_path": archive.owner_key("owner@example.test") + "/record.pdf",
             "filename": "PI-TEST.pdf", "kind": "PI", "status": "draft",
             "content_sha256": sha256(PDF).hexdigest(), "source_snapshot": SOURCE,
         }]
