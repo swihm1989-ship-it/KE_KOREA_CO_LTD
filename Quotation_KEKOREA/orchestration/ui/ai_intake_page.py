@@ -462,7 +462,7 @@ def _source_discount_rate(instruction: str) -> str | None:
     Payment instalment percentages are ignored by its original parser.
     This never interprets the 30% deposit / 70% balance as a line discount.
     """
-    if not re.search(r"할인|\\bdiscount\\b", str(instruction or ""), re.I):
+    if not re.search(r"할인|\bdiscount\b", str(instruction or ""), re.I):
         return None
     engine = _current_mail_intake()._current_ke_trade_engine()
     rate, _ = engine._discount_instruction(instruction)
@@ -525,6 +525,69 @@ def _remember_candidate_bundle(digest: str, candidate_map: dict, *, replace_edit
     st.session_state["ai_intake_candidates"] = (digest, candidate_map)
     _invalidate_document_outputs()
 
+
+
+def _apply_source_discount_recheck(digest: str, kind: str) -> None:
+    """Owner can repair a previously cached 70%-from-payment candidate once."""
+    saved = st.session_state.get("ai_intake_candidates")
+    if (not saved or saved[0] != digest or kind not in {"PI", "PO"}
+            or not isinstance(saved[1].get(kind), dict)):
+        return
+    rate = _source_discount_rate(st.session_state.get("ai_intake_instruction") or "")
+    if rate is None:
+        return
+    revised = deepcopy(saved[1])
+    changed = _apply_source_discount_to_document(revised[kind], rate)
+    if changed:
+        _remember_candidate_bundle(digest, revised)
+        st.session_state["ai_intake_last_answer"] = (
+            kind + " · 원본 요청 할인율 " + rate + "% 복원 · " + str(changed) + "개")
+
+
+def _item_only_missing_unit(kind: str, item: dict) -> bool:
+    """A missing measurement unit is NOT an unrecognized product/price.
+
+    These rows receive ONE shared KE KOREA confirmation control rather than
+    49 repeated product-name/spec/SKU cards. Other missing facts stay visible.
+    """
+    from Quotation_KEKOREA.agent.review_fields import _missing
+    if not isinstance(item, dict) or not _missing(item.get("unit"), True):
+        return False
+    if _missing(item.get("product_name"), True):
+        return False
+    if all(_missing(item.get(key), True)
+           for key in ("quantity", "paid_quantity", "shipped_quantity")):
+        return False
+    if kind != "PL" and _missing(item.get("unit_price"), True):
+        return False
+    # If price_basis was also absent, confirmation of the per-unit price
+    # will be explicit in the bulk control, not guessed from USD amounts.
+    return True
+
+
+def _apply_bulk_missing_units(digest: str, kind: str, widget: str) -> None:
+    """MASTER forwards ONE human unit selection to the original KE KOREA API.
+
+    No independent MASTER unit policy, price calculation or product matching.
+    """
+    saved = st.session_state.get("ai_intake_candidates")
+    if (not saved or saved[0] != digest or kind not in {"PI", "PO", "CI", "PL"}
+            or not _is_current_shared_widget(digest, widget)
+            or not isinstance(saved[1].get(kind), dict)):
+        return
+    from Quotation_KEKOREA.agent.review_fields import apply_common_quantity_unit
+    unit = str(st.session_state.get(widget) or "").strip()
+    updated = deepcopy(saved[1])
+    try:
+        changed = apply_common_quantity_unit(updated[kind], unit)
+    except (ValueError, TypeError) as exc:
+        st.session_state["ai_intake_followup_error"] = str(exc)
+        return
+    if changed:
+        _remember_candidate_bundle(digest, updated)
+        st.session_state["ai_intake_last_answer"] = (
+            kind + " · 미확정 단위 " + str(len(changed)) + "개에 " + unit + " 적용")
+        st.session_state.pop("ai_intake_followup_error", None)
 
 
 def _confirm_po_supplier_and_reprice(digest: str) -> None:
