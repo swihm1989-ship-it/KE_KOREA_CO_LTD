@@ -1464,7 +1464,7 @@ def _render_single_editor(digest: str, candidates: dict) -> None:
         # live in the original AI review and never count as new missing input.
         if gaps:
             unit_gaps = [gap for gap in gaps
-                         if re.fullmatch(r"item(?:\\.\\d+)?\\.unit", gap.key)]
+                         if re.fullmatch(r"item(?:\.\d+)?\.unit", gap.key)]
             other_gaps = [gap for gap in gaps if gap not in unit_gaps]
             if unit_gaps:
                 st.info("현재 입력값 재검증 · 수량 단위 " + str(len(unit_gaps)) +
