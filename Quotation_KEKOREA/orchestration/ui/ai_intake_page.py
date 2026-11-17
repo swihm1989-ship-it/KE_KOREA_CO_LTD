@@ -40,9 +40,9 @@ TRADE_REVIEW_REVISION = "image-advisory-schema-fix-20261116-v5"
 MAIL_PARTY_BRIDGE_MODULE = "Quotation_KEKOREA.agent.mail_party_bridge"
 MAIL_PARTY_BRIDGE_REVISION = "master-po-party-hot-reload-20261117-v1"
 MAIL_INTAKE_MODULE = "Quotation_KEKOREA.orchestration.workflows.mail_intake"
-MAIL_INTAKE_REVISION = "shared-ke-korea-family-20261117-v1"
+MAIL_INTAKE_REVISION = "shared-trade-payment-unit-20261117-v2"
 AI_WORKFLOW_REVISION = "shared-ke-korea-family-20261117-v3"
-AI_INTAKE_REVISION = "master-shared-family-mail-20261117-v21"
+AI_INTAKE_REVISION = "master-49-unit-discount-shared-20261117-v22"
 # Detect a changed source file even when the cached module has the same revision.
 AI_INTAKE_SOURCE_MTIME_NS = os.stat(__file__).st_mtime_ns
 
@@ -456,7 +456,41 @@ def _initialize_shared_widget(widget: str, value: str) -> None:
         st.session_state[widget] = value
 
 
-def _remember_candidate_bundle(digest: str, candidate_map: dict, *, replace_editor=False) -> None:
+def _source_discount_rate(instruction: str) -> str | None:
+    """Read explicit discount instructions ONLY through the KE KOREA agent.
+
+    Payment instalment percentages are ignored by its original parser.
+    This never interprets the 30% deposit / 70% balance as a line discount.
+    """
+    if not re.search(r"할인|\\bdiscount\\b", str(instruction or ""), re.I):
+        return None
+    engine = _current_mail_intake()._current_ke_trade_engine()
+    rate, _ = engine._discount_instruction(instruction)
+    return rate
+
+
+def _apply_source_discount_to_document(document: dict, rate: str) -> int:
+    """Apply a trusted explicit instruction without copying price or roles.
+
+    Called only for a fresh extraction or an owner-clicked reconciliation.
+    Existing human-reviewed PI imports and manual samples are excluded.
+    """
+    from Quotation_KEKOREA.agent.ci_import import is_pi_import
+    from Quotation_KEKOREA.agent.samples import is_manual_sample
+    if is_pi_import(document):
+        return 0
+    changed = 0
+    for row in document.get("items") or []:
+        if not isinstance(row, dict) or is_manual_sample(document, row):
+            continue
+        if str(row.get("discount_percent") if row.get("discount_percent") is not None else "").strip() != str(rate):
+            row["discount_percent"] = str(rate)
+            changed += 1
+    return changed
+
+
+def _remember_candidate_bundle(digest: str, candidate_map: dict, *, replace_editor=False,
+                               source_extraction=False) -> None:
     """Synchronize candidate revisions; widgets refresh before their next render."""
     previous = st.session_state.get("ai_intake_candidates")
     if replace_editor:
@@ -470,6 +504,15 @@ def _remember_candidate_bundle(digest: str, candidate_map: dict, *, replace_edit
         st.session_state.pop("ai_intake_followup_error", None)
     candidate_map = {kind: normalize_trade_values(data) if kind in {"PI", "PO", "CI", "PL"} else data
                      for kind, data in candidate_map.items()}
+    # Only a NEW provider extraction may be corrected from the source request.
+    # Re-rendering, JSON corrections and per-item human discounts must retain
+    # their already-edited values. Never let 30%/70% payment terms set a rate.
+    if source_extraction:
+        rate = _source_discount_rate(st.session_state.get("ai_intake_instruction") or "")
+        if rate is not None:
+            for kind, document in candidate_map.items():
+                if kind in {"PI", "PO"} and isinstance(document, dict):
+                    _apply_source_discount_to_document(document, rate)
     # Resolve explicit user-authored PO buyer/supplier roles only on the NEW
     # extraction, never on edits to an already-reviewed PO. Imported customer
     # orders can otherwise leave their PI seller/buyer on the generated PO.
@@ -2070,7 +2113,8 @@ def render_ai_intake(principal: str):
                 if str(key).startswith("ai_intake_shared_"):
                     st.session_state.pop(key, None)
             st.session_state.pop("ai_intake_drafts", None)
-            _remember_candidate_bundle(digest, candidate_map, replace_editor=True)
+            _remember_candidate_bundle(digest, candidate_map, replace_editor=True,
+                                       source_extraction=True)
             st.session_state["ai_intake_result"] = (digest, extracted)
         except (PermissionError, ValueError, RuntimeError, TypeError) as exc:
             st.error("AI 거래조건 추출 실패: " + str(exc)[:400])
