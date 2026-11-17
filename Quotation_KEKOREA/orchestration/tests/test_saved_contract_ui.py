@@ -46,7 +46,7 @@ class AuthenticatedLibraryUiTests(unittest.TestCase):
         }]
         with patch.dict(os.environ, {"SUPABASE_URL": "https://demo.supabase.co", "SUPABASE_SECRET_KEY": "fake-test-key"}), patch("Quotation_KEKOREA.orchestration.security.auth_gate.require_authentication", return_value="owner@example.com"), patch(
             "Quotation_KEKOREA.orchestration.ui.saved_contracts.make_reader", return_value=repo
-        ):
+        ), patch("Quotation_KEKOREA.orchestration.workflows.pdf_archive.list_documents", return_value=[]):
             app = AppTest.from_file(str(PAGE), default_timeout=25).run()
             app.radio[0].set_value("저장된 계약서").run()
             self.assertEqual(len(app.exception), 0, [x.message for x in app.exception])

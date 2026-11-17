@@ -1322,7 +1322,7 @@ def _discard_trade_final(kind: str) -> None:
         st.session_state.pop("master_trade_final_files", None)
 
 
-def _render_trade_final_panel(digest: str, sources: dict, env: dict, *, edited_matches=True) -> None:
+def _render_trade_final_panel(digest: str, sources: dict, env: dict, *, edited_matches=True, principal: str = "") -> None:
     trade = {kind: doc for kind, doc in sources.items()
              if kind in {"PI", "PO", "CI", "PL"} and isinstance(doc, dict)}
     if not trade:
@@ -1378,6 +1378,7 @@ def _render_trade_final_panel(digest: str, sources: dict, env: dict, *, edited_m
                     bundle = dict(st.session_state.get("master_trade_final_files") or {})
                     bundle[kind] = {"fingerprint": fingerprint, "revision": revision, "files": files}
                     st.session_state["master_trade_final_files"] = bundle
+                    _archive_generated_pdf(principal, kind, "final", files, source)
                 except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as exc:
                     if isinstance(exc, review.TradeExportValidationError):
                         st.error(kind + " · 최종 검증 중 실제 오류 " +
@@ -1808,6 +1809,27 @@ def _render_single_editor(digest: str, candidates: dict) -> None:
 
 
 
+
+
+def _archive_generated_pdf(principal: str, kind: str, status: str,
+                           files: dict, snapshot: dict) -> bool:
+    """Archive only the PDF, never generate alternate layouts or expose secrets."""
+    if not principal or not (files or {}).get("pdf"):
+        return False
+    env = document_export_env(st.secrets, os.environ)
+    if not env.get("SUPABASE_URL") or not env.get("SUPABASE_SECRET_KEY"):
+        st.warning("PDF는 생성되었지만 MASTER 비공개 저장소 환경변수가 없어 자동 보관하지 못했습니다.")
+        return False
+    try:
+        from Quotation_KEKOREA.orchestration.ui.pdf_archive_page import store_generated
+        store_generated(principal, kind, status, files, snapshot)
+    except Exception:
+        st.warning("PDF는 생성되었지만 비공개 보관에 실패했습니다. 아래에서 다운로드하고 저장소 연결을 점검하세요.")
+        return False
+    st.caption("PDF를 " + ("발송 대기" if status == "draft" else "저장된 계약서") +
+               " 메뉴에 자동 보관했습니다.")
+    return True
+
 def _render_original_contract_final(principal: str, snapshot: dict,
                                     edited_matches: bool) -> None:
     """FINAL documents are rendered ONLY with the existing KE KOREA engine."""
@@ -1910,6 +1932,7 @@ def _render_original_contract_final(principal: str, snapshot: dict,
         else:
             st.session_state["master_contract_final_files"] = (
                 fingerprint, results)
+            _archive_generated_pdf(principal, "CONTRACT", "final", results, snapshot)
             st.success("기존 계약서 FINAL 양식으로 PDF와 Word를 생성했습니다. "
                        "메일 전송은 하지 않았습니다.")
     result = st.session_state.get("master_contract_final_files")
@@ -2391,7 +2414,7 @@ def render_ai_intake(principal: str):
         # optional and must never be a prerequisite for a valid FINAL PDF.
         _render_trade_final_panel(digest, candidates[1],
                                   document_export_env(st.secrets, os.environ),
-                                  edited_matches=not json_changed)
+                                  edited_matches=not json_changed, principal=principal)
         st.markdown("#### 추가 검토용 기능 (선택)")
         if st.button("기존 문서 엔진으로 검증·DRAFT 생성", key="ai_intake_prepare",
                      disabled=not editor_matches):
@@ -2405,6 +2428,10 @@ def render_ai_intake(principal: str):
                         for kind, source in data.items()}
                 run = prepare_documents(new_request(instruction, data, requested=requested if mail_mode else None))
                 st.session_state["ai_intake_drafts"] = (edited_key, run)
+                for draft_doc in run.documents:
+                    if (draft_doc.files or {}).get("pdf"):
+                        _archive_generated_pdf(principal, draft_doc.kind, "draft",
+                                               draft_doc.files, data[draft_doc.kind])
             except (ValueError, TypeError, KeyError) as exc:
                 st.error("문서 생성 실패: " + str(exc))
         drafts = st.session_state.get("ai_intake_drafts")
@@ -2480,6 +2507,9 @@ def render_ai_intake(principal: str):
                             except (ValueError, TypeError, KeyError, AttributeError, RuntimeError, OSError) as fallback:
                                 errors[kind] = ("PDF 생성 오류: " + str(fallback))[:400]
                     st.session_state["master_legacy_files"] = (edited_key, results, errors)
+                    for draft_kind, draft_files in results.items():
+                        _archive_generated_pdf(principal, draft_kind, "draft",
+                                               draft_files, updated[draft_kind])
                 except (ValueError, TypeError, KeyError, RuntimeError, ImportError, OSError) as exc:
                     st.error("PDF 생성 실패: " + str(exc)[:400])
             export_bundle = st.session_state.get("master_legacy_files")
