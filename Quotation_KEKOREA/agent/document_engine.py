@@ -6,6 +6,7 @@ document rendering remain independently testable. No Streamlit side effects.
 """
 from __future__ import annotations
 from decimal import Decimal, InvalidOperation
+import os
 import re
 
 from Quotation_KEKOREA.agent.counterparties import (
@@ -24,7 +25,8 @@ from Quotation_KEKOREA.agent.trade_documents import (
 )
 
 
-SHARED_TRADE_ENGINE_REVISION = "ke-korea-postprocessor-20261116-v1"
+SHARED_TRADE_ENGINE_REVISION = "master-payment-discount-shared-20261117-v2"
+SHARED_TRADE_ENGINE_SOURCE_MTIME_NS = os.stat(__file__).st_mtime_ns
 
 
 def _apply_ke_korea_company_defaults(draft, document_type):
