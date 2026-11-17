@@ -190,6 +190,14 @@ elif page == "통합 업무 흐름":
                 raise ValueError("JSON 최상위 값은 문서별 입력 객체여야 합니다.")
             run = prepare_documents(new_request(instruction, candidate_map))
             st.session_state["unified_run"] = run
+            for task in run.documents:
+                if (task.files or {}).get("pdf"):
+                    try:
+                        from Quotation_KEKOREA.orchestration.ui.pdf_archive_page import store_generated
+                        store_generated(_authenticated_principal, task.kind, "draft",
+                                        task.files, candidate_map[task.kind])
+                    except Exception:
+                        st.warning(task.kind + " DRAFT는 생성됐지만 비공개 보관에 실패했습니다.")
             st.session_state["unified_input_key"] = input_key
         except (ValueError, TypeError, KeyError) as exc:
             st.error(f"요청 처리 실패: {exc}")
