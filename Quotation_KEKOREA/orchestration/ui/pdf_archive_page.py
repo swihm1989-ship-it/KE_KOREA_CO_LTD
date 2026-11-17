@@ -12,6 +12,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import streamlit as st
+from streamlit.errors import StreamlitAPIException
 
 from Quotation_KEKOREA.orchestration.workflows import pdf_archive as archive
 from Quotation_KEKOREA.orchestration.workflows.document_assets import document_export_env
@@ -44,16 +45,21 @@ def store_generated(principal: str, kind: str, status: str, files: dict,
 
 
 def _preview(data: bytes) -> None:
+    # st.pdf can exist without its optional streamlit-pdf package on Cloud.
+    # A preview failure must never hide the download or DRAFT -> FINAL controls.
     if hasattr(st, "pdf"):
-        st.pdf(data, height=740)
-    else:
-        import streamlit.components.v1 as components
-        encoded = base64.b64encode(data).decode("ascii")
-        components.html(
-            '<iframe title="PDF preview" src="data:application/pdf;base64,'
-            + encoded + '" width="100%" height="730" style="border:0"></iframe>',
-            height=755, scrolling=False,
-        )
+        try:
+            st.pdf(data, height=740)
+            return
+        except (StreamlitAPIException, ImportError):
+            pass
+    import streamlit.components.v1 as components
+    encoded = base64.b64encode(data).decode("ascii")
+    components.html(
+        '<iframe title="PDF preview" src="data:application/pdf;base64,'
+        + encoded + '" width="100%" height="730" style="border:0"></iframe>',
+        height=755, scrolling=False,
+    )
 
 
 def _trade_final(principal: str, row: dict) -> None:

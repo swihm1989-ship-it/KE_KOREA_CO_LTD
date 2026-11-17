@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 from hashlib import sha256
+
+from streamlit.errors import StreamlitAPIException
 from unittest import TestCase
 from unittest.mock import Mock, patch
 
 from Quotation_KEKOREA.orchestration.workflows import pdf_archive as archive
+from Quotation_KEKOREA.orchestration.ui import pdf_archive_page
 
 PDF = b"%PDF-1.4\nsynthetic PDF bytes\n%%EOF"
 SOURCE = {"document_type": "PI", "document_number": "PI-TEST"}
@@ -95,6 +98,38 @@ class MasterPdfArchiveTests(TestCase):
         self.assertEqual(query["status"], "eq.draft")
         self.assertEqual(query["owner_email"], "eq.owner@example.test")
 
+
+
+class MasterPdfArchivePreviewTests(TestCase):
+    def test_native_pdf_viewer_receives_exact_stored_bytes(self):
+        with patch.object(pdf_archive_page.st, "pdf", create=True) as native:
+            with patch("streamlit.components.v1.html") as fallback:
+                pdf_archive_page._preview(PDF)
+        native.assert_called_once_with(PDF, height=740)
+        fallback.assert_not_called()
+
+    def test_missing_pdf_extra_uses_fallback_instead_of_crashing(self):
+        with patch.object(
+            pdf_archive_page.st, "pdf", create=True,
+            side_effect=StreamlitAPIException("streamlit-pdf extra not installed"),
+        ) as native:
+            with patch("streamlit.components.v1.html") as fallback:
+                pdf_archive_page._preview(PDF)
+        native.assert_called_once_with(PDF, height=740)
+        fallback.assert_called_once()
+        html = fallback.call_args.args[0]
+        self.assertIn("data:application/pdf;base64,", html)
+        self.assertIn("height=\"730\"", html)
+        self.assertEqual(fallback.call_args.kwargs["height"], 755)
+
+    def test_native_import_failure_uses_same_fallback(self):
+        with patch.object(
+            pdf_archive_page.st, "pdf", create=True,
+            side_effect=ModuleNotFoundError("No module named 'streamlit_pdf'"),
+        ):
+            with patch("streamlit.components.v1.html") as fallback:
+                pdf_archive_page._preview(PDF)
+        fallback.assert_called_once()
 
 if __name__ == "__main__":
     import unittest
