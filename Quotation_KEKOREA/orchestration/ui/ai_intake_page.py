@@ -1683,7 +1683,8 @@ def _render_single_editor(digest: str, candidates: dict) -> None:
                                      " · " + (discount_state if discount_state != "직접 입력"
                                               else str(item.get("discount_percent") or "할인율 미확인") + "%") +
                                      ((" · " + event_state) if kind in {"PI", "PO"} else ""))
-                            with st.expander(label, expanded=False):
+                            with st.container(border=True):
+                                st.markdown("**" + label + "**")
                                 prefix = ("ai_intake_shared_" + _shared_widget_identity(digest) +
                                           "_terms_" + kind + "_" + str(idx))
                                 d_widget = prefix + "_discount"
