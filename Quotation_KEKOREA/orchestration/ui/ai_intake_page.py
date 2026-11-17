@@ -1733,11 +1733,15 @@ def _render_single_editor(digest: str, candidates: dict) -> None:
                     if (isinstance(item, dict) and _item_needs_correction(kind, item)
                         and idx not in unit_only_indices)]
                 if missing_indices:
-                    indices = ", ".join(str(i + 1) for i in missing_indices[:10])
-                    if len(missing_indices) > 10:
-                        indices += " 외 " + str(len(missing_indices) - 10) + "개"
-                    st.info(kind + " · 상품정보 추가 확인 " + str(len(missing_indices)) +
-                            "개 (" + indices + ") · 아래에서 누락 항목만 수정해 주세요.")
+                    if len(missing_indices) <= 10:
+                        st.info(kind + " · 상품정보 미입력 " +
+                                ", ".join(str(i + 1) for i in missing_indices) +
+                                "번 · 아래에서 누락 항목만 수정해 주세요.")
+                    else:
+                        st.info(kind + " · 상품정보 미입력 " + str(len(missing_indices)) +
+                                "개 · 첫 10개: " +
+                                ", ".join(str(i + 1) for i in missing_indices[:10]) +
+                                "번 · 아래에서 누락 항목만 수정해 주세요.")
                     for idx in missing_indices:
                         item = items[idx]
                         with st.container(border=True):
