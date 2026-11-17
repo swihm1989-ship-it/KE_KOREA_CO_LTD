@@ -710,3 +710,8 @@ Master 관리자 모니터링 메뉴에 JSON 실행 로그, 모델별 호출/응
 - 클릭하면 **선택한 문서에 있는 모든 품목의 기존 할인율을 덮어씁니다**. 원래의 거래처별 Supabase 단가, 수량, 2+1·3+1 등 증정행사 및 다른 PI/PO/CI/PL 문서는 변경하지 않습니다.
 - 일괄 적용 후 예외 상품은 기존 **상품별 할인·증정행사** 펼침 메뉴에서 다시 수정할 수 있습니다. 할인율 변경 시 기존 승인·PDF 파일은 무효화하고 문서 엔진이 합계를 재계산합니다.
 - 테스트는 0/5/10 순차 적용, 7.5% 직접 입력, 잘못된 할인율(101%) 거절, PI/PO 문서 격리, 증정행사 유지, 20개 품목 최종 PDF 반영을 확인하도록 추가했습니다.
+
+
+### MASTER PDF archive and sidebar workflow (2026-11-17)
+
+MASTER sidebar now shows: 시장 뉴스, 메일함, AI 업무 요청, 통합 업무 흐름, 문서 검토, 발송 대기, 저장된 계약서. The old sample dashboard, execution log, admin monitoring, draft preview, and engine preflight are hidden from the menu (underlying diagnostics and original engines remain untouched). Successful MASTER DRAFT PDF generation archives the exact PDF to the private Supabase bucket `kekorea-master-pdfs`, with owner-scoped metadata in `kekorea_master_pdf_archive`; FINAL PDFs are likewise archived. Saved lists show filenames, KST dates and times, click-to-preview and download. The 발송 대기 screen requires a new user approval (and the original seal authorization for contracts) before converting the immutable draft snapshot into a new PDF using the original KE KOREA rendering engine. Converted drafts leave the pending list, retaining the historical record. No automatic SMTP send. The original KE KOREA contracts database and document renderer are unchanged. New archive records require server-only Supabase credentials and a private bucket. GitHub merge is not by itself proof of live Streamlit deployment; verify the deployed menus and a fresh DRAFT -> FINAL workflow on the running app.
