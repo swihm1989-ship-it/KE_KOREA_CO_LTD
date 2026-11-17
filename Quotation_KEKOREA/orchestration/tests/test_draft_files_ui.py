@@ -1,46 +1,39 @@
-"""Streamlit smoke test: real draft file bytes in isolated preview UI."""
+"""DRAFT document generation and new pending PDF archive UI regression tests."""
 import unittest
 from unittest.mock import patch
 from pathlib import Path
-try:
-    from streamlit.testing.v1 import AppTest
-except ImportError:
-    AppTest = None
+from streamlit.testing.v1 import AppTest
+from Quotation_KEKOREA.orchestration.workflows.draft_files import create_review_files
+from Quotation_KEKOREA.orchestration.tests.test_draft_files import trade_fixture
+from Quotation_KEKOREA.contracts.models import new_snapshot
 
 UI = Path(__file__).resolve().parents[1] / "ui" / "streamlit_page.py"
 
 
-@unittest.skipUnless(AppTest is not None, "Streamlit AppTest unavailable")
 class DraftFileUiTests(unittest.TestCase):
-    def setUp(self):
-        # Only fake UI identity inside tests; never a production auth bypass.
-        gate = patch("Quotation_KEKOREA.orchestration.security.auth_gate.require_authentication",
-                     return_value="test@example.com")
-        gate.start()
-        self.addCleanup(gate.stop)
-        news = patch("Quotation_KEKOREA.orchestration.ui.market_news_page._cached_news",
-                     return_value=([], None))
-        news.start()
-        self.addCleanup(news.stop)
+    def test_trade_review_engine_is_not_replaced_by_pdf_archive(self):
+        files = create_review_files("PI", trade_fixture())
+        self.assertIn("docx", files)
+        self.assertNotIn("pdf", files)
+        self.assertFalse(files["docx"]["sendable"])
 
-    def test_trade_draft_download_from_existing_preview(self):
-        app = AppTest.from_file(str(UI), default_timeout=20).run()
-        app.radio[0].set_value("문서 초안 미리보기").run()
-        app.button(key="build_readonly_preview").click().run()
-        app.button(key="create_review_files").click().run()
-        self.assertEqual(len(app.exception), 0, [str(x.message) for x in app.exception])
-        self.assertIn("docx", app.session_state["review_file_bundle"])
-        self.assertNotIn("pdf", app.session_state["review_file_bundle"])
-        self.assertFalse(app.session_state["review_file_bundle"]["docx"]["sendable"])
+    def test_no_blank_contract_draft_is_exported(self):
+        with self.assertRaises(ValueError):
+            create_review_files("CONTRACT", new_snapshot("sample", "sale", "ko"))
 
-    def test_no_contract_draft_export_without_authored_clauses(self):
-        app = AppTest.from_file(str(UI), default_timeout=20).run()
-        app.radio[0].set_value("문서 초안 미리보기").run()
-        app.selectbox[0].set_value("CONTRACT").run()
-        app.button(key="build_readonly_preview").click().run()
-        app.button(key="create_review_files").click().run()
-        self.assertEqual(len(app.exception), 0, [str(x.message) for x in app.exception])
-        self.assertFalse(app.session_state.get("review_file_bundle"))
+    def test_pending_sidebar_is_for_real_pdfs_not_mock_email(self):
+        with patch("Quotation_KEKOREA.orchestration.security.auth_gate.require_authentication",
+                   return_value="synthetic@example.test"), patch(
+            "Quotation_KEKOREA.orchestration.ui.market_news_page._cached_news",
+            return_value=([], None)
+        ), patch(
+            "Quotation_KEKOREA.orchestration.workflows.pdf_archive.list_documents",
+            return_value=[]
+        ):
+            app = AppTest.from_file(str(UI)).run()
+            app.radio[0].set_value("발송 대기").run()
+        self.assertFalse(app.exception, [x.message for x in app.exception])
+        self.assertTrue(any("DRAFT PDF" in x.value for x in app.subheader))
 
 
 if __name__ == "__main__":
