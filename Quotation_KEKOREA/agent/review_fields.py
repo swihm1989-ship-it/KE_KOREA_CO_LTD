@@ -30,6 +30,29 @@ def field_value(data, field):
     return value
 
 
+
+def apply_common_quantity_unit(data, unit):
+    """Fill only unconfirmed line-item units after ONE explicit user choice.
+
+    Never infer a measurement unit from a numeric quantity. Existing KG, MT,
+    PCS, etc. values remain untouched; prices, discounts and paid/free amounts
+    are never recalculated or overwritten by this helper.
+    """
+    from .trade_documents import normalize_quantity_unit
+
+    canonical = normalize_quantity_unit(unit)
+    allowed = {"PCS", "SET", "KG", "MT", "BOX", "CTN", "DRUM",
+               "PALLET", "ROLL", "G", "L", "W", "WP"}
+    if canonical not in allowed:
+        raise ValueError("Select a supported quantity unit before applying to all items.")
+    changed = []
+    for index, row in enumerate(data.get("items") or []):
+        if isinstance(row, dict) and _missing(row.get("unit"), True):
+            row["unit"] = canonical
+            changed.append(index)
+    return changed
+
+
 def missing_review_fields(data):
     dtype = data.get("document_type")
     fields = [ReviewField(("document_number",), "Document number (or DRAFT)"),
