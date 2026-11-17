@@ -42,7 +42,7 @@ class MasterPdfArchiveTests(TestCase):
         upload = self.repo.upload_private_file.call_args
         self.assertEqual(upload.args[0], archive.BUCKET)
         self.assertEqual(upload.args[3], "application/pdf")
-        self.assertIn("owner@example.test", archive.owner_key("OWNER@example.test"))
+        self.assertEqual(archive.owner_key("OWNER@example.test"), archive.owner_key("owner@example.test"))
         self.assertNotIn("owner@example.test", upload.args[1])
         commit = self.repo.request.call_args
         self.assertEqual(commit.args[:2], ("POST", archive.TABLE))
