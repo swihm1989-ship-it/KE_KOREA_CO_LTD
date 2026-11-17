@@ -140,8 +140,11 @@ def _contract_final(principal: str, row: dict) -> None:
             "기존 계약서 FINAL 직인 사용 암호", type="password",
             key="pdf_contract_seal_" + row["id"],
         )
-        secret = str(os.environ.get("CONTRACT_FINAL_SEAL_PASSWORD") or
-                     st.secrets.get("CONTRACT_FINAL_SEAL_PASSWORD", ""))
+        try:
+            configured_secret = st.secrets.get("CONTRACT_FINAL_SEAL_PASSWORD", "")
+        except (FileNotFoundError, KeyError):
+            configured_secret = ""
+        secret = str(os.environ.get("CONTRACT_FINAL_SEAL_PASSWORD") or configured_secret)
         authorized = bool(secret) and hmac.compare_digest(password, secret)
     approved = st.checkbox(
         "계약서 전체 조항·당사자·거래조건을 확인하고 이 버전의 최종 발행을 승인합니다.",
