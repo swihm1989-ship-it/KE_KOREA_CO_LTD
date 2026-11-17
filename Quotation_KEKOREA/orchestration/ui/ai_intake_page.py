@@ -1463,10 +1463,22 @@ def _render_single_editor(digest: str, candidates: dict) -> None:
         # Show only CURRENT structured gaps once. Historical extraction notes
         # live in the original AI review and never count as new missing input.
         if gaps:
-            st.info("현재 입력값 재검증 · 미입력/확인 필요 " + str(len(gaps)) +
-                    "개 (선택한 전체 문서 기준)")
+            unit_gaps = [gap for gap in gaps
+                         if re.fullmatch(r"item(?:\\.\\d+)?\\.unit", gap.key)]
+            other_gaps = [gap for gap in gaps if gap not in unit_gaps]
+            if unit_gaps:
+                st.info("현재 입력값 재검증 · 수량 단위 " + str(len(unit_gaps)) +
+                        "개 (아래 일괄 적용 가능)" +
+                        (" · 그 외 누락/확인 " + str(len(other_gaps)) + "개"
+                         if other_gaps else ""))
+            else:
+                st.info("현재 입력값 재검증 · 미입력/확인 필요 " + str(len(gaps)) +
+                        "개 (선택한 전체 문서 기준)")
             with st.expander("현재 누락 항목 보기", expanded=False):
-                for gap in gaps:
+                if unit_gaps:
+                    st.write("품목 수량 단위 " + str(len(unit_gaps)) +
+                             "개 · 아래에서 단위를 한 번 선택하세요.")
+                for gap in other_gaps:
                     st.write(gap.label)
             st.caption("아래 입력값을 수정하면 자동으로 다시 검증합니다. "
                        "다른 문서에 남은 누락은 현재 PI의 최종 PDF 발행을 자동 차단하지 않습니다.")
