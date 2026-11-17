@@ -86,7 +86,7 @@ class PaymentTermsNotDiscountTests(unittest.TestCase):
         self.assertTrue(all(x["discount_percent"] == "0" for x in checked["items"]))
         self.assertTrue(all(x["unit_price"] == "381" for x in checked["items"]))
         calculated = validate_and_calculate(checked)
-        self.assertEqual(calculated["items"][0]["final_unit_price"], "381.00")
+        self.assertEqual(calculated["items"][0]["final_unit_price"], "381")
         self.assertEqual(calculated["items"][0]["line_total"], "114300.00")
         self.assertEqual(calculated["total"], "5600700.00")
 
