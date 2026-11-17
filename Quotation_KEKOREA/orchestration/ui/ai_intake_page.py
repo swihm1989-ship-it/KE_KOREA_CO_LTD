@@ -14,7 +14,7 @@ import re
 import streamlit as st
 
 from Quotation_KEKOREA.orchestration.workflows.mail_intake import (
-    extract_mail_candidates, consume_pending, fingerprint as mail_fingerprint,
+    consume_pending, fingerprint as mail_fingerprint,
 )
 from Quotation_KEKOREA.orchestration.router import DOC_TYPES, classify
 from Quotation_KEKOREA.orchestration.workflows.commercial_values import (normalize_trade_values, apply_default_list_prices, apply_bulk_discount)
@@ -39,7 +39,10 @@ TRADE_REVIEW_MODULE = "Quotation_KEKOREA.orchestration.workflows.trade_export_re
 TRADE_REVIEW_REVISION = "image-advisory-schema-fix-20261116-v5"
 MAIL_PARTY_BRIDGE_MODULE = "Quotation_KEKOREA.agent.mail_party_bridge"
 MAIL_PARTY_BRIDGE_REVISION = "master-po-party-hot-reload-20261117-v1"
-AI_INTAKE_REVISION = "master-other-product-pi-20261117-v20"
+MAIL_INTAKE_MODULE = "Quotation_KEKOREA.orchestration.workflows.mail_intake"
+MAIL_INTAKE_REVISION = "shared-ke-korea-family-20261117-v1"
+AI_WORKFLOW_REVISION = "shared-ke-korea-family-20261117-v3"
+AI_INTAKE_REVISION = "master-shared-family-mail-20261117-v21"
 # Detect a changed source file even when the cached module has the same revision.
 AI_INTAKE_SOURCE_MTIME_NS = os.stat(__file__).st_mtime_ns
 
@@ -104,12 +107,71 @@ def _current_mail_party_bridge():
     return module
 
 
+def _current_mail_intake():
+    """Use KE KOREA's extractor even after Streamlit retains pre-deploy imports.
+
+    Master provides user-approved input/attachments and displays the original
+    trade-agent's candidates. Family validation belongs ONLY to the agent.
+    """
+    try:
+        module = importlib.import_module(MAIL_INTAKE_MODULE)
+        shared = importlib.import_module(
+            "Quotation_KEKOREA.agent.trade_documents").FAMILIES
+
+        def compatible():
+            return (
+                getattr(module, "MAIL_INTAKE_REVISION", None) == MAIL_INTAKE_REVISION
+                and getattr(module, "FAMILIES", None) is shared
+                and callable(getattr(module, "extract_mail_candidates", None))
+                and getattr(module, "MAIL_INTAKE_SOURCE_MTIME_NS", None)
+                    == os.stat(module.__file__).st_mtime_ns
+            )
+
+        if not compatible():
+            importlib.invalidate_caches()
+            module = importlib.reload(module)
+        if not compatible():
+            raise RuntimeError("old mail workflow still loaded")
+    except (ImportError, OSError, AttributeError, TypeError, RuntimeError):
+        raise RuntimeError(
+            "KE KOREA 메일 추출 엔진 연결을 최신 버전으로 갱신하지 못했습니다. "
+            "현재 입력은 보존됩니다. 앱을 새로고침하거나 Manage app에서 Reboot하세요."
+        ) from None
+    return module
+
+
+def extract_mail_candidates(*args, **kwargs):
+    """Thin Master facade: forward directly to the KE KOREA mail/attachment agent."""
+    return _current_mail_intake().extract_mail_candidates(*args, **kwargs)
+
+
 def _current_ai_workflow():
-    """Keep pre-deploy workers compatible with the current workflow API."""
-    module = importlib.import_module("Quotation_KEKOREA.orchestration.workflows.ai_intake")
-    if getattr(module, "AI_WORKFLOW_REVISION", None) != "trade-missing-terms-20261113-v2":
-        importlib.invalidate_caches()
-        module = importlib.reload(module)
+    """Keep the natural-language intake adapter aligned with the same agent."""
+    try:
+        module = importlib.import_module(
+            "Quotation_KEKOREA.orchestration.workflows.ai_intake")
+        shared = importlib.import_module(
+            "Quotation_KEKOREA.agent.trade_documents").FAMILIES
+
+        def compatible():
+            return (
+                getattr(module, "AI_WORKFLOW_REVISION", None) == AI_WORKFLOW_REVISION
+                and getattr(module, "_FAMILIES", None) is shared
+                and callable(getattr(module, "make_trade_candidate", None))
+                and getattr(module, "AI_WORKFLOW_SOURCE_MTIME_NS", None)
+                    == os.stat(module.__file__).st_mtime_ns
+            )
+
+        if not compatible():
+            importlib.invalidate_caches()
+            module = importlib.reload(module)
+        if not compatible():
+            raise RuntimeError("old trade workflow still loaded")
+    except (ImportError, OSError, AttributeError, TypeError, RuntimeError):
+        raise RuntimeError(
+            "KE KOREA 거래 문서 엔진 연결을 최신 버전으로 갱신하지 못했습니다. "
+            "현재 입력은 보존됩니다. 앱을 새로고침하거나 Manage app에서 Reboot하세요."
+        ) from None
     return module
 
 
@@ -1887,7 +1949,7 @@ def render_ai_intake(principal: str):
     if not principal:
         raise PermissionError("로그인이 필요합니다.")
     st.subheader("AI 거래조건 추출 · 기존 문서 엔진 연결")
-    st.caption("화면 업데이트: 2026-11-17 · 기타 제품(other) PI·PO 지원 + 기존 단가·문서 엔진 유지")
+    st.caption("화면 업데이트: 2026-11-17 · KE KOREA 원본 문서 엔진 위임 · 기타 상품 PI·PO 오류 수정")
     st.caption("문서 작업은 이 화면에서 진행합니다. 검토용 초안과 최종 발행 문서는 기존 검증·승인 규칙에 따라 구분합니다.")
     st.caption("기존 계약서 분석 AI를 사용해 자연어에서 거래조건을 제안합니다. 확정·발행·전송은 자동으로 하지 않습니다.")
     st.info("AI 요청에는 아래 입력 내용과 직접 선택한 참고파일만 전송합니다. 저장된 계약서는 모델에 전달되지 않습니다.")
@@ -1956,8 +2018,13 @@ def render_ai_intake(principal: str):
     st.caption("감지된 문서 종류: " + (", ".join(requested) if requested else "없음 · PI/PO/CI/PL/계약서를 명시하세요"))
     language = st.radio("계약서 언어", ["한국어", "English"], horizontal=True,
                         key="ai_intake_language")
-    family = st.selectbox("무역서류 상품군", ["solar_cell", "wafer", "polysilicon",
-                                            "solar_module", "cosmetics", "other"], key="ai_intake_family")
+    # UI presentation order is fixed, but product-family *policy* is entirely
+    # the original KE KOREA document engine's single authoritative set.
+    from Quotation_KEKOREA.agent.trade_documents import FAMILIES as trade_families
+    order = ("solar_cell", "wafer", "polysilicon", "solar_module", "cosmetics", "other")
+    options = [value for value in order if value in trade_families]
+    options += sorted(trade_families - set(order))
+    family = st.selectbox("무역서류 상품군", options, key="ai_intake_family")
     config = _model_config()
     ready = bool(config.get("OPENAI_API_KEY") and
                  (config.get("OPENAI_MODEL") or config.get("CONTRACT_OPENAI_MODEL")))
