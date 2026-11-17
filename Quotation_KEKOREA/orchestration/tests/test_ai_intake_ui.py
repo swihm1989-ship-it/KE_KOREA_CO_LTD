@@ -97,6 +97,17 @@ class AiIntakeUiTests(unittest.TestCase):
             self.assertTrue(any("AI 모델 연결" in x.value for x in app.warning))
             self.assertTrue(app.button(key="ai_intake_extract").disabled)
 
+    def test_master_ai_request_supports_other_product_family_in_mobile_selector(self):
+        """A computer-parts PI should not be forced into solar/cosmetics."""
+        app = AppTest.from_file(str(PAGE), default_timeout=25).run()
+        app.radio[0].set_value("AI 업무 요청").run()
+        self.assertFalse(app.exception, [x.message for x in app.exception])
+        families = app.selectbox(key="ai_intake_family")
+        self.assertIn("other", families.options)
+        families.set_value("other").run()
+        self.assertFalse(app.exception, [x.message for x in app.exception])
+        self.assertEqual(app.selectbox(key="ai_intake_family").value, "other")
+
     def test_no_consent_means_no_api_call(self):
         with patch.dict(os.environ, {"OPENAI_API_KEY": "fake", "OPENAI_MODEL": "fake"}), patch(
             "Quotation_KEKOREA.orchestration.workflows.ai_intake.extract_candidate"
