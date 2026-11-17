@@ -5,12 +5,17 @@ No polling, sends, database writes, automatic approvals or payload logging.
 from copy import deepcopy
 from dataclasses import dataclass
 from hashlib import sha256
+import os
 import re
 from uuid import uuid4
 
+from Quotation_KEKOREA.agent.trade_documents import FAMILIES
 from Quotation_KEKOREA.orchestration.router import classify, DOC_TYPES
 from Quotation_KEKOREA.observability.core import traced
 
+# The Master mail wrapper must not retain pre-deploy product-family rules.
+MAIL_INTAKE_REVISION = "shared-ke-korea-family-20261117-v1"
+MAIL_INTAKE_SOURCE_MTIME_NS = os.stat(__file__).st_mtime_ns
 MAX_MAIL_CHARS=12000
 
 
@@ -173,7 +178,7 @@ def extract_mail_candidates(instruction,kinds,env,*,consent,language='ko',family
     kinds=classify('','',list(kinds))
     if not kinds:
         raise ValueError('준비할 문서 종류를 선택해 주세요.')
-    if family not in {'solar_cell','wafer','polysilicon','solar_module','cosmetics','other'}:
+    if family not in FAMILIES:
         raise ValueError('상품군을 확인해 주세요.')
     from Quotation_KEKOREA.agent.attachments import validate_attachments
     files=validate_attachments(list(attachments))
