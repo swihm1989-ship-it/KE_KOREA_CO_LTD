@@ -131,6 +131,20 @@ class MasterPaymentUnitHandoffRegression(unittest.TestCase):
         self.assertEqual(docs["PO"]["items"][0]["discount_percent"], "10")
         self.assertEqual(docs["PO"]["currency"], "KRW")
 
+    def test_bulk_unit_does_not_fill_unidentified_products_outside_button_count(self):
+        pi = laptop_pi(discount="0")
+        pi["items"][1]["product_name"] = None
+        app = master_ui({"PI": pi}, fresh=False,
+                        instruction="Synthetic PI line list for user verification")
+        self.assertTrue(any(b.label == "PI · 빈 단위 48개 일괄 적용"
+                            for b in app.button))
+        next(b for b in app.button
+             if b.label == "PI · 빈 단위 48개 일괄 적용").click().run()
+        self.assertFalse(app.exception, [e.message for e in app.exception])
+        rows = app.session_state["ai_intake_candidates"][1]["PI"]["items"]
+        self.assertEqual(rows[0]["unit"], "PCS")
+        self.assertIsNone(rows[1]["unit"])  # Product name requires separate evidence
+
     def test_stale_70_only_restored_after_click_and_user_discount_stays_editable(self):
         app = master_ui({"PI": laptop_pi(unit="PCS", price_basis="PCS")}, fresh=False)
         rows = app.session_state["ai_intake_candidates"][1]["PI"]["items"]
