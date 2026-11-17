@@ -95,6 +95,13 @@ class PublicQuantityUnitUiTests(unittest.TestCase):
         from streamlit.testing.v1 import AppTest
         app_path = Path(__file__).resolve().parents[1] / "app.py"
         doc = laptop_order()
+        # Screenshot also had optional PI country/shipment and buyer phone
+        # missing, plus an empty invoice identifier. They must not require
+        # 49 separate edits or block DRAFT after the unit is confirmed.
+        doc["document_number"] = None
+        doc["country_of_origin"] = None
+        doc["shipment_reference"] = None
+        doc["buyer"]["phone"] = None
         env = {"OPENAI_API_KEY": "TEST", **{f"KEKOREA_USD_{name}": "TEST"
                for name in ("BENEFICIARY", "BANK_NAME", "BRANCH", "SWIFT",
                             "ACCOUNT_NUMBER", "BANK_ADDRESS")}}
@@ -120,6 +127,10 @@ class PublicQuantityUnitUiTests(unittest.TestCase):
             self.assertFalse(at.exception, [x.message for x in at.exception])
             effective = json.loads(at.session_state["rendered_json"])["document"]
             self.assertEqual(len(effective["items"]), 49)
+            self.assertEqual(effective["document_number"], "DRAFT")
+            self.assertIsNone(effective["country_of_origin"])
+            self.assertIsNone(effective["shipment_reference"])
+            self.assertIsNone(effective["buyer"]["phone"])
             self.assertTrue(all(row["unit"] == "PCS" for row in effective["items"]))
             self.assertEqual(effective["items"][0]["paid_quantity"], "91")
             self.assertEqual(effective["items"][0]["final_unit_price"], "2600")
