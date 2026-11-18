@@ -49,7 +49,7 @@ class MasterReplyRevisionSyncTests(unittest.TestCase):
                  "source_subject":mail.subject,"source_body":mail.body}
         with (
             patch("Quotation_KEKOREA.orchestration.security.auth_gate.require_authentication",
-                  return_value="owner@example.test"),
+                  return_value="owner@example.com"),
             patch("Quotation_KEKOREA.orchestration.ui.market_news_page._cached_news",
                   return_value=([], None)),
             patch("Quotation_KEKOREA.orchestration.ui.mailbox_page._settings",
