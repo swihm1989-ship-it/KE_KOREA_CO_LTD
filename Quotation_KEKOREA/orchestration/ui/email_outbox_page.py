@@ -216,6 +216,17 @@ def render_email_outbox(principal: str):
                 if config.smtp is None:
                     st.error("SMTP 호스트·계정 설정이 필요합니다. 전송된 메일은 없습니다.")
                 else:
+                    endpoint=config.smtp
+                    # Host/port/mode are public connection metadata. Never
+                    # print username, SMTP password or raw TLS exceptions.
+                    st.caption("검사 대상 SMTP: "+str(endpoint.host)+" : "+
+                               str(endpoint.port)+" · "+
+                               ("STARTTLS" if endpoint.security=="starttls"
+                                else "SSL/TLS")+" · 계정 암호 비공개")
+                    if (endpoint.port==465 and endpoint.security=="starttls") or (
+                            endpoint.port==587 and endpoint.security=="ssl"):
+                        st.warning("일반적인 SMTP 포트·암호화 방식 조합과 다릅니다. "
+                                   "현재 서비스의 공식 서버 설정을 확인하세요.")
                     with st.spinner("SMTP 연결·인증을 검사합니다. 실제 메일은 전송하지 않습니다."):
                         probe_smtp(config.smtp)
                     st.success("SMTP TLS 연결과 로그인 성공. 메일은 보내지 않았습니다. "
