@@ -13,7 +13,7 @@ import socket
 import smtplib
 import ssl
 
-SMTP_DIAGNOSTIC_REVISION = "smtp-starttls-20261112-v3"
+SMTP_DIAGNOSTIC_REVISION = "smtp-safe-ssl-reasons-20261118-v4"
 POP_DIAGNOSTIC_REVISION = "pop-health-20261113-v4"
 POP_FETCH_REVISION = "pop-fetch-older-fallback-20261113-v1"
 
@@ -314,9 +314,15 @@ def probe_smtp(endpoint: Endpoint) -> None:
             "SSLV3_ALERT_HANDSHAKE_FAILURE": "TLS 핸드셰이크 거부",
         }
         kind = known_reasons.get(reason, "TLS 핸드셰이크 오류")
+        mode = "STARTTLS" if endpoint.security == "starttls" else "SSL/TLS"
+        # Report only the standardized SSL reason, never the server message,
+        # credentials or raw exception contents.
+        safe_reason = reason if reason in known_reasons else "OTHER_SSL_ERROR"
         raise MailConnectionError(
-            "SMTP STARTTLS 명령 이후 " + kind +
-            ": 서버 TLS 정책 또는 네트워크 중간장비를 확인하세요."
+            "SMTP " + mode + " " + stage + " 단계 " + kind +
+            " (원인코드: " + safe_reason + "). "
+            "SMTP 서버 주소·포트·암호화 방식이 후이즈 계정 상품과 일치하는지 "
+            "확인하세요. 인증서 검증을 끄지 마세요."
         ) from None
     except smtplib.SMTPResponseException as exc:
         code = getattr(exc, "smtp_code", None)
