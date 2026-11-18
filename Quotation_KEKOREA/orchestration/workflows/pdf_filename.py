@@ -61,7 +61,7 @@ def _item(source):
                          if first.get(key) is not None and str(first.get(key)).strip() != ""), "")
     quantity=_part(quantity_value,22)
     unit=_part(first.get("unit"),12)
-    amount=(quantity+" "+unit).strip()
+    amount=(quantity+" "+unit).strip() if quantity else ""
     if amount:
         return (product+"("+amount+")") if product else "("+amount+")"
     return product
