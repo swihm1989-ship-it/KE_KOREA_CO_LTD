@@ -83,7 +83,13 @@ def click_and_check():
             # THIS IS MOCK TRANSPORT, NEVER REAL SMTP.
             send.click()
             expect(page.get_by_text("mock-send-count: 1")).to_be_visible()
-            expect(page.get_by_text("미발송 메일이 없습니다.")).to_be_visible()
+            # After sending, the explicitly owner-accessible historical row
+            # remains visible for deliberate repeat-send/delete. No automatic
+            # second SMTP action is permitted during page rerenders.
+            expect(page.get_by_role("button",name="같은 메일로 새 발송 건 작성")).to_be_visible()
+            expect(page.get_by_text("이전 발송 기록은 그대로 보관됩니다.",exact=False)).to_be_visible()
+            page.reload()
+            expect(page.get_by_text("mock-send-count: 1")).to_be_visible()
             page.screenshot(path=str(OUTPUT/"05_mock_sent_once.png"),full_page=True)
             print("MASTER_BROWSER_UI_SMOKE_OK: draft, consent, synthetic AI, 3 candidates,"
                   " editable text, approval gate, exactly one mocked send")
