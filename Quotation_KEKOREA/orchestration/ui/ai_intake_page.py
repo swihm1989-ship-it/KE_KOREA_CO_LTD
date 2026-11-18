@@ -57,7 +57,7 @@ def _log_trade_final_render_failure(kind: str, exc: Exception) -> None:
 def _ensure_trade_extractor_current() -> bool:
     """Reload the trade extractor if Streamlit retains the pre-deploy 90s code."""
     module = importlib.import_module("Quotation_KEKOREA.agent.extractor")
-    expected_revision = "master-long-image-timeout-20261117-v1"
+    expected_revision = "master-conditional-vision-recheck-20261118-v2"
     source_mtime = os.stat(module.__file__).st_mtime_ns
     stale = (getattr(module, "TRADE_EXTRACTOR_REVISION", None) != expected_revision
              or getattr(module, "TRADE_EXTRACTOR_SOURCE_MTIME_NS", None) != source_mtime)
