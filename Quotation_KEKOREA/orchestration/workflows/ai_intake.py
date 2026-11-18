@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 import re
-AI_WORKFLOW_REVISION = "shared-ke-korea-family-20261118-v4"
+AI_WORKFLOW_REVISION = "shared-ke-korea-family-20261118-v5"
 AI_WORKFLOW_SOURCE_MTIME_NS = os.stat(__file__).st_mtime_ns
 from Quotation_KEKOREA.observability.core import traced
 from copy import deepcopy
