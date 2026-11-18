@@ -9,7 +9,7 @@ from pathlib import Path
 import os
 import streamlit as st
 
-REPLY_RUNTIME_REVISION = "master-reply-20261118-live-diagnostic-v1"
+REPLY_RUNTIME_REVISION = "master-reply-20261118-http400-schema-v2"
 REPLY_SOURCE_MTIME_NS = Path(__file__).stat().st_mtime_ns
 
 from Quotation_KEKOREA.orchestration.workflows.document_assets import document_export_env

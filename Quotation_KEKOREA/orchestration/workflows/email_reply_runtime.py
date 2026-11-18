@@ -14,7 +14,7 @@ import re
 import urllib.error
 import urllib.request
 
-REPLY_RUNTIME_REVISION = "master-reply-20261118-live-diagnostic-v1"
+REPLY_RUNTIME_REVISION = "master-reply-20261118-http400-schema-v2"
 DRAFT_MODULE = "Quotation_KEKOREA.orchestration.workflows.email_reply_drafts"
 HANDOFF_MODULE = "Quotation_KEKOREA.orchestration.workflows.email_reply_handoff"
 MAIL_UI_MODULE = "Quotation_KEKOREA.orchestration.ui.email_outbox_page"
@@ -83,10 +83,10 @@ def status(env):
 
 
 def probe_connection(env, *, opener=None):
-    """Explicit user-triggered Responses API probe with dummy input only.
+    """Explicitly clicked, dummy-only OpenAI Responses API compatibility check.
 
-    No user email text is sent, no SMTP action occurs, and no server response
-    body is shown in a UI. Small model usage may be billed.
+    No original customer messages, real contacts, SMTP actions or API keys
+    are logged or displayed. Can consume a small number of model tokens.
     """
     key = str(env.get("OPENAI_API_KEY") or "").strip()
     model = configured_model(env)
@@ -94,70 +94,69 @@ def probe_connection(env, *, opener=None):
         return "설정 오류: OPENAI_API_KEY가 없습니다."
     if not model:
         return "설정 오류: CONTRACT_OPENAI_MODEL 또는 OPENAI_MODEL이 없습니다."
-    # Same Responses endpoint and JSON mode used by the real generator, but
-    # with completely synthetic data, no inbox, customer or transaction text.
+    provider = _drafts()  # Ensure cached module is current after Streamlit hot-deploy.
+    _post_response = provider._post_response
+    _safe_http_failure = provider._safe_http_failure
     payload = {
         "model": model,
-        "instructions": "Reply with a short JSON object containing exactly one boolean field named ok set to true.",
+        "instructions": "Respond with a JSON object with exactly one boolean property named ok, set to true.",
         "input": [{"role": "user", "content": "Synthetic connectivity test. No personal or customer data."}],
-        "text": {"format": {"type": "json_object"}},
+        "text": {"format": {
+            "type": "json_schema",
+            "name": "mail_reply_connection_probe",
+            "strict": True,
+            "schema": {
+                "type": "object",
+                "properties": {"ok": {"type": "boolean"}},
+                "required": ["ok"],
+                "additionalProperties": False,
+            },
+        }},
         "max_output_tokens": 256,
         "store": False,
     }
-    request = urllib.request.Request(
-        "https://api.openai.com/v1/responses",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"},
-        method="POST",
-    )
+    used_plain_text = False
+    first_format_failure = None
     try:
-        with (opener or urllib.request.urlopen)(request, timeout=25) as response:
-            raw = response.read(25001)
-        if len(raw)>25000:
-            return "진단 실패: 모델 응답이 너무 큽니다."
-        result = json.loads(raw.decode("utf-8"))
-    except urllib.error.HTTPError as error:
-        http_code = error.code
-        # Keep only allowlisted structured provider identifiers, never provider
-        # message text, request body, mailbox content or credential values.
-        hint = ""
         try:
-            detail = json.loads(error.read(4096).decode("utf-8"))
-            data = detail.get("error", {}) if isinstance(detail, dict) else {}
-            codes = [str(data.get(k, "")) for k in ("code", "param")] if isinstance(data, dict) else []
-            identifiers = [v for v in codes if re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", v)]
-            if identifiers:
-                hint = " (" + ", ".join(identifiers) + ")"
-        except (OSError, UnicodeError, ValueError, TypeError):
-            pass
-        finally:
-            error.close()
-        names = {
-            400: "모델·응답 형식 또는 요청 옵션 오류",
-            401: "API 키 오류 또는 만료",
-            403: "API 모델 접근 권한 문제",
-            404: "모델을 찾지 못하거나 접근 권한 없음",
-            429: "API 사용량·요금 한도 초과",
-            500: "OpenAI 서버 일시 오류",
-            502: "OpenAI 서버 일시 오류",
-            503: "OpenAI 서버 일시 오류",
-        }
-        return "진단 실패 (HTTP "+str(http_code)+"): "+names.get(http_code,"API 응답 오류")+hint
+            result = _post_response(payload, key, opener or urllib.request.urlopen, timeout=25)
+        except urllib.error.HTTPError as error:
+            failure = _safe_http_failure(error)
+            if not failure["format_rejected"]:
+                return "진단 실패: " + failure["message"]
+            first_format_failure = failure
+            fallback = dict(payload)
+            fallback["text"] = {"format": {"type": "text"}}
+            used_plain_text = True
+            try:
+                result = _post_response(fallback, key, opener or urllib.request.urlopen, timeout=25)
+            except urllib.error.HTTPError as retry_error:
+                retry = _safe_http_failure(retry_error)
+                # Preserve first failure's safe identifier when the provider
+                # does not provide another useful error code/param.
+                detail = retry["message"]
+                if not retry["code"] and not retry["param"]:
+                    detail += " · 최초 형식 오류: " + first_format_failure["message"]
+                return "진단 실패: " + detail
     except (urllib.error.URLError, OSError, TimeoutError):
         return "진단 실패: AI 서버 연결 또는 요청 시간 초과"
     except (UnicodeError, json.JSONDecodeError):
         return "진단 실패: AI 서버 응답을 읽을 수 없습니다."
+    except RuntimeError as error:
+        return "진단 실패: " + str(error)[:220]
     try:
         if not isinstance(result, dict) or result.get("status") != "completed":
             return "진단 실패: AI 요청이 완료되지 않았습니다."
         parts = [
-            x.get("text","")
-            for item in result.get("output",[]) if isinstance(item,dict)
-            for x in item.get("content",[]) if isinstance(x,dict) and x.get("type")=="output_text"
+            x.get("text", "")
+            for item in result.get("output", []) if isinstance(item, dict)
+            for x in item.get("content", []) if isinstance(x, dict) and x.get("type") == "output_text"
         ]
         probe_json = json.loads("".join(parts))
     except (ValueError, TypeError, KeyError):
         return "진단 실패: 모델이 요청한 JSON 응답을 만들지 못했습니다."
-    if not isinstance(probe_json,dict) or probe_json.get("ok") is not True:
+    if not isinstance(probe_json, dict) or probe_json.get("ok") is not True:
         return "진단 실패: AI 모델 응답 형식이 올바르지 않습니다."
+    if used_plain_text:
+        return "진단 성공: API 인증·모델 응답 정상 (구조화 형식 대신 일반 텍스트 호환 방식 사용)"
     return "진단 성공: API 인증·모델 응답 정상. 실제 메일 회신 생성은 별도 확인이 필요합니다."

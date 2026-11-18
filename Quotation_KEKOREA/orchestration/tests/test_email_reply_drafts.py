@@ -81,6 +81,111 @@ class EmailDraftTests(unittest.TestCase):
         self.assertEqual(data["model"],"contract-model")
         self.assertFalse(data["store"])
 
+    def test_openai_responses_format_uses_strict_json_schema(self):
+        opener=Mock(return_value=FakeResponse())
+        draft.generate_candidates(self.source,self.env,"ko",opener=opener)
+        payload=json.loads(opener.call_args.args[0].data.decode("utf-8"))
+        format_=payload["text"]["format"]
+        self.assertEqual(format_["type"],"json_schema")
+        self.assertEqual(format_["name"],"mail_reply_candidates")
+        self.assertTrue(format_["strict"])
+        self.assertEqual(format_["schema"]["required"],["candidates"])
+        self.assertFalse(format_["schema"]["additionalProperties"])
+        self.assertFalse(payload["store"])
+        self.assertEqual(payload["model"],"dummy-model")
+
+    def test_http400_unsupported_json_schema_retries_exactly_once_as_text(self):
+        from io import BytesIO
+        import urllib.error
+        error=urllib.error.HTTPError(
+            "https://api.openai.com/v1/responses",400,"secret from provider",None,
+            BytesIO(json.dumps({"error":{
+                "code":"unsupported_parameter",
+                "param":"text.format.type",
+                "message":"The model does not support json_schema; private customer data"
+            }}).encode("utf-8"))
+        )
+        opener=Mock(side_effect=[error,FakeResponse()])
+        options=draft.generate_candidates(self.source,self.env,"ko",opener=opener)
+        self.assertEqual(len(options),3)
+        self.assertEqual(opener.call_count,2)
+        first=json.loads(opener.call_args_list[0].args[0].data.decode("utf-8"))
+        second=json.loads(opener.call_args_list[1].args[0].data.decode("utf-8"))
+        self.assertEqual(first["text"]["format"]["type"],"json_schema")
+        self.assertEqual(second["text"]["format"]["type"],"text")
+        self.assertFalse(first["store"])
+        self.assertFalse(second["store"])
+        self.assertEqual(first["input"],second["input"])
+        self.assertEqual(first["model"],second["model"])
+        self.assertNotIn("private customer",str(options))
+
+    def test_http400_nonformat_error_is_actionable_and_never_retried(self):
+        from io import BytesIO
+        import urllib.error
+        error=urllib.error.HTTPError(
+            "https://api.openai.com/v1/responses",400,"private value",None,
+            BytesIO(json.dumps({"error":{
+                "code":"invalid_request_error", "param":"model",
+                "message":"private-key 1234 and the entire original email"
+            }}).encode("utf-8"))
+        )
+        opener=Mock(side_effect=error)
+        with self.assertRaises(RuntimeError) as caught:
+            draft.generate_candidates(self.source,self.env,"ko",opener=opener)
+        msg=str(caught.exception)
+        self.assertIn("HTTP 400",msg)
+        self.assertIn("code=invalid_request_error",msg)
+        self.assertIn("param=model",msg)
+        self.assertNotIn("private-key",msg)
+        self.assertNotIn("original email",msg)
+        self.assertEqual(opener.call_count,1)
+
+    def test_http400_format_retry_failure_still_preserves_api_details(self):
+        from io import BytesIO
+        import urllib.error
+        def fake_error(param):
+            return urllib.error.HTTPError(
+                "https://api.openai.com/v1/responses",400,"never display",None,
+                BytesIO(json.dumps({"error":{
+                    "code":"unsupported_parameter", "param":param,
+                    "message":"secret API response details"
+                }}).encode("utf-8"))
+            )
+        opener=Mock(side_effect=[
+            fake_error("text.format"),fake_error("model")
+        ])
+        with self.assertRaises(RuntimeError) as caught:
+            draft.generate_candidates(self.source,self.env,"en",opener=opener)
+        self.assertIn("param=model",str(caught.exception))
+        self.assertIn("호환 출력 형식",str(caught.exception))
+        self.assertNotIn("secret",str(caught.exception))
+        self.assertEqual(opener.call_count,2)
+
+    def test_text_fallback_accepts_one_complete_json_code_fence_only(self):
+        from io import BytesIO
+        import urllib.error
+        body=json.dumps({"candidates":[
+            {"body":"Professional response number 1 with enough detail."},
+            {"body":"Professional response number 2 with enough detail."},
+            {"body":"Professional response number 3 with enough detail."},
+        ]})
+        class FencedResponse(FakeResponse):
+            def read(self,*_args):
+                return json.dumps({
+                    "status":"completed",
+                    "output":[{"content":[{"type":"output_text",
+                      "text":"```json\n"+body+"\n```"}]}],
+                }).encode("utf-8")
+        error=urllib.error.HTTPError(
+            "https://api.openai.com/v1/responses",400,"hidden",None,
+            BytesIO(json.dumps({"error":{
+                "param":"text.format","code":"unsupported_parameter",
+                "message":"Model does not support json_schema"
+            }}).encode("utf-8")))
+        opener=Mock(side_effect=[error,FencedResponse()])
+        result=draft.generate_candidates(self.source,self.env,"en",opener=opener)
+        self.assertEqual(len(result),3)
+
     def test_signature_attaches_once_after_editor(self):
         result=draft.join_signature("We will check.","en")
         self.assertIn("KE Korea Co. Ltd",result)
