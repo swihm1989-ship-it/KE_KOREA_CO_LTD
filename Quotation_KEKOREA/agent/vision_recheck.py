@@ -85,6 +85,16 @@ def recheck_reasons(candidate, *, document_type=None):
         quote = str(row.get("source") or "")
         if not quote:
             return [f"item_{i}_source"]
+        # Model-number and variant mismatches also merit a visual re-read:
+        # two variants can share a supplier SKU or have near-identical names.
+        code = str(row.get("product_code") or "").strip()
+        if code and re.sub(r"\s+", "", code).casefold() not in re.sub(
+                r"\s+", "", quote).casefold():
+            return [f"item_{i}_code_not_in_source"]
+        capacity = str(row.get("capacity") or "").strip()
+        if capacity and re.sub(r"\s+", "", capacity).casefold() not in re.sub(
+                r"\s+", "", quote).casefold():
+            return [f"item_{i}_capacity_not_in_source"]
         quoted = {_number(token) for token in _PRINTED_NUMBERS.findall(quote)}
         for field in ("quantity", "unit_price"):
             if field == "unit_price" and kind == "PL":
