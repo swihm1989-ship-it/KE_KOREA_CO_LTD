@@ -40,8 +40,8 @@ MAIL_PARTY_BRIDGE_MODULE = "Quotation_KEKOREA.agent.mail_party_bridge"
 MAIL_PARTY_BRIDGE_REVISION = "master-po-party-hot-reload-20261117-v1"
 MAIL_INTAKE_MODULE = "Quotation_KEKOREA.orchestration.workflows.mail_intake"
 MAIL_INTAKE_REVISION = "shared-trade-payment-unit-20261117-v2"
-AI_WORKFLOW_REVISION = "shared-ke-korea-family-20261118-v4"
-AI_INTAKE_REVISION = "master-contract-rag-health-20261118-v24"
+AI_WORKFLOW_REVISION = "shared-ke-korea-family-20261118-v5"
+AI_INTAKE_REVISION = "master-priced-rows-contract-cache-20261118-v25"
 # Detect a changed source file even when the cached module has the same revision.
 AI_INTAKE_SOURCE_MTIME_NS = os.stat(__file__).st_mtime_ns
 
@@ -507,6 +507,20 @@ def _remember_candidate_bundle(digest: str, candidate_map: dict, *, replace_edit
         st.session_state.pop("ai_intake_followup_error", None)
     candidate_map = {kind: normalize_trade_values(data) if kind in {"PI", "PO", "CI", "PL"} else data
                      for kind, data in candidate_map.items()}
+    # A provider can incorrectly collapse three independently priced items
+    # into one product and assign it the last quantity/price. Restore ONLY rows
+    # explicitly named, priced and quantified in the user-typed instruction.
+    # This happens before the original ECLADO catalog/price policy runs.
+    if source_extraction:
+        from Quotation_KEKOREA.orchestration.workflows.source_line_items import (
+            restore_explicit_priced_rows,
+        )
+        candidate_map, recovered_count = restore_explicit_priced_rows(
+            candidate_map, st.session_state.get("ai_intake_instruction") or "")
+        if recovered_count:
+            st.session_state["ai_intake_source_line_recovered"] = recovered_count
+        else:
+            st.session_state.pop("ai_intake_source_line_recovered", None)
     # Only a NEW provider extraction may be corrected from the source request.
     # Re-rendering, JSON corrections and per-item human discounts must retain
     # their already-edited values. Never let 30%/70% payment terms set a rate.
@@ -1549,6 +1563,10 @@ def _render_single_editor(digest: str, candidates: dict) -> None:
         if item_count:
             st.markdown("##### 추출된 상품 목록")
             st.caption("상품명·규격·수량·가격을 한눈에 비교하세요. 필요한 행만 아래 상세 수정에서 고칠 수 있습니다.")
+            recovered = st.session_state.get("ai_intake_source_line_recovered")
+            if recovered:
+                st.info("AI가 합쳐서 추출한 품목을 원본 요청의 개별 수량·단가로 "
+                        + str(recovered) + "개 복구했습니다. 출고·발행 전 원본과 확인해 주세요.")
             from Quotation_KEKOREA.agent.review_fields import _missing
             for kind, doc in candidates.items():
                 if kind not in {"PI", "PO", "CI", "PL"} or not isinstance(doc, dict):

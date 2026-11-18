@@ -6,6 +6,8 @@ import urllib.error
 import urllib.request
 from copy import deepcopy
 from math import isfinite
+
+CONTRACT_DRAFT_SCHEMA_REVISION = "master-contract-draft-recovery-20261118-v1"
 from uuid import uuid4
 
 from Quotation_KEKOREA.contracts.models import CONTRACT_TYPES, validate_snapshot
