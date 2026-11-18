@@ -42,6 +42,8 @@ def click_and_check():
             # Streamlit renders hidden text inside its selectbox menu as well;
             # assert the visible sender caption rather than a hidden option.
             expect(page.get_by_text("받은 사람: Mock buyer",exact=False)).to_be_visible()
+            expect(page.get_by_text("PI-FINAL-SYNTHETIC.pdf",exact=False)).to_be_visible()
+            expect(page.get_by_text("요청하신 PI 최종 PDF를 첨부합니다.",exact=False)).to_be_visible()
             send=page.get_by_role("button",name="발송",exact=True)
             expect(send).to_be_disabled()
             page.screenshot(path=str(OUTPUT/"01_draft_no_ai.png"),full_page=True)
