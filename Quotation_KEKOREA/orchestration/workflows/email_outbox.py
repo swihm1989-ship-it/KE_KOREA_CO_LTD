@@ -238,7 +238,7 @@ def send_smtp(config,recipient:str,subject:str,body:str,message_id:str="",*,
         client.login(config.smtp.username,config.smtp.password)
         stage="send_message"
         result=client.send_message(email)
-        if result:
+        if isinstance(result,dict) and result:
             # Some recipients might have been accepted. Never retry.
             raise OutboxError("SMTP에서 일부 수신자가 거부됐습니다. 실제 전송 여부를 확인하세요.")
     except Exception as exc:
