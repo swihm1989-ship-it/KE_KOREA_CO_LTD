@@ -304,6 +304,13 @@ def analyze_trade(messages, current_snapshot, reference_context, *, env, client=
         # instead of dropping an entire valid 3-line order. Never coerce
         # booleans, nested objects, unit symbols or currency codes.
         if allow_numeric_terms and type(value) in (int, float):
+            if str(term.get("key")) not in {
+                "quantity", "unit_price", "contract_duration",
+                "monthly_quantity_mt", "total_contract_quantity",
+                "total_contract_value", "commission_fee", "commission_rate",
+                "discount_percent", "price", "amount",
+            }:
+                raise ValueError("Contract AI returned a non-text field that is not a numeric trade term.")
             if type(value) is float and not isfinite(value):
                 raise ValueError("Contract AI returned a non-finite numeric term.")
             term["value"] = str(value)
