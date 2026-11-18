@@ -193,6 +193,25 @@ class VisionRecheckTests(unittest.TestCase):
         self.assertTrue(_same("PCS", "EA", "unit"))
         self.assertFalse(_same("00229", "229", "product_code"))
 
+    def test_same_sku_with_different_english_product_name_needs_review(self):
+        misread = dict(audit_item())
+        misread["product_name"] = "Exo Clinica Cream"
+        out, requests = self.run_extract(
+            first([item(source=None)]), second([misread]),
+            attachments=[{"mime_type": "image/png", "name": "order.png", "data": b"image"}])
+        self.assertEqual(len(requests), 2)
+        self.assertTrue(any("상품명" in x for x in out["conflicts"]))
+        self.assertEqual(out["items"][0]["product_name"], "Suncream")
+
+    def test_translation_across_scripts_is_not_a_false_name_discrepancy(self):
+        translated = dict(audit_item())
+        translated["product_name"] = "防晒霜"
+        out, requests = self.run_extract(
+            first([item(source=None)]), second([translated]),
+            attachments=[{"mime_type": "image/png", "name": "order.png", "data": b"image"}])
+        self.assertEqual(len(requests), 2)
+        self.assertFalse(any("상품명" in x for x in out["conflicts"]))
+
     def test_pdf_source_rerendered_to_original_page_pixels(self):
         pdf = pymupdf.open()
         page = pdf.new_page()
