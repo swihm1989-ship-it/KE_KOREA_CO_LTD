@@ -55,6 +55,9 @@ def extract_candidate(instruction: str, env: Mapping[str, str], *, consent: bool
 def _validated_analysis(analysis: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(analysis, Mapping):
         raise ValueError("추출 결과는 JSON 객체여야 합니다.")
+    # Never mutate the original raw extraction while normalizing party roles.
+    # The live UI keeps the raw result for human comparison with edited drafts.
+    analysis = deepcopy(dict(analysis))
     if analysis.get("contract_type") not in {"sale", "trade_commission", "investment_commission"}:
         raise ValueError("지원하지 않는 계약 유형입니다.")
     parties, terms = analysis.get("parties"), analysis.get("terms")
