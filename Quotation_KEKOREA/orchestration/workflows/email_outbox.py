@@ -314,11 +314,16 @@ def send_smtp(config,recipient:str,subject:str,body:str,message_id:str="",*,
                 raise OutboxError("PDF 첨부파일 형식이 유효하지 않습니다.")
             email.add_attachment(data,maintype="application",subtype="pdf",
                                  filename=filename)
-        from Quotation_KEKOREA.orchestration.adapters.whois_mail import (
-            _whois_legacy_dh_context,
-        )
-        tls=(_whois_legacy_dh_context(config.smtp) if allow_legacy_dh
-             else ssl.create_default_context())
+        if allow_legacy_dh:
+            # Streamlit may still hold the old WHOIS module after a hot deploy.
+            import importlib
+            from Quotation_KEKOREA.orchestration.adapters import whois_mail as _mail
+            if not callable(getattr(_mail, "_whois_legacy_dh_context", None)):
+                importlib.invalidate_caches()
+                _mail=importlib.reload(_mail)
+            tls=_mail._whois_legacy_dh_context(config.smtp)
+        else:
+            tls=ssl.create_default_context()
         stage="connect"
         if config.smtp.security=="ssl":
             client=smtplib.SMTP_SSL(config.smtp.host,config.smtp.port,timeout=20,context=tls)
