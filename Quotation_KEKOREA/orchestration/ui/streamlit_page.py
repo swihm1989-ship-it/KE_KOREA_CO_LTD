@@ -61,7 +61,9 @@ if st.session_state.pop("master_reply_navigation_pending", False):
     st.session_state["master_page"] = "발송 대기"
     if st.session_state.get("master_reply_selected"):
         st.session_state["master_email_outbox_selected"] = st.session_state["master_reply_selected"]
-_master_menu = ["시장 뉴스", "메일함", "AI 업무 요청", "통합 업무 흐름", "문서 검토", "발송 대기", "저장된 계약서"]
+# Operational sidebar only. Legacy unified-review and mock document-review
+# handlers below remain in source for developer regression tests.
+_master_menu = ["시장 뉴스", "메일함", "AI 업무 요청", "발송 대기", "저장된 계약서"]
 if st.session_state.get("master_page") not in (None, *_master_menu):
     st.session_state["master_page"] = "AI 업무 요청"
 page = st.sidebar.radio("업무 메뉴", _master_menu, label_visibility="collapsed", key="master_page")
