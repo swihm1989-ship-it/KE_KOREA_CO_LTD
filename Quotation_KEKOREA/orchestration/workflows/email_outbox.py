@@ -55,6 +55,10 @@ def _predata_message(stage: str, exc: Exception) -> str:
                 "서버 호스트·포트·TLS 설정을 확인하세요.")
     if isinstance(exc, ssl.SSLCertVerificationError):
         return "SMTP 인증서 검증 실패. 메일은 전송되지 않았습니다. 서버 TLS 설정을 확인하세요."
+    if isinstance(exc, ssl.SSLError) and getattr(exc,"reason","")=="DH_KEY_TOO_SMALL":
+        return ("후이즈 SMTP 서버가 TLS 1.2에서 1024비트 DH 키를 제공하여 "
+                "현재 클라우드 보안 기준으로 거부됐습니다. 메일은 발송되지 않았습니다. "
+                "서버 업그레이드를 요청하거나 발송 대기에서 명시적 구형 TLS 호환 옵션을 검토하세요.")
     if isinstance(exc, (TimeoutError, ConnectionError)):
         return (f"SMTP {stage} 단계 응답 시간 초과/연결 실패. "
                 "메일은 전송되지 않았습니다. 서버 연결을 확인하세요.")
