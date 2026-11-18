@@ -21,31 +21,8 @@ from Quotation_KEKOREA.orchestration.workflows.email_outbox import (
 )
 
 def _clear_send_approval(ident: str):
-    """Edits invalidate prior recipient/body approval."""
-    st.session_state["master_reply_confirm_"+ident] = False
-    st.session_state.pop("master_reply_confirm_digest_"+ident, None)
-
-
-def _capture_send_approval(ident: str, to_key: str, subject_key: str,
-                           body_key: str, signature_key: str):
-    """Bind consent to the exact CURRENT widget values on user click."""
-    marker="master_reply_confirm_"+ident
-    saved="master_reply_confirm_digest_"+ident
-    if not st.session_state.get(marker):
-        st.session_state.pop(saved,None)
-        return
-    recipient=str(st.session_state.get(to_key) or "").strip()
-    subject=str(st.session_state.get(subject_key) or "").strip()
-    body=str(st.session_state.get(body_key) or "").strip()
-    signature=str(st.session_state.get(signature_key) or "").strip()
-    if not body or not signature:
-        st.session_state[marker]=False
-        st.session_state.pop(saved,None)
-        return
-    combined=body+"\n\n"+signature
-    st.session_state[saved]=sha256(
-        ("\0".join((recipient,subject,combined))).encode("utf-8")
-    ).hexdigest()[:20]
+    """Any email edit invalidates the exact-value send approval."""
+    st.session_state.pop("master_reply_approved_digest_"+ident, None)
 
 
 def _db_env():
@@ -210,17 +187,22 @@ def render_email_outbox(principal: str):
     with st.expander("일반 텍스트 메일 미리보기"):
         st.code(final_body, language=None)
 
-    # A stable checkbox key avoids losing the click when Streamlit batches a
-    # textarea blur and approval in one event. Exact-value digest is retained.
+    # Approval is a separate deliberate BUTTON click, not a checkbox whose
+    # state can be lost when Streamlit batches a text edit + checkbox event.
+    # The exact current recipient/subject/body/signature is hashed and any
+    # subsequent edit invalidates the stored approval before sending.
     digest=sha256(("\0".join((recipient,subject,final_body))).encode()).hexdigest()[:20]
-    checked=st.checkbox(
-        "받는 사람·제목·본문·서명을 모두 확인했습니다. 발송 버튼을 누르면 실제 이메일이 전송됩니다.",
-        key="master_reply_confirm_"+chosen_id,
-        on_change=_capture_send_approval,
-        args=(chosen_id,to_key,sub_key,body_key,sig_key),
-    )
-    approved=(checked and st.session_state.get(
-        "master_reply_confirm_digest_"+chosen_id)==digest)
+    approved_key="master_reply_approved_digest_"+chosen_id
+    if st.button("이 내용으로 발송 전 승인",type="secondary",
+                 disabled=not body.strip() or not signature.strip(),
+                 key="master_reply_approve_"+chosen_id):
+        st.session_state[approved_key]=digest
+        st.rerun()
+    approved=(st.session_state.get(approved_key)==digest)
+    if approved:
+        st.success("현재 받는 사람·제목·본문·서명이 확인되었습니다. 아래 발송 버튼을 누를 때만 전송됩니다.")
+    else:
+        st.caption("내용을 확인한 뒤 '이 내용으로 발송 전 승인'을 누르면 발송 버튼이 활성화됩니다.")
     if st.button("발송",type="primary",disabled=not approved or not body.strip(),
                  key="master_reply_send_"+chosen_id):
         try:

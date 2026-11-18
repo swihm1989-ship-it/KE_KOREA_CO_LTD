@@ -72,10 +72,9 @@ class OutboxLiveUiTests(unittest.TestCase):
         areas[0].set_value("안녕하세요. 답장을 확인한 후 연락드리겠습니다.").run()
         self.assertFalse(app.exception,[x.message for x in app.exception])
         self.assertTrue(app.button(key="master_reply_send_"+self.mail_id).disabled)
-        checks=[c for c in app.checkbox if str(c.key or "").startswith(
-            "master_reply_confirm_"+self.mail_id)]
-        self.assertEqual(len(checks),1)
-        checks[0].check().run()
+        approve=app.button(key="master_reply_approve_"+self.mail_id)
+        self.assertFalse(approve.disabled)
+        approve.click().run()
         self.assertFalse(app.button(key="master_reply_send_"+self.mail_id).disabled)
         send.assert_not_called()
         app.button(key="master_reply_send_"+self.mail_id).click().run()
@@ -86,25 +85,12 @@ class OutboxLiveUiTests(unittest.TestCase):
         self.assertEqual(args.kwargs.get("language"),"ko")
         self.assertIn("(주)케이이코리아",args.args[6])
 
-    def test_exact_envelope_consent_is_captured_and_reset_on_edit(self):
-        from hashlib import sha256
+    def test_approval_is_revoked_on_any_editor_change(self):
         from Quotation_KEKOREA.orchestration.ui import email_outbox_page as outbox_page
-        keys=("to","sub","body","sig")
-        state={
-            "to":"buyer@example.test","sub":"Re: Tender",
-            "body":"안녕하세요. 검토하겠습니다.","sig":"임석원\n(주)케이이코리아",
-            "master_reply_confirm_unit":True,
-        }
+        state={"master_reply_approved_digest_unit":"sample-digest"}
         with patch.object(outbox_page.st,"session_state",state):
-            outbox_page._capture_send_approval("unit",*keys)
-            want=sha256(("\0".join((
-                "buyer@example.test","Re: Tender",
-                "안녕하세요. 검토하겠습니다.\n\n임석원\n(주)케이이코리아",
-            ))).encode("utf-8")).hexdigest()[:20]
-            self.assertEqual(state["master_reply_confirm_digest_unit"],want)
             outbox_page._clear_send_approval("unit")
-            self.assertFalse(state["master_reply_confirm_unit"])
-            self.assertNotIn("master_reply_confirm_digest_unit",state)
+            self.assertNotIn("master_reply_approved_digest_unit",state)
 
     def test_provider_diagnostic_requires_one_explicit_click_with_dummy_content(self):
         app,_send,probe=self._app()

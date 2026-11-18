@@ -74,10 +74,9 @@ def click_and_check():
             textarea=page.get_by_label("메일 내용 (직접 수정 가능)")
             textarea.fill("안녕하세요. 문의 내용을 검토한 후 다시 연락드리겠습니다.")
             expect(send).to_be_disabled()
-            page.get_by_text(
-                "받는 사람·제목·본문·서명을 모두 확인했습니다. 발송 버튼을 누르면 실제 이메일이 전송됩니다.",
-                exact=True,
-            ).click()
+            approve=page.get_by_role("button",name="이 내용으로 발송 전 승인")
+            expect(approve).to_be_enabled()
+            approve.click()
             expect(send).to_be_enabled()
             page.screenshot(path=str(OUTPUT/"04_approved_only.png"),full_page=True)
 
