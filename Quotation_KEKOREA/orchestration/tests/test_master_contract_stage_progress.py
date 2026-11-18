@@ -17,9 +17,10 @@ class ContractStageProgressTests(TestCase):
 
     def test_master_forwards_real_graph_progress_and_keeps_existing_draft_guards(self):
         seen = []
+        provided_callback = seen.append
         def fake_graph(candidate, preferred_clauses, **kwargs):
             callback = kwargs.get("progress_callback")
-            self.assertIs(callback, seen.append)
+            self.assertIs(callback, provided_callback)
             self.assertFalse(kwargs["use_library"])
             self.assertFalse(kwargs["transaction_messages"])
             self.assertEqual(preferred_clauses, [])
@@ -41,7 +42,7 @@ class ContractStageProgressTests(TestCase):
                    side_effect=fake_graph) as graph:
             draft = generate_contract_draft(
                 self.original, self.env, consent=True,
-                use_library=False, progress_callback=seen.append)
+                use_library=False, progress_callback=provided_callback)
         self.assertEqual(seen, ["입력 조건 검증", "AI 계약서 초안 작성"])
         self.assertEqual(len(draft["clauses"]), 1)
         self.assertEqual(self.original["clauses"], [])
