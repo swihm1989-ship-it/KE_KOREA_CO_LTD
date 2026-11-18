@@ -63,6 +63,9 @@ class MasterReplyRevisionSyncTests(unittest.TestCase):
         ):
             app = AppTest.from_file(str(PAGE), default_timeout=35).run()
             app.radio(key="master_page").set_value("메일함").run()
+            # The real mailbox intentionally requires an explicit first
+            # POP refresh before a selected message/action is rendered.
+            app.button(key="whois_refresh").click().run()
             app.button(key="whois_ai_synthetic-mail-no-docs").click().run()
             self.assertFalse(app.exception, [x.message for x in app.exception])
             self.assertFalse(app.checkbox(key="ai_mail_reply_consent").value)
