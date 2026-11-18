@@ -12,7 +12,7 @@ from Quotation_KEKOREA.agent.ci_import import ci_import_issues
 from .commercial_values import normalize_trade_values
 from .intake_followups import format_field_label
 
-TRADE_REVIEW_REVISION = 'image-advisory-schema-fix-20261116-v5'
+TRADE_REVIEW_REVISION = 'human-approved-ai-notes-20261118-v6'
 
 
 class TradeExportValidationError(ValueError):
@@ -302,9 +302,9 @@ def _historical_image_review_note(note, candidate):
 def review_trade_document(kind, source, *, final=False, allow_optional_na=False, allow_incomplete=False):
     """Describe real gaps separately from old AI notes; never mutates input.
 
-    The default is strict. Explicit final incomplete mode reports missing facts
-    as warnings and leaves them blank; supplied invalid values, conflicts and
-    original-PI price requirements continue to block.
+    The default is strict. Explicit user-approved incomplete FINAL treats old
+    AI extraction notes as warnings, while independently validated numerical,
+    identity and source-document mismatches remain blocking.
     """
     kind=str(kind).upper()
     if kind not in {'PI','PO','CI','PL'} or not isinstance(source,Mapping):
@@ -328,13 +328,13 @@ def review_trade_document(kind, source, *, final=False, allow_optional_na=False,
         # for each old extraction note. Keep notes as non-blocking warnings;
         # independent numeric, identity and CI-import checks still apply.
         candidate['missing_fields'] = []
-        candidate['conflicts'] = [
-            note for note in candidate.get('conflicts') or []
-            if not _reconciled_payment_timing_note(note, candidate)
-            and not _historical_image_review_note(note, candidate)
-        ]
-        # All other conflicts remain validation blockers; historic notes are
-        # retained separately for display, not silently discarded from source.
+        # Extraction prose describes *suspected* conflicts, not independently
+        # validated facts. Once the owner explicitly reviews and approves FINAL,
+        # retain ALL original AI notes in warnings below rather than passing
+        # them back into the legacy validator as automatic blockers.
+        # The structured candidate is still checked independently for invalid
+        # numeric values, identities, quantity mismatches and CI/PL totals.
+        candidate['conflicts'] = []
     if allow_optional_na:
         for field in missing_review_fields(candidate):
             if not field.required:
