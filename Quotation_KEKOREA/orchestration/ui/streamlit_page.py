@@ -145,7 +145,7 @@ elif page == "AI 업무 요청":
     try:
         ai_page = importlib.import_module(
             "Quotation_KEKOREA.orchestration.ui.ai_intake_page")
-        expected_revision = "master-contract-stage-progress-20261118-v26"
+        expected_revision = "master-reply-runtime-sync-20261118-v27"
         source_mtime = Path(ai_page.__file__).stat().st_mtime_ns
         # Streamlit may keep an imported module in memory after a GitHub
         # deployment. A forgotten manual version bump previously left the
@@ -278,11 +278,15 @@ elif page == "발송 대기":
     import importlib
     from Quotation_KEKOREA.orchestration.workflows import email_reply_runtime as _reply_runtime
     _expected_reply_revision = "master-reply-20261118-personal-salutation-v3"
-    if getattr(_reply_runtime, "REPLY_RUNTIME_REVISION", None) != _expected_reply_revision:
+    if (getattr(_reply_runtime, "REPLY_RUNTIME_REVISION", None) != _expected_reply_revision
+            or getattr(_reply_runtime, "REPLY_RUNTIME_SOURCE_MTIME_NS", None)
+            != Path(_reply_runtime.__file__).stat().st_mtime_ns):
         importlib.invalidate_caches()
         _reply_runtime = importlib.reload(_reply_runtime)
     try:
-        if getattr(_reply_runtime, "REPLY_RUNTIME_REVISION", None) != _expected_reply_revision:
+        if (getattr(_reply_runtime, "REPLY_RUNTIME_REVISION", None) != _expected_reply_revision
+                or getattr(_reply_runtime, "REPLY_RUNTIME_SOURCE_MTIME_NS", None)
+                != Path(_reply_runtime.__file__).stat().st_mtime_ns):
             raise RuntimeError("AI 회신 모듈 버전이 다릅니다. 앱 재배포 상태를 확인해 주세요.")
         _email_ui = _reply_runtime.current_outbox_page()
     except RuntimeError as error:
