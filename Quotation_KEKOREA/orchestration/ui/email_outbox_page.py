@@ -25,7 +25,27 @@ from Quotation_KEKOREA.orchestration.workflows.email_outbox import (
     requeue_reply, delete_reply,
 )
 
-SEND_REVISION_EXPECTED = "master-smtp-whois-legacy-optin-20261118-v4"
+SEND_REVISION_EXPECTED = "master-smtp-whois-auto-compat-20261118-v5"
+
+
+def _automatic_whois_tls(principal: str) -> bool:
+    """Use scoped legacy TLS for the verified WHOIS SMTP endpoint only.
+
+    TLS certificate and hostname checks remain mandatory. Other hosts use
+    the normal secure context. No checkbox is required.
+    """
+    try:
+        from Quotation_KEKOREA.orchestration.adapters.whois_mail import mail_config
+        from Quotation_KEKOREA.orchestration.ui.mailbox_page import _settings
+        endpoint=mail_config(_settings(),principal).smtp
+        return bool(
+            endpoint is not None
+            and endpoint.host.lower()=="smtp.whoisworks.com"
+            and endpoint.port==587
+            and endpoint.security=="starttls"
+        )
+    except (ValueError,KeyError,TypeError,RuntimeError,PermissionError,OSError):
+        return False
 
 
 def _resolve_send_approved():
@@ -206,17 +226,14 @@ def render_email_outbox(principal: str):
     with st.expander("SMTP 연결·로그인 진단 (메일 발송 없음)", expanded=False):
         st.caption("서버 접속, TLS, 로그인만 확인합니다. 메일은 전송하지 않습니다. "
                    "기존 'send_unknown' 발송 기록의 성공 여부를 확인하는 기능은 아닙니다.")
-        legacy_key="master_reply_legacy_whois_dh_"+chosen_id
-        st.warning(
-            "후이즈 SMTP 서버는 현재 TLS 1.2에서 1024비트 DH 키를 사용하여 "
-            "표준 보안 연결이 거부됩니다. 임시 호환 연결은 암호화와 인증서 검증을 "
-            "유지하지만 키 교환 보안 수준이 낮아집니다. 후이즈 서버 개선이 권장됩니다."
-        )
-        st.checkbox(
-            "보안 약화를 이해했으며, 이 메일에만 후이즈 구형 TLS 연결을 허용합니다",
-            key=legacy_key,
-            on_change=_clear_send_approval,args=(chosen_id,),
-        )
+        auto_legacy=_automatic_whois_tls(principal)
+        if auto_legacy:
+            st.warning(
+                "후이즈 SMTP(587/STARTTLS)의 1024비트 DH 키를 위해 구형 TLS 호환 "
+                "방식을 자동 사용합니다. 별도 동의는 필요하지 않지만 키 교환 보안 "
+                "수준은 낮습니다. TLS 암호화·인증서 검증은 유지됩니다. "
+                "후이즈 서버 업그레이드가 근본 해결책입니다."
+            )
         if st.button("SMTP 접속·로그인 검사", key="master_reply_smtp_probe_"+chosen_id):
             from Quotation_KEKOREA.orchestration.adapters.whois_mail import (
                 mail_config, probe_smtp, MailConnectionError,
@@ -240,13 +257,13 @@ def render_email_outbox(principal: str):
                                    "현재 서비스의 공식 서버 설정을 확인하세요.")
                     with st.spinner("SMTP 연결·인증을 검사합니다. 실제 메일은 전송하지 않습니다."):
                         from Quotation_KEKOREA.orchestration.adapters import whois_mail as _mail
-                        if bool(st.session_state.get(legacy_key)):
+                        if auto_legacy:
                             if "allow_legacy_dh" not in inspect.signature(_mail.probe_smtp).parameters:
                                 importlib.invalidate_caches()
                                 _mail=importlib.reload(_mail)
                         _mail.probe_smtp(
                             config.smtp,
-                            allow_legacy_dh=bool(st.session_state.get(legacy_key)),
+                            allow_legacy_dh=auto_legacy,
                         )
                     st.success("SMTP TLS 연결과 로그인 성공. 메일은 보내지 않았습니다. "
                                "실제 발송 성공 여부는 별도 확인이 필요합니다.")
@@ -492,10 +509,10 @@ def render_email_outbox(principal: str):
     # state can be lost when Streamlit batches a text edit + checkbox event.
     # The exact current recipient/subject/body/signature is hashed and any
     # subsequent edit invalidates the stored approval before sending.
-    legacy_enabled=bool(st.session_state.get("master_reply_legacy_whois_dh_"+chosen_id))
+    legacy_enabled=_automatic_whois_tls(principal)
     if legacy_enabled:
-        st.warning("구형 TLS 호환 옵션이 선택됐습니다. "
-                   "이 메일의 승인에만 적용되며 보안 수준이 낮아집니다.")
+        st.caption("후이즈 구형 TLS 자동 호환 적용 · 인증서 검증 유지 · "
+                   "보안 수준이 낮아져 서버 업데이트를 권장합니다.")
     digest=sha256(("\0".join((recipient,subject,final_body,attached_stamp,
                                 "legacy-tls" if legacy_enabled else "standard-tls"))).encode()).hexdigest()[:20]
     approved_key="master_reply_approved_digest_"+chosen_id
