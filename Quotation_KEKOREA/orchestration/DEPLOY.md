@@ -73,3 +73,11 @@ Streamlit이 출력하는 로컬 주소(일반적으로 `http://localhost:8501`)
 ## 2026-11-11 · AI 업무 요청 메뉴 통합 및 부족정보 직접입력 (PR #40)
 
 MASTER GRAPH 독립 UI의 `AI 업무 요청` 메뉴는 이제 기존 `AI 거래조건 추출` 실제 분석 화면을 직접 제공하며, 중복된 `AI 거래조건 추출` 사이드바 메뉴 및 사용자용 Mock 요청 폼을 제거한다. 내부 `mock_workflow`/샘플 메일 테스트는 유지된다. AI 거래조건 추출 후 Buyer/Seller 법인명·주소·국가, 상품명·수량·단가·단가출처 및 필수 무역 조건이 누락된 경우 **별도 텍스트 입력칸**이 표시된다. 사용자가 해당 칸에 입력하고 Enter를 누르거나 포커스를 이동하면 Streamlit rerun으로 최신 문서 후보(JSON, 화면 거래 요약)에 반영되며, 동일한 거래조건을 PI/PO/CI/PL과 계약서 후보에 동기화한다. 기존 DRAFT 파일과 검토 상태는 즉시 무효화하고, 조건이 바뀐 기존 AI 계약서 조항도 폐기하여 재생성을 요구한다. 기존 문서 엔진 규칙에 따라 정확한 법인명/주소/지급조건을 사람이 검증해야 하며 **AI/인간 입력을 자동으로 confirmed로 승격하지 않는다**. 안전한 발행·발송 승인 기능은 아직 분리되어 있다. 상세 테스트 `orchestration/tests/test_intake_followups.py` 및 `test_ai_intake_ui.py`.
+
+
+## 2026-11-18 · 이메일 발송 대기 + 최종 수동 승인 (운영 전 확인)
+- PR #128의 자동 접수 답장 제안은 **폐기**했다. 앱은 어떤 수신 메일에도 자동 발송하지 않는다.
+- 추가 비공개 테이블: 'public.kekorea_master_mail_outbox'; RLS ON, anon/authenticated 권한 없음, service_role만 사용. SQL은 orchestration/sql/master_mail_outbox.sql 참조. 테이블 초기 상태는 0건 검증.
+- 필요한 비밀설정은 기존 WHOIS_POP_*, WHOIS_SMTP_*, WHOIS_MAIL_OWNER_EMAILS와 MASTER용 SUPABASE_URL/SUPABASE_SECRET_KEY 및 OPENAI_API_KEY/OPENAI_MODEL이다. 서버만 이 키를 읽고 메일 원문/키/수신자 정보가 로그에 출력되지 않도록 한다.
+- 'AI 업무 요청'에서 무서류 메일 분류, 외부 AI 전송 동의, '발송 대기'에서 최종 수정/내용별 승인 체크 후 '발송' 버튼만 SMTP로 연결한다. 신뢰할 수 없는 본문을 AI 프롬프트 명령으로 취급하지 않는다.
+- 이 개발 PR은 아직 main에 병합·배포되지 않았고 실 계정 SMTP 송신/운영 사용자 E2E 테스트는 수행하지 않았다. 배포 후 테스트는 허용된 본인 테스트 주소를 대상으로 사용자가 최종 확인한 테스트 메일만 보낸다.

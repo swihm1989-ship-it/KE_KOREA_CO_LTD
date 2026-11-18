@@ -246,7 +246,10 @@ class MailboxUiTests(unittest.TestCase):
             app.button(key='whois_ai_uid2').click().run()
             self.assertFalse(app.exception,[x.message for x in app.exception])
             self.assertIn('500 PCS',app.text_area(key='ai_intake_instruction').value)
-            self.assertFalse(app.checkbox(key='ai_intake_consent').value)
+            # No explicit document request: the human-only reply route is
+            # displayed and AI processing is disabled until explicit consent.
+            self.assertFalse(app.checkbox(key='ai_mail_reply_consent').value)
+            self.assertTrue(app.button(key='ai_mail_reply_queue').disabled)
 
     def test_auto_poll_fetches_without_click_and_preserves_uidl_unique_messages(self):
         from Quotation_KEKOREA.orchestration.ui.mailbox_page import _merge_messages

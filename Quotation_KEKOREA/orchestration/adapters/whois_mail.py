@@ -56,6 +56,9 @@ class MailMessage:
     received_at: str = ''
     attachments: tuple[Attachment,...] = ()
     notice: str = ''
+    # RFC metadata is used only if an owner explicitly sends a reply.
+    message_id: str = ''
+    reply_to: str = ''
 
 
 def mail_config(values, principal: str) -> MailConfig:
@@ -363,7 +366,9 @@ def parse_message(uid: str, raw: bytes) -> MailMessage:
         if name in {'.','..'}: name='attachment.bin'
         attachments.append(Attachment(name,payload,part.get_content_type()))
     return MailMessage(uid,str(msg.get('From',''))[:500],str(msg.get('Subject','(제목 없음)'))[:500],
-                       body[:20000],str(msg.get('Date',''))[:100],tuple(attachments),' '.join(set(notices)))
+                       body[:20000],str(msg.get('Date',''))[:100],tuple(attachments),' '.join(set(notices)),
+                       message_id=str(msg.get('Message-ID',''))[:250],
+                       reply_to=str(msg.get('Reply-To',''))[:500])
 
 
 @traced('mail.collect')

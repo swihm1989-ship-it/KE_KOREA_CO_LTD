@@ -117,6 +117,10 @@ def queue_handoff(state, message, *, extract=False, attachments=(), requested=No
             # identity, and never grants authorization to issue documents.
             'sender':str(getattr(message,'sender','') or '')[:500],
             'subject':str(getattr(message,'subject','') or '')[:500],
+            'uid':str(getattr(message,'uid','') or '')[:500],
+            'body':str(getattr(message,'body','') or '')[:20000],
+            'message_id':str(getattr(message,'message_id','') or '')[:250],
+            'reply_to':str(getattr(message,'reply_to','') or '')[:500],
         }
         state['ai_intake_mail_attachments']=deepcopy(list(attachments))
         from Quotation_KEKOREA.agent.pricing import is_eclado_supplier
