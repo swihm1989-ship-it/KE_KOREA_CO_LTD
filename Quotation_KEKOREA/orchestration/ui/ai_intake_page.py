@@ -20,7 +20,6 @@ from Quotation_KEKOREA.orchestration.router import DOC_TYPES, classify
 from Quotation_KEKOREA.orchestration.workflows.commercial_values import (normalize_trade_values, apply_default_list_prices, apply_bulk_discount)
 from Quotation_KEKOREA.orchestration.workflows.label_typos import canonical_label
 from Quotation_KEKOREA.orchestration.workflows.ai_intake import (
-    extract_candidate,
     selected_contract_reference,
 )
 from Quotation_KEKOREA.orchestration.workflows.unified_review import (
@@ -41,8 +40,8 @@ MAIL_PARTY_BRIDGE_MODULE = "Quotation_KEKOREA.agent.mail_party_bridge"
 MAIL_PARTY_BRIDGE_REVISION = "master-po-party-hot-reload-20261117-v1"
 MAIL_INTAKE_MODULE = "Quotation_KEKOREA.orchestration.workflows.mail_intake"
 MAIL_INTAKE_REVISION = "shared-trade-payment-unit-20261117-v2"
-AI_WORKFLOW_REVISION = "shared-ke-korea-family-20261117-v3"
-AI_INTAKE_REVISION = "master-49-unit-discount-shared-20261117-v22"
+AI_WORKFLOW_REVISION = "shared-ke-korea-family-20261118-v4"
+AI_INTAKE_REVISION = "master-numeric-term-hotdeploy-20261118-v23"
 # Detect a changed source file even when the cached module has the same revision.
 AI_INTAKE_SOURCE_MTIME_NS = os.stat(__file__).st_mtime_ns
 
@@ -173,6 +172,10 @@ def _current_ai_workflow():
             "현재 입력은 보존됩니다. 앱을 새로고침하거나 Manage app에서 Reboot하세요."
         ) from None
     return module
+
+
+def extract_candidate(*args, **kwargs):
+    return _current_ai_workflow().extract_candidate(*args, **kwargs)
 
 
 def make_trade_candidate(*args, **kwargs):

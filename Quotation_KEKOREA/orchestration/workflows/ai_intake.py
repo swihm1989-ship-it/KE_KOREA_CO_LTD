@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 import re
-AI_WORKFLOW_REVISION = "shared-ke-korea-family-20261117-v3"
+AI_WORKFLOW_REVISION = "shared-ke-korea-family-20261118-v4"
 AI_WORKFLOW_SOURCE_MTIME_NS = os.stat(__file__).st_mtime_ns
 from Quotation_KEKOREA.observability.core import traced
 from copy import deepcopy
@@ -43,11 +43,29 @@ def extract_candidate(instruction: str, env: Mapping[str, str], *, consent: bool
     model = str(env.get("CONTRACT_OPENAI_MODEL") or env.get("OPENAI_MODEL") or "")
     if not api_key or not model:
         raise ValueError("MASTER GRAPH의 OPENAI_API_KEY 및 OPENAI_MODEL 서버 설정이 필요합니다.")
-    from Quotation_KEKOREA.contracts.service import analyze_trade
+    # Streamlit's long-lived worker may retain the old strict service module
+    # after deployment. Refresh this opt-in endpoint without affecting users
+    # browsing the original KE KOREA contract application.
+    import importlib
+    from inspect import Parameter, signature
+    service = importlib.import_module("Quotation_KEKOREA.contracts.service")
+    analyze_trade = service.analyze_trade
+
+    def supports_numeric_terms(fn):
+        parameters = signature(fn).parameters
+        return ("allow_numeric_terms" in parameters or any(
+            p.kind == Parameter.VAR_KEYWORD for p in parameters.values()))
+    if not supports_numeric_terms(analyze_trade):
+        importlib.invalidate_caches()
+        service = importlib.reload(service)
+        analyze_trade = service.analyze_trade
+    if not supports_numeric_terms(analyze_trade):
+        raise RuntimeError("MASTER AI 거래조건 추출 모듈이 이전 버전입니다. 서버 재시작이 필요합니다.")
     from Quotation_KEKOREA.contracts.models import new_snapshot
     snapshot = new_snapshot("temp-ai-intake", "sale", "ko")
     analysis = analyze_trade(
         [{"role": "user", "content": normalize_trade_labels(instruction)}], snapshot, [], env=dict(env),
+        allow_numeric_terms=True,
     )
     return deepcopy(analysis)
 
