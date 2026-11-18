@@ -264,8 +264,21 @@ def _compare(candidate, second, partial):
 
 def recheck_draft(candidate, attachments, *, env, opener, document_type=None):
     """One independent call at most, and only for source-recognition anomalies."""
-    if not attachments or not recheck_reasons(candidate, document_type=document_type):
+    reasons = recheck_reasons(candidate, document_type=document_type)
+    if not attachments or not reasons:
         return candidate
+    # Inconsistency in the original printed arithmetic is a hard review
+    # condition even if an independent Vision read transcribes it identically.
+    math_conflict = {
+        "invoice_total_inconsistent":
+            "원문에 기재된 전체 합계와 각 행의 인쇄 합계가 일치하지 않습니다. 원본을 확인하세요.",
+        "quantity_total_inconsistent":
+            "원문에 기재된 총수량과 각 품목 수량 합계가 일치하지 않습니다. 원본을 확인하세요.",
+    }.get(reasons[0])
+    if math_conflict:
+        issues = candidate.setdefault("conflicts", [])
+        if math_conflict not in issues:
+            issues.append(math_conflict)
     try:
         second, partial = _independent_read(attachments, env=env, opener=opener)
         return _compare(candidate, second, partial)
