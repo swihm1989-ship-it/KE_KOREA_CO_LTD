@@ -85,3 +85,21 @@ MASTER GRAPH 독립 UI의 `AI 업무 요청` 메뉴는 이제 기존 `AI 거래�
 
 ### 2026-11-18 · 이메일 서명 배포 점검
 기존 `Quotation_KEKOREA/assets/company_logo.png`가 포함되어 있어야 한다. 서버 Pillow로 최대 320×200의 인라인 PNG를 준비하고 MIME HTML(Content-ID)/일반 텍스트 대안을 동시에 구성한다. 회사명 `(주)케이이코리아`, 대표이사 직함, 홈페이지 링크가 양 언어 서명에 출력되는지 시험한다. 실제 Gmail/Outlook/후이즈 수신측의 로고 표시 및 링크 동작은 승인된 테스트 메일로 별도 E2E 검증해야 하며, 사용자 발송 버튼을 누르지 않고는 어떤 메일도 보내지 않는다.
+
+### 2026-11-18 · AI 회신 오류 운영 진단 체크
+1. GitHub main의 현재 커밋을 확인하고 Streamlit Cloud 배포 브랜치/커밋과 일치하는지 확인한다.
+2. MASTER 발송 대기 → AI 연결 상태 진단에서 모듈 revision, API 키 설정 여부, 모델명을 확인한다. 키값은 절대로 노출·복사하지 않는다.
+3. 동의를 확인한 후 API 연결 진단 실행: 가상 텍스트만 전송, HTTP 401(키), 403(권한), 404(모델), 429(한도), 400(모델 또는 파라미터) 코드와 안전한 code/param만 출력한다.
+4. 모델 파일이 구버전이라는 안내가 뜨면 Streamlit Cloud 앱을 Reboot한다. 수정한 소스는 버전+파일 mtime 체크로 import cache를 교정한다.
+5. 이미 발송 대기함에 저장된 DRAFT는 삭제·재수신하지 않는다. AI 재생성 또는 직접 작성 가능. 실송신은 사용자가 최종 확인 후 발송 버튼을 클릭한 경우에만 수행한다.
+6. 이 리비전의 automated checks는 Streamlit AppTest UI, provider mock, SMTP mock, 기존 계약/문서 회귀 테스트를 포함한다. 실운영 Gmail/후이즈 UI 인증이나 실제 메일 수신 측 화면 확인은 이 CI에 포함되지 않는다.
+
+
+### 2026-11-18 · Chromium 브라우저 자동 클릭 테스트
+`.github/workflows/master-browser-smoke.yml`는 Streamlit 실제 `email_outbox_page` 컴포넌트를 localhost 테스트 서버에서 열고 Playwright Chromium으로 클릭한다. 여기서 Supabase, OpenAI, SMTP는 모두 테스트용 가상 함수로 대체되어 영업 데이터나 실제 메일은 사용하지 않는다.
+검사: DRAFT 표시, AI 연결 진단 사전 동의, 가상 AI 회신 후보 3개, 직접 편집, 최종 확인 없이는 발송 버튼 비활성화, 확인 후 전송 클릭 시 정확히 1회의 가상 발신, 단계별 브라우저 캡처를 GitHub Actions artifact에 저장.
+이 테스트는 인증된 실제 운영 사이트가 아니라 동일 코드의 합성 데이터를 사용하는 CI 환경에서 실행된다. 실제 Streamlit Cloud 로그인·배포·실OpenAI·실SMTP 결과를 검증했다고 주장하면 안 된다.
+
+Streamlit 메인 네비게이션에서도 발송 대기 UI를 importlib 모듈 객체로 갱신한다. 하위 API 모듈뿐 아니라 화면 모듈도 소스 수정 시 자동 재로드하며, 버전 불일치 시 구버전 UI를 조용히 사용하지 않는다.
+
+브라우저 자동 클릭 검사에서 편집 직후 체크박스가 초기화되는 문제가 확인되어, 수정 후 발송 승인은 별도의 '이 내용으로 발송 전 승인' 버튼으로 통일했다. 승인 당시 주소·제목·본문·서명 해시가 기록되며 이후 어떤 수정에도 승인 취소, 사용자가 '발송' 버튼을 누르기 전까지 전송 없음.

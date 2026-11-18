@@ -5,8 +5,12 @@ Never sends on render, navigation, polling, AI completion, or page reload.
 from __future__ import annotations
 
 from hashlib import sha256
+from pathlib import Path
 import os
 import streamlit as st
+
+REPLY_RUNTIME_REVISION = "master-reply-20261118-live-diagnostic-v1"
+REPLY_SOURCE_MTIME_NS = Path(__file__).stat().st_mtime_ns
 
 from Quotation_KEKOREA.orchestration.workflows.document_assets import document_export_env
 from Quotation_KEKOREA.orchestration.workflows.email_reply_drafts import (
@@ -15,6 +19,11 @@ from Quotation_KEKOREA.orchestration.workflows.email_reply_drafts import (
 from Quotation_KEKOREA.orchestration.workflows.email_outbox import (
     OutboxError, list_replies, get_reply, save_candidates, send_approved,
 )
+
+def _clear_send_approval(ident: str):
+    """Any email edit invalidates the exact-value send approval."""
+    st.session_state.pop("master_reply_approved_digest_"+ident, None)
+
 
 def _db_env():
     return document_export_env(st.secrets,os.environ)
@@ -80,11 +89,34 @@ def render_email_outbox(principal: str):
                          disabled=True,height=200,key="master_reply_sent_view_"+chosen_id)
         return
 
+    with st.expander("AI 연결 상태 진단 · 가상 데이터만 사용", expanded=False):
+        from Quotation_KEKOREA.orchestration.workflows.email_reply_runtime import (
+            status as reply_runtime_status, probe_connection,
+        )
+        from Quotation_KEKOREA.orchestration.ui.ai_intake_page import _model_config
+        diag_env = _model_config()
+        diag = reply_runtime_status(diag_env)
+        st.caption("실행 코드 버전: " + diag["runtime"])
+        st.caption("AI 키: " + ("설정됨" if diag["key_configured"] else "미설정")
+                   + " · 모델: " + diag["model"])
+        st.caption("연결 검사는 원본 메일을 전송하지 않습니다. 가상 문장만 보내며 적은 API 비용이 발생할 수 있습니다.")
+        probe_consent=st.checkbox("가상 AI 연결 테스트 실행에 동의합니다.",
+                                  key="master_reply_probe_consent_"+chosen_id)
+        if st.button("API 연결 진단 실행", disabled=not probe_consent,
+                     key="master_reply_probe_"+chosen_id):
+            with st.spinner("OpenAI 인증과 모델 응답을 확인합니다."):
+                probe_result=probe_connection(diag_env)
+            if probe_result.startswith("진단 성공"):
+                st.success(probe_result)
+            else:
+                st.warning(probe_result)
+
     stored_lang=row.get("language") if row.get("language") in {"ko","en"} else "en"
     lang=st.radio("회신 및 서명 언어",["ko","en"],
                   format_func=lambda value:"한국어" if value=="ko" else "English",
                   index=0 if stored_lang=="ko" else 1,
-                  horizontal=True,key="master_reply_language_"+chosen_id)
+                  horizontal=True,key="master_reply_language_"+chosen_id,
+                  on_change=_clear_send_approval,args=(chosen_id,))
     suggestions=row.get("candidate_bodies") or []
     if lang!=stored_lang and len(suggestions)==3:
         st.warning("언어를 바꿨습니다. 아래에서 새 언어로 후보를 다시 생성한 후 발송하세요.")
@@ -95,7 +127,8 @@ def render_email_outbox(principal: str):
         try:
             with st.spinner("세 가지 스타일의 회신을 작성합니다."):
                 from Quotation_KEKOREA.orchestration.ui.ai_intake_page import _model_config
-                options=generate_candidates({
+                from Quotation_KEKOREA.orchestration.workflows.email_reply_runtime import generate_reply_candidates
+                options=generate_reply_candidates({
                     "subject":row.get("source_subject",""),
                     "body":row.get("source_body",""),
                     "sender":row.get("sender_header",""),
@@ -114,7 +147,8 @@ def render_email_outbox(principal: str):
                 st.text(candidate)
         selected_index=st.radio("수정할 회신 후보",list(range(3)),
             horizontal=True,format_func=lambda i:str(i+1)+". "+STYLES[i],
-            key="master_reply_choice_"+chosen_id)
+            key="master_reply_choice_"+chosen_id,
+            on_change=_clear_send_approval,args=(chosen_id,))
         suggested_body=suggestions[selected_index]
     else:
         st.info("AI 후보가 아직 없거나 선택한 언어와 일치하지 않습니다. "
@@ -123,14 +157,18 @@ def render_email_outbox(principal: str):
         selected_index="manual"
         suggested_body=""
     stamp=sha256((row["source_hash"]+"|"+str(selected_index)+"|"+lang+"|"+suggested_body).encode()).hexdigest()[:12]
+    to_key="master_reply_to_"+chosen_id
+    sub_key="master_reply_subject_"+chosen_id
+    body_key="master_reply_body_"+chosen_id+"_"+stamp
+    sig_key="master_reply_signature_"+chosen_id+"_"+lang
     recipient=st.text_input("받는 사람",value=str(row.get("recipient_email") or ""),
-                            key="master_reply_to_"+chosen_id)
+                            key=to_key,on_change=_clear_send_approval,args=(chosen_id,))
     subject=st.text_input("메일 제목",value=reply_subject(row.get("source_subject") or ""),
-                          key="master_reply_subject_"+chosen_id)
+                          key=sub_key,on_change=_clear_send_approval,args=(chosen_id,))
     body=st.text_area("메일 내용 (직접 수정 가능)",value=suggested_body,
-                      height=235,key="master_reply_body_"+chosen_id+"_"+stamp)
+                      height=235,key=body_key,on_change=_clear_send_approval,args=(chosen_id,))
     signature=st.text_area("Signature (기본값 · 수정 가능)",value=default_signature(lang),
-                           height=150,key="master_reply_signature_"+chosen_id+"_"+lang)
+                           height=150,key=sig_key,on_change=_clear_send_approval,args=(chosen_id,))
     final_body=body.strip()+"\n\n"+signature.strip()
     if not body.strip():
         st.warning("답장 본문을 작성해야 발송할 수 있습니다.")
@@ -149,12 +187,22 @@ def render_email_outbox(principal: str):
     with st.expander("일반 텍스트 메일 미리보기"):
         st.code(final_body, language=None)
 
-    # Confirmation is tied to the EXACT current envelope. Any edit invalidates it.
+    # Approval is a separate deliberate BUTTON click, not a checkbox whose
+    # state can be lost when Streamlit batches a text edit + checkbox event.
+    # The exact current recipient/subject/body/signature is hashed and any
+    # subsequent edit invalidates the stored approval before sending.
     digest=sha256(("\0".join((recipient,subject,final_body))).encode()).hexdigest()[:20]
-    approved=st.checkbox(
-        "받는 사람·제목·본문·서명을 모두 확인했습니다. 발송 버튼을 누르면 실제 이메일이 전송됩니다.",
-        key="master_reply_confirm_"+chosen_id+"_"+digest,
-    )
+    approved_key="master_reply_approved_digest_"+chosen_id
+    if st.button("이 내용으로 발송 전 승인",type="secondary",
+                 disabled=not body.strip() or not signature.strip(),
+                 key="master_reply_approve_"+chosen_id):
+        st.session_state[approved_key]=digest
+        st.rerun()
+    approved=(st.session_state.get(approved_key)==digest)
+    if approved:
+        st.success("현재 받는 사람·제목·본문·서명이 확인되었습니다. 아래 발송 버튼을 누를 때만 전송됩니다.")
+    else:
+        st.caption("내용을 확인한 뒤 '이 내용으로 발송 전 승인'을 누르면 발송 버튼이 활성화됩니다.")
     if st.button("발송",type="primary",disabled=not approved or not body.strip(),
                  key="master_reply_send_"+chosen_id):
         try:
