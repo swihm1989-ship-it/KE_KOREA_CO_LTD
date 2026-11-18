@@ -93,3 +93,9 @@ MASTER GRAPH 독립 UI의 `AI 업무 요청` 메뉴는 이제 기존 `AI 거래�
 4. 모델 파일이 구버전이라는 안내가 뜨면 Streamlit Cloud 앱을 Reboot한다. 수정한 소스는 버전+파일 mtime 체크로 import cache를 교정한다.
 5. 이미 발송 대기함에 저장된 DRAFT는 삭제·재수신하지 않는다. AI 재생성 또는 직접 작성 가능. 실송신은 사용자가 최종 확인 후 발송 버튼을 클릭한 경우에만 수행한다.
 6. 이 리비전의 automated checks는 Streamlit AppTest UI, provider mock, SMTP mock, 기존 계약/문서 회귀 테스트를 포함한다. 실운영 Gmail/후이즈 UI 인증이나 실제 메일 수신 측 화면 확인은 이 CI에 포함되지 않는다.
+
+
+### 2026-11-18 · Chromium 브라우저 자동 클릭 테스트
+`.github/workflows/master-browser-smoke.yml`는 Streamlit 실제 `email_outbox_page` 컴포넌트를 localhost 테스트 서버에서 열고 Playwright Chromium으로 클릭한다. 여기서 Supabase, OpenAI, SMTP는 모두 테스트용 가상 함수로 대체되어 영업 데이터나 실제 메일은 사용하지 않는다.
+검사: DRAFT 표시, AI 연결 진단 사전 동의, 가상 AI 회신 후보 3개, 직접 편집, 최종 확인 없이는 발송 버튼 비활성화, 확인 후 전송 클릭 시 정확히 1회의 가상 발신, 단계별 브라우저 캡처를 GitHub Actions artifact에 저장.
+이 테스트는 인증된 실제 운영 사이트가 아니라 동일 코드의 합성 데이터를 사용하는 CI 환경에서 실행된다. 실제 Streamlit Cloud 로그인·배포·실OpenAI·실SMTP 결과를 검증했다고 주장하면 안 된다.
