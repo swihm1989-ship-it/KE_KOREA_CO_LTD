@@ -14,7 +14,7 @@ import smtplib
 import ssl
 from uuid import UUID, uuid4
 
-from Quotation_KEKOREA.contracts.repository import ContractRepository
+from Quotation_KEKOREA.contracts.repository import ContractRepository, ContractRepositoryError
 from Quotation_KEKOREA.orchestration.adapters.whois_mail import mail_config
 from Quotation_KEKOREA.orchestration.workflows.email_reply_drafts import (
     reply_subject, source_hash, preferred_language,
@@ -234,8 +234,12 @@ def queue_reply(env:dict,principal:str,source:dict,config_values:dict):
         matching=_repo(env).request("GET",TABLE,query=[
             ("owner_email","eq."+owner),("mailbox_hash","eq."+config.pop.account_id),
             ("mail_uid","eq."+uid),("limit","1")])
+    except ContractRepositoryError as exc:
+        # ContractRepositoryError contains only sanitized HTTP/status categories;
+        # never expose database keys, URLs, request bodies or provider responses.
+        raise OutboxError("발송 대기 DB 저장 단계 오류: " + str(exc)) from None
     except Exception:
-        raise OutboxError("메일을 발송 대기함에 저장하지 못했습니다.") from None
+        raise OutboxError("메일을 발송 대기함에 저장하지 못했습니다. 서버 DB 연결 설정을 확인하세요.") from None
     if not isinstance(matching,list) or not matching:
         raise OutboxError("발송 대기함 저장 결과를 확인할 수 없습니다.")
     return matching[0]
