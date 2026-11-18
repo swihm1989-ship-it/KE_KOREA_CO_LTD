@@ -239,7 +239,15 @@ def render_email_outbox(principal: str):
                         st.warning("일반적인 SMTP 포트·암호화 방식 조합과 다릅니다. "
                                    "현재 서비스의 공식 서버 설정을 확인하세요.")
                     with st.spinner("SMTP 연결·인증을 검사합니다. 실제 메일은 전송하지 않습니다."):
-                        probe_smtp(config.smtp, allow_legacy_dh=bool(st.session_state.get(legacy_key)))
+                        from Quotation_KEKOREA.orchestration.adapters import whois_mail as _mail
+                        if bool(st.session_state.get(legacy_key)):
+                            if "allow_legacy_dh" not in inspect.signature(_mail.probe_smtp).parameters:
+                                importlib.invalidate_caches()
+                                _mail=importlib.reload(_mail)
+                        _mail.probe_smtp(
+                            config.smtp,
+                            allow_legacy_dh=bool(st.session_state.get(legacy_key)),
+                        )
                     st.success("SMTP TLS 연결과 로그인 성공. 메일은 보내지 않았습니다. "
                                "실제 발송 성공 여부는 별도 확인이 필요합니다.")
             except (MailConnectionError, ValueError, PermissionError) as error:
