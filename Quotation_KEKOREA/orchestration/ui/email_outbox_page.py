@@ -25,7 +25,7 @@ from Quotation_KEKOREA.orchestration.workflows.email_outbox import (
     requeue_reply, delete_reply,
 )
 
-SEND_REVISION_EXPECTED = "master-smtp-pdf-attachment-20261118-v3"
+SEND_REVISION_EXPECTED = "master-smtp-whois-legacy-optin-20261118-v4"
 
 
 def _resolve_send_approved():
@@ -47,7 +47,7 @@ def _resolve_send_approved():
         return (getattr(mod, "EMAIL_SEND_RUNTIME_REVISION", None)==SEND_REVISION_EXPECTED
                 and getattr(mod, "EMAIL_SEND_SOURCE_MTIME_NS", None)==actual_mtime
                 and {"confirmed", "signature_text", "language",
-                     "expected_attachment_digest"}.issubset(params))
+                     "expected_attachment_digest","allow_legacy_dh"}.issubset(params))
 
     if not current(module):
         try:
@@ -206,6 +206,17 @@ def render_email_outbox(principal: str):
     with st.expander("SMTP 연결·로그인 진단 (메일 발송 없음)", expanded=False):
         st.caption("서버 접속, TLS, 로그인만 확인합니다. 메일은 전송하지 않습니다. "
                    "기존 'send_unknown' 발송 기록의 성공 여부를 확인하는 기능은 아닙니다.")
+        legacy_key="master_reply_legacy_whois_dh_"+chosen_id
+        st.warning(
+            "후이즈 SMTP 서버는 현재 TLS 1.2에서 1024비트 DH 키를 사용하여 "
+            "표준 보안 연결이 거부됩니다. 임시 호환 연결은 암호화와 인증서 검증을 "
+            "유지하지만 키 교환 보안 수준이 낮아집니다. 후이즈 서버 개선이 권장됩니다."
+        )
+        st.checkbox(
+            "보안 약화를 이해했으며, 이 메일에만 후이즈 구형 TLS 연결을 허용합니다",
+            key=legacy_key,
+            on_change=_clear_send_approval,args=(chosen_id,),
+        )
         if st.button("SMTP 접속·로그인 검사", key="master_reply_smtp_probe_"+chosen_id):
             from Quotation_KEKOREA.orchestration.adapters.whois_mail import (
                 mail_config, probe_smtp, MailConnectionError,
@@ -228,7 +239,15 @@ def render_email_outbox(principal: str):
                         st.warning("일반적인 SMTP 포트·암호화 방식 조합과 다릅니다. "
                                    "현재 서비스의 공식 서버 설정을 확인하세요.")
                     with st.spinner("SMTP 연결·인증을 검사합니다. 실제 메일은 전송하지 않습니다."):
-                        probe_smtp(config.smtp)
+                        from Quotation_KEKOREA.orchestration.adapters import whois_mail as _mail
+                        if bool(st.session_state.get(legacy_key)):
+                            if "allow_legacy_dh" not in inspect.signature(_mail.probe_smtp).parameters:
+                                importlib.invalidate_caches()
+                                _mail=importlib.reload(_mail)
+                        _mail.probe_smtp(
+                            config.smtp,
+                            allow_legacy_dh=bool(st.session_state.get(legacy_key)),
+                        )
                     st.success("SMTP TLS 연결과 로그인 성공. 메일은 보내지 않았습니다. "
                                "실제 발송 성공 여부는 별도 확인이 필요합니다.")
             except (MailConnectionError, ValueError, PermissionError) as error:
@@ -473,7 +492,12 @@ def render_email_outbox(principal: str):
     # state can be lost when Streamlit batches a text edit + checkbox event.
     # The exact current recipient/subject/body/signature is hashed and any
     # subsequent edit invalidates the stored approval before sending.
-    digest=sha256(("\0".join((recipient,subject,final_body,attached_stamp))).encode()).hexdigest()[:20]
+    legacy_enabled=bool(st.session_state.get("master_reply_legacy_whois_dh_"+chosen_id))
+    if legacy_enabled:
+        st.warning("구형 TLS 호환 옵션이 선택됐습니다. "
+                   "이 메일의 승인에만 적용되며 보안 수준이 낮아집니다.")
+    digest=sha256(("\0".join((recipient,subject,final_body,attached_stamp,
+                                "legacy-tls" if legacy_enabled else "standard-tls"))).encode()).hexdigest()[:20]
     approved_key="master_reply_approved_digest_"+chosen_id
     if st.button("이 내용으로 발송 전 승인",type="secondary",
                  disabled=not body.strip() or not signature.strip(),
@@ -495,7 +519,8 @@ def render_email_outbox(principal: str):
                 result=current_send(env,principal,chosen_id,_settings(),
                                     recipient,subject,final_body,confirmed=True,
                                     signature_text=signature,language=lang,
-                                    expected_attachment_digest=attached_stamp)
+                                    expected_attachment_digest=attached_stamp,
+                                    allow_legacy_dh=legacy_enabled)
         except (OutboxError,ValueError,PermissionError) as error:
             _clear_send_approval(chosen_id)
             st.error(str(error)[:350])
