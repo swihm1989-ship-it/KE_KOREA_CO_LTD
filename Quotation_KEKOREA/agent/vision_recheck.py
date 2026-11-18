@@ -62,7 +62,9 @@ def recheck_reasons(candidate, *, document_type=None):
     """Recognized image errors only; unspecified contract terms are not errors."""
     if not isinstance(candidate, dict):
         return []
-    kind = document_type or candidate.get("document_type")
+    # Do not run an expensive check on partial / mock / non-trade replies.
+    # Production structured extraction always includes document_type.
+    kind = candidate.get("document_type")
     if kind not in {"PI", "PO", "CI", "PL"}:
         return []
     rows = candidate.get("items")
