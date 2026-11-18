@@ -2412,17 +2412,38 @@ def render_ai_intake(principal: str):
                 else:
                     st.session_state.pop("master_reply_ai_notice", None)
                 st.rerun()
+        # Safe owner-only diagnosis: never print Supabase credentials or message bodies.
+        db_settings = document_export_env(st.secrets, os.environ)
+        if not db_settings.get("SUPABASE_URL") or not db_settings.get("SUPABASE_SECRET_KEY"):
+            st.error("Render 서버에 SUPABASE_URL 또는 SUPABASE_SECRET_KEY가 설정되지 않았습니다. 발송 대기 DB 저장을 사용할 수 없습니다.")
+        if st.button("발송 대기 DB 연결 진단 (읽기 전용)", key="ai_mail_outbox_db_probe"):
+            try:
+                from Quotation_KEKOREA.contracts.repository import ContractRepository, ContractRepositoryError
+                probe_result = ContractRepository(db_settings).request(
+                    "GET", "kekorea_master_mail_outbox", query=[
+                        ("select", "id"), ("owner_email", "eq." + principal), ("limit", "1")])
+                st.success("발송 대기 DB 연결 및 인증 성공. 읽기 전용으로 확인했습니다.")
+            except ValueError:
+                st.error("발송 대기 DB 연결 설정 오류: SUPABASE_URL 또는 SUPABASE_SECRET_KEY를 확인하세요.")
+            except ContractRepositoryError as error:
+                st.error("발송 대기 DB 인증·통신 오류: " + str(error)[:220])
+            except Exception:
+                st.error("발송 대기 DB 읽기 진단 실패. 서버 연결 상태를 확인하세요.")
         if st.button("AI 생성 없이 발송 대기로 보관",
                      key="ai_mail_reply_queue_without_ai"):
             try:
                 from Quotation_KEKOREA.orchestration.ui.mailbox_page import _settings
-                from Quotation_KEKOREA.orchestration.workflows.email_outbox import queue_reply
+                from Quotation_KEKOREA.orchestration.workflows.email_outbox import queue_reply, OutboxError
                 row=queue_reply(document_export_env(st.secrets,os.environ),principal,mail_source,_settings())
                 st.session_state["master_reply_selected"]=row["id"]
                 st.session_state["master_reply_navigation_pending"]=True
                 st.rerun()
+            except OutboxError as error:
+                st.error("발송 대기 저장 실패: " + str(error)[:250])
+            except ValueError:
+                st.error("발송 대기 입력 또는 DB 설정이 유효하지 않습니다.")
             except Exception:
-                st.error("발송 대기 저장에 실패했습니다. 서버 설정을 확인하세요.")
+                st.error("발송 대기 저장 실패: 예상하지 못한 서버 오류입니다. 연결 진단을 실행하세요.")
         return
 
     language = st.radio("계약서 언어", ["한국어", "English"], horizontal=True,
