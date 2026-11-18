@@ -2263,6 +2263,7 @@ def render_ai_intake(principal: str):
         st.checkbox(
             "최종 PDF를 발송 대기에 첨부할 때 AI 회신 후보 3개도 생성 (선택)",
             key="ai_intake_reply_candidate_consent",
+            value=True,
             help="체크하면 원본 메일의 제목·본문·발신인 정보가 AI 회신 추천을 위해 전송됩니다. 메일은 자동 발송되지 않습니다.",
         )
         requested = st.multiselect('준비할 문서', list(DOC_TYPES),
