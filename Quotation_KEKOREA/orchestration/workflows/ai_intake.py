@@ -47,14 +47,19 @@ def extract_candidate(instruction: str, env: Mapping[str, str], *, consent: bool
     # after deployment. Refresh this opt-in endpoint without affecting users
     # browsing the original KE KOREA contract application.
     import importlib
-    from inspect import signature
+    from inspect import Parameter, signature
     service = importlib.import_module("Quotation_KEKOREA.contracts.service")
     analyze_trade = service.analyze_trade
-    if "allow_numeric_terms" not in signature(analyze_trade).parameters:
+
+    def supports_numeric_terms(fn):
+        parameters = signature(fn).parameters
+        return ("allow_numeric_terms" in parameters or any(
+            p.kind == Parameter.VAR_KEYWORD for p in parameters.values()))
+    if not supports_numeric_terms(analyze_trade):
         importlib.invalidate_caches()
         service = importlib.reload(service)
         analyze_trade = service.analyze_trade
-    if "allow_numeric_terms" not in signature(analyze_trade).parameters:
+    if not supports_numeric_terms(analyze_trade):
         raise RuntimeError("MASTER AI 거래조건 추출 모듈이 이전 버전입니다. 서버 재시작이 필요합니다.")
     from Quotation_KEKOREA.contracts.models import new_snapshot
     snapshot = new_snapshot("temp-ai-intake", "sale", "ko")
