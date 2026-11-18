@@ -402,8 +402,10 @@ def send_approved(env:dict,principal:str,ident:str,config_values:dict,
         )
         verified_attachments=load_approved_attachments(
             env,owner,ident,expected_attachment_digest)
-    digest=sha256((recipient+"\0"+subject+"\0"+body+"\0"+
-                   str(expected_attachment_digest or "")).encode("utf-8")).hexdigest()
+    approved_data=recipient+"\0"+subject+"\0"+body
+    if expected_attachment_digest is not None:
+        approved_data+="\0"+expected_attachment_digest
+    digest=sha256(approved_data.encode("utf-8")).hexdigest()
     repo=_repo(env)
     stamp=datetime.now(timezone.utc).isoformat()
     try:
