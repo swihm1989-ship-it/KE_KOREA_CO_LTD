@@ -1563,10 +1563,10 @@ def _render_single_editor(digest: str, candidates: dict) -> None:
         if item_count:
             st.markdown("##### 추출된 상품 목록")
             st.caption("상품명·규격·수량·가격을 한눈에 비교하세요. 필요한 행만 아래 상세 수정에서 고칠 수 있습니다.")
-        recovered = st.session_state.get("ai_intake_source_line_recovered")
-        if recovered:
-            st.info("AI가 합쳐서 추출한 품목을 원본 요청의 개별 수량·단가로 "
-                    + str(recovered) + "개 복구했습니다. 출고·발행 전 원본과 확인해 주세요.")
+            recovered = st.session_state.get("ai_intake_source_line_recovered")
+            if recovered:
+                st.info("AI가 합쳐서 추출한 품목을 원본 요청의 개별 수량·단가로 "
+                        + str(recovered) + "개 복구했습니다. 출고·발행 전 원본과 확인해 주세요.")
             from Quotation_KEKOREA.agent.review_fields import _missing
             for kind, doc in candidates.items():
                 if kind not in {"PI", "PO", "CI", "PL"} or not isinstance(doc, dict):
