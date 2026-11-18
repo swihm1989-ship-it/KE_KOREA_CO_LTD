@@ -265,12 +265,38 @@ def probe_pop_cross_diagnostics(endpoint: Endpoint) -> dict:
     return {"message_count": count, "samples": samples}
 
 
-def probe_smtp(endpoint: Endpoint) -> None:
+def _whois_legacy_dh_context(endpoint: Endpoint) -> ssl.SSLContext:
+    """Explicit opt-in workaround for the provider's 1024-bit DHE group.
+
+    On 2026-11-18 a credential-free cloud handshake showed
+    smtp.whoisworks.com:587 negotiates TLS 1.2 DHE-RSA-AES256-GCM-SHA384
+    with a 1024-bit temporary DH key, rejected by security level 2.
+    This lowers *only* the key-exchange security level for this one
+    identified endpoint. Standard hostname and certificate verification
+    remain required. It must never be enabled automatically.
+    """
+    if (endpoint.host.lower() != "smtp.whoisworks.com" or
+            endpoint.port != 587 or endpoint.security != "starttls"):
+        raise MailConnectionError(
+            "구형 DH 호환 옵션은 검증된 후이즈 SMTP 주소·587/STARTTLS에서만 허용합니다."
+        )
+    context = ssl.create_default_context()
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    context.maximum_version = ssl.TLSVersion.TLSv1_2
+    context.set_ciphers("DHE-RSA-AES256-GCM-SHA384:@SECLEVEL=1")
+    # Security floor is reduced only with conscious opt-in; no plaintext,
+    # anonymous ciphers, insecure verification or automatic retry.
+    assert context.verify_mode == ssl.CERT_REQUIRED and context.check_hostname
+    return context
+
+
+def probe_smtp(endpoint: Endpoint, *, allow_legacy_dh: bool = False) -> None:
     """Verify SMTP over TLS without sending mail or exposing server responses."""
     client = None
     stage = "connect"
     try:
-        context = ssl.create_default_context()
+        context = (_whois_legacy_dh_context(endpoint) if allow_legacy_dh
+                   else ssl.create_default_context())
         if endpoint.security == "ssl":
             client = smtplib.SMTP_SSL(endpoint.host, endpoint.port, timeout=12, context=context)
             stage = "login"
