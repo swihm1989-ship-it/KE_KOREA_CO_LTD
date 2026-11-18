@@ -161,6 +161,71 @@ def load_pdf(env: Mapping[str, str], principal: str, document_id: str
     return row, data
 
 
+
+def delete_document(env: Mapping[str, str], principal: str,
+                    document_id: str) -> None:
+    """Owner-verified delete of one archived PDF on explicit user click only.
+
+    First confirm the metadata DELETE, then remove the single private
+    storage object. Never delete legacy contract records or RAG references.
+    """
+    owner = _principal(principal)
+    try:
+        ident = str(UUID(str(document_id)))
+    except (ValueError, TypeError):
+        raise PdfArchiveError("삭제할 PDF 식별자가 유효하지 않습니다.") from None
+    repo = _repo(env)
+    try:
+        rows = repo.request("GET", TABLE, query=[
+            ("select", "id,kind,status,filename,storage_path"),
+            ("id", "eq." + ident), ("owner_email", "eq." + owner),
+            ("limit", "1"),
+        ])
+    except Exception:
+        raise PdfArchiveError("삭제할 PDF를 조회하지 못했습니다.") from None
+    if not isinstance(rows, list) or len(rows) != 1:
+        raise PdfArchiveError("현재 로그인된 계정의 문서를 찾지 못했습니다.")
+    row = rows[0]
+    current_status = str(row.get("status") or "")
+    if current_status not in ("draft", "final", "converted"):
+        raise PdfArchiveError("삭제할 PDF 상태를 확인할 수 없습니다.")
+    path = str(row.get("storage_path") or "")
+    if (not path.startswith(owner_key(owner) + "/") or
+            not path.endswith("/" + ident + ".pdf")):
+        raise PdfArchiveError("선택한 문서의 비공개 저장 경로가 올바르지 않습니다.")
+    try:
+        # Self-referencing FKs: remove only this document's links from
+        # same-owner PDF metadata before deleting its row.
+        repo.request("PATCH", TABLE, payload={"final_document_id": None},
+                     query=[("final_document_id", "eq." + ident),
+                            ("owner_email", "eq." + owner)],
+                     headers={"Prefer": "return=minimal"})
+        repo.request("PATCH", TABLE, payload={"parent_draft_id": None},
+                     query=[("parent_draft_id", "eq." + ident),
+                            ("owner_email", "eq." + owner)],
+                     headers={"Prefer": "return=minimal"})
+        deleted = repo.request("DELETE", TABLE, query=[
+            ("id", "eq." + ident), ("owner_email", "eq." + owner),
+            ("status", "eq." + current_status),
+        ], headers={"Prefer": "return=representation"})
+    except Exception:
+        raise PdfArchiveError(
+            "PDF 보관 기록을 삭제하지 못했습니다. 저장소를 새로고침하고 다시 확인하세요."
+        ) from None
+    if not isinstance(deleted, list) or len(deleted) != 1:
+        raise PdfArchiveError(
+            "다른 화면에서 문서가 변경되었습니다. 다시 조회한 뒤 삭제하세요."
+        )
+    try:
+        repo.delete_private_file(BUCKET, path)
+    except Exception:
+        # Metadata is gone but the private storage object may remain.
+        raise PdfArchiveError(
+            "문서 목록 삭제는 완료됐으나 비공개 PDF 파일 정리가 실패했습니다. "
+            "저장소 관리자에게 파일 정리를 요청하세요."
+        ) from None
+
+
 def mark_draft_converted(env: Mapping[str, str], principal: str,
                          draft_id: str, final_id: str) -> None:
     owner = _principal(principal)
