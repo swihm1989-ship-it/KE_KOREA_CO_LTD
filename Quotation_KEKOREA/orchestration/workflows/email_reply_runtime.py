@@ -28,7 +28,23 @@ def _latest(module_name, expected):
     # Streamlit reruns an entrypoint but often retains imported submodules.
     # Compare source mtime as well as revision and serialize across sessions.
     with _RELOAD_LOCK:
-        module = importlib.import_module(module_name)
+        try:
+            module = importlib.import_module(module_name)
+        except ImportError:
+            # Hot-deployed Streamlit can retain an older email_outbox module
+            # whose exported names no longer match the freshly deployed UI.
+            # Refresh dependencies once, then retry the page import. Never
+            # perform any SMTP action during this recovery.
+            if module_name != MAIL_UI_MODULE:
+                raise
+            importlib.invalidate_caches()
+            for dependency in (
+                "Quotation_KEKOREA.orchestration.workflows.email_reply_drafts",
+                "Quotation_KEKOREA.orchestration.workflows.email_outbox",
+            ):
+                cached = importlib.import_module(dependency)
+                importlib.reload(cached)
+            module = importlib.import_module(module_name)
         try:
             source_mtime = Path(module.__file__).stat().st_mtime_ns
         except (TypeError, OSError):
