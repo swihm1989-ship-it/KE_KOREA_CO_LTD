@@ -40,7 +40,10 @@ jobs:
                 timeout 9 openssl s_client -connect "$host:$port" -servername "$host" -brief </dev/null 2>&1 | head -n 9 || true
               fi
             done
-          done
+          echo "SECURE_ECDHE_ONLY_587"
+          timeout 9 openssl s_client -starttls smtp -connect smtp.whoisworks.com:587 -servername smtp.whoisworks.com -tls1_2 -cipher 'ECDHE:!DHE' -brief </dev/null 2>&1 | head -n 12 || true
+          echo "DIAGNOSTIC_LOW_SECURITY_LEVEL_ONLY_DO_NOT_USE_IN_PRODUCTION"
+          timeout 9 openssl s_client -starttls smtp -connect smtp.whoisworks.com:587 -servername smtp.whoisworks.com -tls1_2 -cipher 'DEFAULT:@SECLEVEL=1' -brief </dev/null 2>&1 | head -n 14 || true
       - name: Click synthetic Streamlit UI in Chromium without production secrets
         run: |
           python Quotation_KEKOREA/orchestration/tests/browser_smoke.py
