@@ -70,6 +70,7 @@ with (
     patch.object(page,"_resolve_send_approved",return_value=send),
     patch.object(runtime,"generate_reply_candidates",side_effect=generate),
     patch.object(attachments,"list_attachments",return_value=[FIXTURE_PDF]),
+    patch.object(attachments.pdf_archive,"load_pdf",return_value=(FIXTURE_PDF,b"%PDF-1.4\nSYNTHETIC")),
     patch.object(runtime,"probe_connection",return_value="진단 성공: 가상 AI 서버 응답"),
 ):
     page.render_email_outbox("owner@example.test")
