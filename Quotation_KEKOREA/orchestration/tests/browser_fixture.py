@@ -14,6 +14,11 @@ from Quotation_KEKOREA.orchestration.workflows import mail_pdf_attachments as at
 
 st.set_page_config(page_title="MASTER synthetic email UI QA",layout="wide")
 FIXTURE_ID="00000000-0000-4000-8000-000000000001"
+FIXTURE_PDF={
+    "id":"00000000-0000-4000-8000-000000000002",
+    "filename":"PI-FINAL-SYNTHETIC.pdf", "kind":"PI",
+    "status":"final", "content_sha256":"a"*64,
+}
 if "fixture_record" not in st.session_state:
     st.session_state["fixture_record"]={
         "id":FIXTURE_ID,
@@ -46,7 +51,7 @@ def save(_env,_principal,_ident,candidates,lang):
 def send(_env,_principal,_ident,_settings,recipient,subject,body,*,confirmed,
          signature_text,language,expected_attachment_digest=None):
     assert confirmed is True
-    assert expected_attachment_digest==attachments.attachment_digest([])
+    assert expected_attachment_digest==attachments.attachment_digest([FIXTURE_PDF])
     assert recipient=="buyer@example.test"
     assert "www.ke-korea.co.kr" in signature_text
     assert "임석원" in signature_text
@@ -64,7 +69,7 @@ with (
     patch.object(page,"save_candidates",side_effect=save),
     patch.object(page,"_resolve_send_approved",return_value=send),
     patch.object(runtime,"generate_reply_candidates",side_effect=generate),
-    patch.object(attachments,"list_attachments",return_value=[]),
+    patch.object(attachments,"list_attachments",return_value=[FIXTURE_PDF]),
     patch.object(runtime,"probe_connection",return_value="진단 성공: 가상 AI 서버 응답"),
 ):
     page.render_email_outbox("owner@example.test")
