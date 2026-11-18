@@ -2218,6 +2218,59 @@ def render_ai_intake(principal: str):
                        "원본 주문 이미지를 위에서 첨부해야 제품명·수량·SKU를 분석할 수 있습니다: "
                        + ", ".join(missing_images[:5]))
     st.caption("감지된 문서 종류: " + (", ".join(requested) if requested else "없음 · PI/PO/CI/PL/계약서를 명시하세요"))
+
+    # Mail with no requested documents must not be forced through the trade
+    # extractor. Route to a reply outbox only after the user's explicit click.
+    if mail_mode and not requested:
+        st.markdown("#### 서류 작성 불필요 · 메일 회신")
+        st.info("문서가 필요 없는 메일입니다. AI 답장 세 가지를 생성해 발송 대기로 넘길 수 있습니다. "
+                "자동 발송은 절대 하지 않습니다. 문서가 필요하면 위에서 종류를 선택하세요.")
+        from Quotation_KEKOREA.orchestration.workflows.email_reply_drafts import (
+            preferred_language, generate_candidates,
+        )
+        from Quotation_KEKOREA.orchestration.workflows.email_outbox import (
+            queue_reply, save_candidates, OutboxError,
+        )
+        auto_language = preferred_language(mail_source.get("subject",""),mail_source.get("body",""))
+        locale_options = ["한국어", "English"]
+        selected_language = st.radio(
+            "답장·서명 언어", locale_options,
+            index=0 if auto_language == "ko" else 1,
+            horizontal=True, key="ai_mail_reply_language")
+        lang = "ko" if selected_language=="한국어" else "en"
+        ai_consent = st.checkbox(
+            "선택한 메일 제목·본문을 OpenAI에 보내 회신 후보 3개를 생성하는 데 동의합니다.",
+            key="ai_mail_reply_consent")
+        if st.button("회신 후보 3개 작성 → 발송 대기",
+                     key="ai_mail_reply_queue",type="primary",disabled=not ai_consent):
+            try:
+                with st.spinner("메일 회신 후보를 생성해 비공개 발송 대기함에 저장합니다."):
+                    from Quotation_KEKOREA.orchestration.ui.mailbox_page import _settings
+                    db_env = document_export_env(st.secrets, os.environ)
+                    row = queue_reply(db_env, principal, mail_source, _settings())
+                    if not row.get("candidate_bodies"):
+                        suggestions=generate_candidates(mail_source,_model_config(),lang)
+                        save_candidates(db_env,principal,row["id"],suggestions,lang)
+                    st.session_state["master_reply_selected"]=row["id"]
+                    st.session_state["master_reply_navigation_pending"]=True
+                st.rerun()
+            except (OutboxError,ValueError,RuntimeError) as error:
+                st.error("발송 대기 전환 실패: "+str(error)[:300])
+            except Exception:
+                st.error("메일 회신 후보를 저장하지 못했습니다. 연결 설정을 확인하세요.")
+        if st.button("AI 생성 없이 발송 대기로 보관",
+                     key="ai_mail_reply_queue_without_ai"):
+            try:
+                from Quotation_KEKOREA.orchestration.ui.mailbox_page import _settings
+                from Quotation_KEKOREA.orchestration.workflows.email_outbox import queue_reply
+                row=queue_reply(document_export_env(st.secrets,os.environ),principal,mail_source,_settings())
+                st.session_state["master_reply_selected"]=row["id"]
+                st.session_state["master_reply_navigation_pending"]=True
+                st.rerun()
+            except Exception:
+                st.error("발송 대기 저장에 실패했습니다. 서버 설정을 확인하세요.")
+        return
+
     language = st.radio("계약서 언어", ["한국어", "English"], horizontal=True,
                         key="ai_intake_language")
     # UI presentation order is fixed, but product-family *policy* is entirely

@@ -57,6 +57,10 @@ with st.sidebar:
 # a top-level ImportError would otherwise prevent the entire Master from loading.
 if st.session_state.pop("master_mail_navigation_pending", False):
     st.session_state["master_page"] = "AI 업무 요청"
+if st.session_state.pop("master_reply_navigation_pending", False):
+    st.session_state["master_page"] = "발송 대기"
+    if st.session_state.get("master_reply_selected"):
+        st.session_state["master_email_outbox_selected"] = st.session_state["master_reply_selected"]
 _master_menu = ["시장 뉴스", "메일함", "AI 업무 요청", "통합 업무 흐름", "문서 검토", "발송 대기", "저장된 계약서"]
 if st.session_state.get("master_page") not in (None, *_master_menu):
     st.session_state["master_page"] = "AI 업무 요청"
@@ -65,7 +69,7 @@ st.sidebar.divider()
 st.sidebar.caption("접속 계정: " + _authenticated_principal)
 if st.sidebar.button("로그아웃", key="master_logout"):
     st.logout()
-st.sidebar.caption("메일함은 별도 허용 계정만 읽을 수 있습니다. 실제 메일 발송은 비활성 상태입니다.")
+st.sidebar.caption("회신은 발송 대기에서 사용자 최종 승인 후 '발송' 버튼으로만 전송됩니다.")
 
 def _message() -> MockMessage:
     return next((m for m in SAMPLE_MESSAGES if m.id == st.session_state.mock_selected), SAMPLE_MESSAGES[0])
@@ -267,6 +271,11 @@ elif page == "저장된 계약서":
         render_saved_contracts(_authenticated_principal)
 
 elif page == "발송 대기":
+    # Email replies are a separate, user-approved queue; preserve existing
+    # DRAFT PDF -> FINAL workflow unchanged below.
+    from Quotation_KEKOREA.orchestration.ui.email_outbox_page import render_email_outbox
+    render_email_outbox(_authenticated_principal)
+    st.divider()
     from Quotation_KEKOREA.orchestration.ui.pdf_archive_page import render_pdf_archive
     render_pdf_archive(_authenticated_principal, "draft")
 
