@@ -73,11 +73,28 @@ def extract_reference(file_bytes, filename, *, vision_client=None):
             for page_number in scanned_pages:
                 page = document.load_page(page_number - 1)
                 pixmap = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5), alpha=False)
-                extracted = vision_client(pixmap.tobytes("png"), page_number)
-                if str(extracted or "").strip():
-                    locations.append({"locator": f"page {page_number}", "text": str(extracted).strip()})
-                    if "needs manual review" in str(extracted).casefold():
-                        uncertain_pages.append(page_number)
+                source_pixels = pixmap.tobytes("png")
+                extracted = str(vision_client(source_pixels, page_number) or "").strip()
+                # The first scan OCR is already Vision. If it cannot read the
+                # page or explicitly reports uncertainty, make ONE more
+                # independent read of the original image, then keep the
+                # existing manual-review status for any unresolved value.
+                first_unclear = not extracted or "needs manual review" in extracted.casefold()
+                if first_unclear:
+                    try:
+                        second = str(vision_client(source_pixels, page_number) or "").strip()
+                    except (RuntimeError, ValueError, TypeError, TimeoutError, OSError):
+                        second = ""
+                    if not extracted and second:
+                        extracted = second + "\n[Needs manual review: only the second Vision read found text.]"
+                    elif extracted and second:
+                        first_body = extracted.split("[Needs manual review:", 1)[0].strip()
+                        second_body = second.split("[Needs manual review:", 1)[0].strip()
+                        if first_body != second_body:
+                            extracted += "\n[Needs manual review: independent Vision reads disagree.]"
+                    uncertain_pages.append(page_number)
+                if extracted:
+                    locations.append({"locator": f"page {page_number}", "text": extracted})
         if not locations:
             status = "scanned_requires_ocr"
         elif scanned_pages and (not vision_client or uncertain_pages):

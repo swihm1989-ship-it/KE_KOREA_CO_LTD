@@ -8,7 +8,7 @@ import urllib.error
 import urllib.request
 
 
-TRADE_EXTRACTOR_REVISION = "master-long-image-timeout-20261117-v1"
+TRADE_EXTRACTOR_REVISION = "master-conditional-vision-recheck-20261118-v2"
 TRADE_EXTRACTOR_SOURCE_MTIME_NS = Path(__file__).stat().st_mtime_ns
 
 
@@ -201,10 +201,19 @@ def extract_trade_data(prompt, *, images=None, env=None, opener=urllib.request.u
         if not texts:
             raise RuntimeError("OpenAI returned no structured draft; no document was created")
         try:
-            return json.loads("".join(texts))
+            draft = json.loads("".join(texts))
         except json.JSONDecodeError:
             observation.fail_code('invalid_response')
             raise RuntimeError("OpenAI returned an invalid structured draft; no document was created") from None
+        # Independent 2nd-pass Vision only for a source recognition anomaly,
+        # never for missing transaction terms in a text-only request.
+        # Keep all existing human review / approval paths unchanged.
+        if images:
+            from Quotation_KEKOREA.agent.vision_recheck import recheck_draft
+            draft = recheck_draft(
+                draft, images, env=config, opener=opener,
+                document_type=requested_document_type)
+        return draft
 
 
 def verify_item_quotes(draft, prompt, *, image_context=False):
