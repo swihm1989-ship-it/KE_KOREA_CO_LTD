@@ -5,6 +5,7 @@ import re
 import urllib.error
 import urllib.request
 from copy import deepcopy
+from math import isfinite
 from uuid import uuid4
 
 from Quotation_KEKOREA.contracts.models import CONTRACT_TYPES, validate_snapshot
@@ -227,7 +228,8 @@ def _localize_contract_followups(data, language, *, env, opener):
     return data
 
 
-def analyze_trade(messages, current_snapshot, reference_context, *, env, client=None):
+def analyze_trade(messages, current_snapshot, reference_context, *, env, client=None,
+                  allow_numeric_terms=False):
     messages = messages[-30:]
     reference_context = reference_context or []
     latest_user_text = next((str(message.get("content") or "") for message in reversed(messages)
@@ -290,13 +292,34 @@ def analyze_trade(messages, current_snapshot, reference_context, *, env, client=
             raise ValueError("Contract AI returned a non-text party value.")
         if not set(party["roles"]).issubset(valid_roles):
             raise ValueError("Contract AI returned an unsupported party role.")
+    numeric_term_normalized = False
     for term in data["terms"]:
         if (not isinstance(term, dict) or not term.get("key")
                 or term.get("status") not in {"suggested", "missing"}):
             raise ValueError("Contract AI returned an invalid term status.")
+        value = term.get("value")
+        # Opt-in ONLY for MASTER AI intake. Legacy contract workflows keep
+        # the original exact-text contract. A model may return JSON numbers
+        # for prices/quantities; preserve finite values as visible suggestions
+        # instead of dropping an entire valid 3-line order. Never coerce
+        # booleans, nested objects, unit symbols or currency codes.
+        if allow_numeric_terms and type(value) in (int, float):
+            if type(value) is float and not isfinite(value):
+                raise ValueError("Contract AI returned a non-finite numeric term.")
+            term["value"] = str(value)
+            numeric_term_normalized = True
         if any(term.get(field) is not None and not isinstance(term.get(field), str)
                for field in ("value", "unit", "currency")):
             raise ValueError("Contract AI must return term values as text to preserve exact decimals and units.")
+    if numeric_term_normalized:
+        data["issues"].append({
+            "code": "ai_numeric_term_needs_review",
+            "severity": "confirm",
+            "message": ("AI가 수량 또는 금액을 숫자형으로 반환해 문자로 변환했습니다. "
+                        "원문과 대조한 뒤 확인하세요." if response_language == "ko" else
+                        "AI returned a numeric term rather than text. Check the original "
+                        "quantity and monetary values before confirming."),
+        })
     if any(not isinstance(question, str) for question in data["questions"]):
         raise ValueError("Contract AI returned an invalid question.")
     data["issues"] = _normalize_ai_issues(
