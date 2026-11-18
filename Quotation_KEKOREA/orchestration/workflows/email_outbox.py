@@ -12,7 +12,7 @@ from hashlib import sha256
 import re
 import smtplib
 import ssl
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from Quotation_KEKOREA.contracts.repository import ContractRepository
 from Quotation_KEKOREA.orchestration.adapters.whois_mail import mail_config
@@ -115,6 +115,86 @@ def get_reply(env:dict,principal:str,ident:str):
     if not rows:
         raise OutboxError("이 메일을 조회할 권한이 없거나 삭제되었습니다.")
     return rows[0]
+
+
+def requeue_reply(env: dict, principal: str, ident: str,
+                  config_values: dict) -> dict:
+    """Owner-requested NEW draft for a deliberate repeat send.
+
+    Preserves every previous attempt and its original status. Creates a new
+    independent row with an independent id and a fresh mail UID. This does
+    not transmit anything and never silently retries send_unknown messages.
+    The previous approved text is only an editable prefill; it is NOT
+    considered approved for the new attempt.
+    """
+    owner = _owner(principal)
+    original = get_reply(env, owner, ident)
+    if original.get("status") not in ("sent", "send_unknown"):
+        raise OutboxError("기존 발송 기록을 확인한 후 새 발송 건을 만들 수 있습니다.")
+    if not str(original.get("approved_body") or "").strip():
+        raise OutboxError("이전 발송 본문이 없어 새 발송 건을 만들 수 없습니다.")
+    settings = mail_config(config_values, owner)
+    if settings.pop is None or original.get("mailbox_hash") != settings.pop.account_id:
+        raise OutboxError("현재 로그인된 메일함의 이전 발송 기록만 다시 작성할 수 있습니다.")
+    new_uid = "manual-repeat-" + uuid4().hex
+    record = {
+        "owner_email": owner,
+        "mailbox_hash": original["mailbox_hash"],
+        "mail_uid": new_uid,
+        "sender_header": str(original.get("sender_header") or "")[:500],
+        "recipient_email": email_address(original.get("recipient_email")),
+        "source_subject": str(original.get("source_subject") or "")[:250],
+        "source_body": str(original.get("source_body") or "")[:20000],
+        "source_hash": source_hash(
+            new_uid, original.get("sender_header") or "",
+            original.get("source_subject") or "", original.get("source_body") or "",
+        ),
+        "message_id": valid_message_id(original.get("message_id")),
+        "language": original.get("language") if original.get("language") in ("ko","en") else "en",
+        "candidate_bodies": [],
+        "status": "draft",
+        "approved_subject": str(original.get("approved_subject") or ""),
+        # The copied body is a prefill only: the approved hash is NULL and
+        # the new draft cannot be sent until a NEW explicit owner approval.
+        "approved_body": str(original["approved_body"]),
+        "approved_sha256": None,
+    }
+    try:
+        fresh = _repo(env).request("POST", TABLE, payload=record,
+                                  headers={"Prefer": "return=representation"})
+    except Exception:
+        raise OutboxError("새 발송 건을 작성하지 못했습니다. 기존 발송 기록은 유지됩니다.") from None
+    if not isinstance(fresh, list) or len(fresh) != 1:
+        raise OutboxError("새 발송 건 저장을 확인하지 못했습니다. 기존 발송 기록은 유지됩니다.")
+    return fresh[0]
+
+
+def delete_reply(env: dict, principal: str, ident: str) -> None:
+    """Explicit, authenticated permanent deletion of an outbox record only.
+
+    Deletion does not retract mail already accepted by the SMTP server.
+    A currently in-flight 'sending' record cannot be removed mid-transport.
+    """
+    owner = _owner(principal)
+    record = get_reply(env, owner, ident)
+    status = str(record.get("status") or "")
+    if status == "sending":
+        raise OutboxError("전송 처리 중인 메일은 삭제할 수 없습니다. 전송 상태를 확인하세요.")
+    if status not in ("draft", "sent", "send_unknown"):
+        raise OutboxError("삭제할 수 없는 발송 기록 상태입니다.")
+    try:
+        deleted = _repo(env).request(
+            "DELETE", TABLE,
+            query=[("id", "eq." + _safe_id(ident)),
+                   ("owner_email", "eq." + owner),
+                   ("status", "eq." + status)],
+            headers={"Prefer": "return=representation"},
+        )
+    except Exception:
+        raise OutboxError("발송 기록을 삭제하지 못했습니다. 기존 기록은 유지됩니다.") from None
+    if not isinstance(deleted, list) or len(deleted) != 1:
+        raise OutboxError("다른 창에서 발송 상태가 변경되었습니다. 새로고침 후 다시 삭제하세요.")
+
 
 def queue_reply(env:dict,principal:str,source:dict,config_values:dict):
     """Store an incoming email once after explicit AI intake routing."""
