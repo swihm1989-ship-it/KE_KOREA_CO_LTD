@@ -41,7 +41,7 @@ MAIL_PARTY_BRIDGE_REVISION = "master-po-party-hot-reload-20261117-v1"
 MAIL_INTAKE_MODULE = "Quotation_KEKOREA.orchestration.workflows.mail_intake"
 MAIL_INTAKE_REVISION = "shared-trade-payment-unit-20261117-v2"
 AI_WORKFLOW_REVISION = "shared-ke-korea-family-20261118-v6"
-AI_INTAKE_REVISION = "master-contract-stage-progress-20261118-v26"
+AI_INTAKE_REVISION = "master-reply-runtime-sync-20261118-v27"
 # Detect a changed source file even when the cached module has the same revision.
 AI_INTAKE_SOURCE_MTIME_NS = os.stat(__file__).st_mtime_ns
 
@@ -2287,12 +2287,20 @@ def render_ai_intake(principal: str):
                 with st.spinner("메일을 발송 대기에 저장하고 AI 답장을 준비합니다."):
                     from Quotation_KEKOREA.orchestration.ui.mailbox_page import _settings
                     from Quotation_KEKOREA.orchestration.workflows import email_reply_runtime as _reply_runtime
-                    _expected_reply_revision = "master-reply-20261118-http400-schema-v2"
-                    if getattr(_reply_runtime, "REPLY_RUNTIME_REVISION", None) != _expected_reply_revision:
+                    # The intake page and reply/outbox modules must
+                    # accept the SAME deployed runtime version. The older
+                    # v2 constant previously blocked queueing BEFORE any
+                    # draft write after the reply v3 deployment.
+                    _expected_reply_revision = "master-reply-20261118-personal-salutation-v3"
+                    _reply_mtime = os.stat(_reply_runtime.__file__).st_mtime_ns
+                    if (getattr(_reply_runtime, "REPLY_RUNTIME_REVISION", None) != _expected_reply_revision
+                            or getattr(_reply_runtime, "REPLY_RUNTIME_SOURCE_MTIME_NS", None) != _reply_mtime):
                         importlib.invalidate_caches()
                         _reply_runtime = importlib.reload(_reply_runtime)
-                    if getattr(_reply_runtime, "REPLY_RUNTIME_REVISION", None) != _expected_reply_revision:
-                        raise RuntimeError("AI 회신 런타임 버전이 이전 상태입니다.")
+                    if (getattr(_reply_runtime, "REPLY_RUNTIME_REVISION", None) != _expected_reply_revision
+                            or getattr(_reply_runtime, "REPLY_RUNTIME_SOURCE_MTIME_NS", None)
+                            != os.stat(_reply_runtime.__file__).st_mtime_ns):
+                        raise RuntimeError("AI 회신 코드를 최신 상태로 불러오지 못했습니다. 입력을 유지하고 앱을 재시작하세요.")
                     db_env = document_export_env(st.secrets, os.environ)
                     row, warning = _reply_runtime.prepare_email_handoff(
                         db_env, principal, mail_source, _settings(),
