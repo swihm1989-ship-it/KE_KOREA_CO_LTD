@@ -211,8 +211,11 @@ def send_approved(env:dict,principal:str,ident:str,config_values:dict,
     row=get_reply(env,owner,ident)
     if row["mailbox_hash"]!=config.pop.account_id:
         raise OutboxError("메일함 계정이 변경됐습니다. 발송하지 않았습니다.")
-    if row["status"]!="draft" or len(row.get("candidate_bodies") or [])!=3:
-        raise OutboxError("발송할 AI 후보를 먼저 선택하고 수정해 주세요.")
+    # Manual drafting is allowed when the AI service is unavailable. Both
+    # manual and AI-assisted replies require the same explicit owner approval.
+    # Reject partially written candidate bundles rather than guessing intent.
+    if row["status"]!="draft" or len(row.get("candidate_bodies") or []) not in (0,3):
+        raise OutboxError("이 메일은 수정 가능한 DRAFT 상태가 아닙니다.")
     recipient,subject,body=_validate_message(recipient,subject,body)
     html_body=None
     logo_bytes=None

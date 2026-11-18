@@ -33,6 +33,11 @@ def render_email_outbox(principal: str):
     except Exception:
         st.error("메일 대기함 설정을 확인해 주세요.")
         return
+    # AI failure after a successful mailbox->outbox save must not be presented
+    # as a lost email. Show the warning once, without exposing server secrets.
+    ai_notice=st.session_state.pop("master_reply_ai_notice", None)
+    if ai_notice:
+        st.warning(ai_notice)
     if not rows:
         st.info("발송 대기 중인 이메일이 없습니다. 메일함 → AI 업무 요청에서 문서 불필요 메일을 보내세요.")
         return
@@ -101,23 +106,28 @@ def render_email_outbox(principal: str):
             st.error("AI 회신 생성 실패: "+str(error)[:300])
         except Exception:
             st.error("AI 회신 생성에 실패했습니다. 설정을 확인하세요.")
-    if len(suggestions)!=3 or lang!=stored_lang:
-        st.info("AI 회신 후보 3개를 생성한 후 직접 수정·발송할 수 있습니다.")
-        return
-
-    st.markdown("#### 추천 회신 후보 3개")
-    for index,body in enumerate(suggestions):
-        with st.expander("후보 "+str(index+1)+" · "+STYLES[index]):
-            st.text(body)
-    selected_index=st.radio("수정할 회신 후보",list(range(3)),
-        horizontal=True,format_func=lambda i:str(i+1)+". "+STYLES[i],
-        key="master_reply_choice_"+chosen_id)
-    stamp=sha256((row["source_hash"]+"|"+str(selected_index)+"|"+lang+"|"+suggestions[selected_index]).encode()).hexdigest()[:12]
+    has_ai_candidates=len(suggestions)==3 and lang==stored_lang
+    if has_ai_candidates:
+        st.markdown("#### AI 추천 회신 후보 3개")
+        for index,candidate in enumerate(suggestions):
+            with st.expander("후보 "+str(index+1)+" · "+STYLES[index]):
+                st.text(candidate)
+        selected_index=st.radio("수정할 회신 후보",list(range(3)),
+            horizontal=True,format_func=lambda i:str(i+1)+". "+STYLES[i],
+            key="master_reply_choice_"+chosen_id)
+        suggested_body=suggestions[selected_index]
+    else:
+        st.info("AI 후보가 아직 없거나 선택한 언어와 일치하지 않습니다. "
+                "상단에서 AI 회신 후보를 다시 생성하거나, 아래에서 직접 회신을 작성할 수 있습니다. "
+                "직접 작성한 메일도 최종 승인 전에는 발송되지 않습니다.")
+        selected_index="manual"
+        suggested_body=""
+    stamp=sha256((row["source_hash"]+"|"+str(selected_index)+"|"+lang+"|"+suggested_body).encode()).hexdigest()[:12]
     recipient=st.text_input("받는 사람",value=str(row.get("recipient_email") or ""),
                             key="master_reply_to_"+chosen_id)
     subject=st.text_input("메일 제목",value=reply_subject(row.get("source_subject") or ""),
                           key="master_reply_subject_"+chosen_id)
-    body=st.text_area("메일 내용 (직접 수정 가능)",value=suggestions[selected_index],
+    body=st.text_area("메일 내용 (직접 수정 가능)",value=suggested_body,
                       height=235,key="master_reply_body_"+chosen_id+"_"+stamp)
     signature=st.text_area("Signature (기본값 · 수정 가능)",value=default_signature(lang),
                            height=150,key="master_reply_signature_"+chosen_id+"_"+lang)

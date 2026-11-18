@@ -68,7 +68,8 @@ def generate_candidates(source: dict, env: dict, language: str, *, opener=None) 
     if language not in {"ko","en"}:
         raise ValueError("회신 언어가 유효하지 않습니다.")
     api_key=str(env.get("OPENAI_API_KEY") or "")
-    model=str(env.get("OPENAI_MODEL") or env.get("CONTRACT_OPENAI_MODEL") or "")
+    # Match the proven contract engine model selection; avoid an unrelated default.
+    model=str(env.get("CONTRACT_OPENAI_MODEL") or env.get("OPENAI_MODEL") or "").strip()
     if not api_key or not model:
         raise ValueError("AI 회신 초안용 OPENAI_API_KEY / OPENAI_MODEL 설정이 필요합니다.")
     body=str(source.get("body") or "")
@@ -97,7 +98,7 @@ def generate_candidates(source: dict, env: dict, language: str, *, opener=None) 
             "from":str(source.get("sender") or "")[:350],
             "subject":subject[:220],"body":body[:12000]},ensure_ascii=False)}],
         "text":{"format":{"type":"json_object"}},
-        "max_output_tokens":2700,
+        "max_output_tokens":3600,
         "store":False,
     }
     request=urllib.request.Request(
@@ -113,9 +114,28 @@ def generate_candidates(source: dict, env: dict, language: str, *, opener=None) 
         if len(raw)>160000:
             raise RuntimeError("AI 회신 응답이 너무 깁니다.")
         result=json.loads(raw.decode("utf-8"))
-    except (urllib.error.HTTPError, urllib.error.URLError, OSError, TimeoutError,
-            UnicodeError, json.JSONDecodeError):
-        raise RuntimeError("AI 회신 생성에 실패했습니다. 키와 모델 설정을 확인하세요.") from None
+    except urllib.error.HTTPError as exc:
+        # Never show raw OpenAI error bodies, request URLs, credentials, or mail.
+        # The HTTP status alone is enough to identify the next safe action.
+        http_code = exc.code
+        exc.close()
+        explanations = {
+            400: "모델 또는 AI 요청 형식을 확인해야 합니다.",
+            401: "서버의 OpenAI API 키가 유효하지 않거나 만료되었습니다.",
+            403: "이 API 키로 모델을 사용할 권한이 없습니다.",
+            404: "지정한 AI 모델을 찾을 수 없거나 접근할 수 없습니다.",
+            408: "AI 요청 시간이 초과되었습니다.",
+            429: "AI 사용량 제한 또는 결제 한도에 도달했습니다.",
+            500: "OpenAI 서버 오류가 발생했습니다.",
+            502: "AI 서비스 일시 오류가 발생했습니다.",
+            503: "AI 서비스가 일시적으로 이용 불가능합니다.",
+        }
+        detail = explanations.get(http_code, "OpenAI 서버와 통신하는 중 오류가 발생했습니다.")
+        raise RuntimeError(f"AI 회신 API 오류 (HTTP {http_code}): {detail}") from None
+    except (urllib.error.URLError, OSError, TimeoutError):
+        raise RuntimeError("AI 서비스 연결 또는 시간 초과 오류입니다. 네트워크 상태를 확인하세요.") from None
+    except (UnicodeError, json.JSONDecodeError):
+        raise RuntimeError("AI 응답을 읽을 수 없습니다. 잠시 후 다시 생성해 주세요.") from None
     if not isinstance(result,dict) or result.get("status")=="incomplete" or result.get("error"):
         raise RuntimeError("AI 회신이 완성되지 않았습니다.")
     texts=[piece.get("text","") for output in result.get("output",[])

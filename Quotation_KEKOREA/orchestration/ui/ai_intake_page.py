@@ -2243,21 +2243,33 @@ def render_ai_intake(principal: str):
             key="ai_mail_reply_consent")
         if st.button("회신 후보 3개 작성 → 발송 대기",
                      key="ai_mail_reply_queue",type="primary",disabled=not ai_consent):
+            # The mailbox draft must be persisted even if an AI provider call
+            # fails, times out, reaches its quota or returns malformed JSON.
             try:
-                with st.spinner("메일 회신 후보를 생성해 비공개 발송 대기함에 저장합니다."):
+                with st.spinner("메일을 발송 대기에 저장하고 AI 답장을 준비합니다."):
                     from Quotation_KEKOREA.orchestration.ui.mailbox_page import _settings
+                    from Quotation_KEKOREA.orchestration.workflows.email_reply_handoff import (
+                        prepare_email_handoff,
+                    )
                     db_env = document_export_env(st.secrets, os.environ)
-                    row = queue_reply(db_env, principal, mail_source, _settings())
-                    if not row.get("candidate_bodies"):
-                        suggestions=generate_candidates(mail_source,_model_config(),lang)
-                        save_candidates(db_env,principal,row["id"],suggestions,lang)
-                    st.session_state["master_reply_selected"]=row["id"]
-                    st.session_state["master_reply_navigation_pending"]=True
-                st.rerun()
+                    row, warning = prepare_email_handoff(
+                        db_env, principal, mail_source, _settings(),
+                        _model_config(), lang, ai_consented=True)
             except (OutboxError,ValueError,RuntimeError) as error:
-                st.error("발송 대기 전환 실패: "+str(error)[:300])
+                st.error("발송 대기 저장 실패: "+str(error)[:300])
             except Exception:
-                st.error("메일 회신 후보를 저장하지 못했습니다. 연결 설정을 확인하세요.")
+                st.error("발송 대기 저장에 실패했습니다. DB 연결 설정을 확인하세요.")
+            else:
+                st.session_state["master_reply_selected"]=row["id"]
+                st.session_state["master_reply_navigation_pending"]=True
+                if warning:
+                    st.session_state["master_reply_ai_notice"]=(
+                        "메일은 발송 대기에 안전하게 저장했습니다. AI 답장은 생성하지 못했습니다: "
+                        + str(warning)[:260] + " 발송 대기에서 재시도하거나 직접 작성할 수 있습니다."
+                    )
+                else:
+                    st.session_state.pop("master_reply_ai_notice", None)
+                st.rerun()
         if st.button("AI 생성 없이 발송 대기로 보관",
                      key="ai_mail_reply_queue_without_ai"):
             try:
