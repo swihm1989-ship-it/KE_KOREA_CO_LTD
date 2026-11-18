@@ -217,6 +217,27 @@ def render_pdf_archive(principal: str, status: str) -> None:
     st.download_button("PDF 다운로드", data=data,
                        file_name=row["filename"], mime="application/pdf",
                        key="pdf_download_" + chosen)
+    # Deletion is an explicit, owner-scoped action for a single archived
+    # PDF. It does not touch source contracts or RAG documents.
+    with st.expander("선택한 PDF 삭제", expanded=False):
+        st.caption("선택한 문서의 비공개 PDF 파일과 MASTER 보관 기록을 영구 삭제합니다. "
+                   "이미 발송한 이메일이나 기존 계약서 원본은 삭제되지 않습니다.")
+        delete_ok=st.checkbox(
+            "이 PDF를 삭제하겠습니다.",
+            key="master_pdf_delete_confirm_" + chosen)
+        if st.button("선택한 PDF 삭제", type="secondary",
+                     disabled=not delete_ok,
+                     key="master_pdf_delete_" + chosen):
+            try:
+                archive.delete_document(_env(),principal,chosen)
+            except archive.PdfArchiveError as error:
+                st.error(str(error))
+            except Exception:
+                st.error("PDF 삭제에 실패했습니다. 저장소 설정을 확인하세요.")
+            else:
+                st.session_state.pop("master_pdf_selected_" + status,None)
+                st.success("선택한 PDF 문서를 삭제했습니다.")
+                st.rerun()
     if status == "draft":
         st.divider()
         if row["kind"] == "CONTRACT":

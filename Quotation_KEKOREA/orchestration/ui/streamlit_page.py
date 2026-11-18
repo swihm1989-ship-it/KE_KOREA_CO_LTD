@@ -277,7 +277,7 @@ elif page == "발송 대기":
     # when this entrypoint source changes. Resolve it before the UI module.
     import importlib
     from Quotation_KEKOREA.orchestration.workflows import email_reply_runtime as _reply_runtime
-    _expected_reply_revision = "master-reply-20261118-http400-schema-v2"
+    _expected_reply_revision = "master-reply-20261118-personal-salutation-v3"
     if getattr(_reply_runtime, "REPLY_RUNTIME_REVISION", None) != _expected_reply_revision:
         importlib.invalidate_caches()
         _reply_runtime = importlib.reload(_reply_runtime)

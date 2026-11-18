@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-REPLY_RUNTIME_REVISION = "master-reply-20261118-http400-schema-v2"
+REPLY_RUNTIME_REVISION = "master-reply-20261118-personal-salutation-v3"
 REPLY_SOURCE_MTIME_NS = Path(__file__).stat().st_mtime_ns
 
 from Quotation_KEKOREA.orchestration.workflows.email_outbox import (

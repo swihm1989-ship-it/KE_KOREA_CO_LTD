@@ -19,7 +19,7 @@ CREATE INDEX IF NOT EXISTS kekorea_master_pdf_owner_status_time
   ON public.kekorea_master_pdf_archive (owner_email, status, created_at DESC);
 ALTER TABLE public.kekorea_master_pdf_archive ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.kekorea_master_pdf_archive FROM anon, authenticated;
-GRANT SELECT, INSERT, UPDATE ON public.kekorea_master_pdf_archive TO service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.kekorea_master_pdf_archive TO service_role;
 INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 VALUES ('kekorea-master-pdfs', 'kekorea-master-pdfs', false, 20971520,
         ARRAY['application/pdf']::text[])

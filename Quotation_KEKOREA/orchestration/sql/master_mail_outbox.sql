@@ -27,5 +27,5 @@ create index if not exists kekorea_master_mail_outbox_owner_created
   on public.kekorea_master_mail_outbox(owner_email,created_at desc);
 alter table public.kekorea_master_mail_outbox enable row level security;
 revoke all on table public.kekorea_master_mail_outbox from public, anon, authenticated;
-grant select, insert, update on table public.kekorea_master_mail_outbox to service_role;
+grant select, insert, update, delete on table public.kekorea_master_mail_outbox to service_role;
 -- Server only: no public/anon/authenticated RLS allow policy. No SECURITY DEFINER.

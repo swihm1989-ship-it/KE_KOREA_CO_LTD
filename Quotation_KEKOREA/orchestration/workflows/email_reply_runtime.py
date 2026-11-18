@@ -14,7 +14,7 @@ import re
 import urllib.error
 import urllib.request
 
-REPLY_RUNTIME_REVISION = "master-reply-20261118-http400-schema-v2"
+REPLY_RUNTIME_REVISION = "master-reply-20261118-personal-salutation-v3"
 DRAFT_MODULE = "Quotation_KEKOREA.orchestration.workflows.email_reply_drafts"
 HANDOFF_MODULE = "Quotation_KEKOREA.orchestration.workflows.email_reply_handoff"
 MAIL_UI_MODULE = "Quotation_KEKOREA.orchestration.ui.email_outbox_page"
