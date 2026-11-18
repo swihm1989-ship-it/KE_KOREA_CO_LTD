@@ -7,7 +7,6 @@ from Quotation_KEKOREA.orchestration.workflows import (
     email_outbox as outbox,
     mail_pdf_attachments as attachments,
 )
-from Quotation_KEKOREA.orchestration.adapters.whois_mail import MailConfig, PopConfig, SmtpConfig
 
 
 class MailPdfAttachmentTests(TestCase):
