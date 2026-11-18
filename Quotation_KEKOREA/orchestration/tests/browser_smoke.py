@@ -39,7 +39,9 @@ def click_and_check():
             page.set_default_timeout(25000)
             page.goto(URL+"/",wait_until="domcontentloaded")
             expect(page.get_by_text("mock-send-count: 0")).to_be_visible(timeout=25000)
-            expect(page.get_by_text("입찰 건 관련",exact=False).first).to_be_visible()
+            # Streamlit renders hidden text inside its selectbox menu as well;
+            # assert the visible sender caption rather than a hidden option.
+            expect(page.get_by_text("받은 사람: Mock buyer",exact=False)).to_be_visible()
             send=page.get_by_role("button",name="발송",exact=True)
             expect(send).to_be_disabled()
             page.screenshot(path=str(OUTPUT/"01_draft_no_ai.png"),full_page=True)
@@ -86,6 +88,12 @@ def click_and_check():
             page.screenshot(path=str(OUTPUT/"05_mock_sent_once.png"),full_page=True)
             print("MASTER_BROWSER_UI_SMOKE_OK: draft, consent, synthetic AI, 3 candidates,"
                   " editable text, approval gate, exactly one mocked send")
+        except Exception:
+            # Keep a screenshot of the synthetic-only failure state so CI
+            # failures can be debugged without user screenshots.
+            page.screenshot(path=str(OUTPUT/"99_failure.png"),full_page=True)
+            print("SYNTHETIC_UI_BODY_ON_FAILURE: " + page.locator("body").inner_text()[:2800])
+            raise
         finally:
             browser.close()
 
