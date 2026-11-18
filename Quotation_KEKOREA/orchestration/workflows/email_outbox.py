@@ -20,7 +20,7 @@ from Quotation_KEKOREA.orchestration.workflows.email_reply_drafts import (
     reply_subject, source_hash, preferred_language,
 )
 
-EMAIL_SEND_RUNTIME_REVISION = "master-smtp-whois-legacy-optin-20261118-v4"
+EMAIL_SEND_RUNTIME_REVISION = "master-smtp-whois-auto-compat-20261118-v5"
 EMAIL_SEND_SOURCE_MTIME_NS = Path(__file__).stat().st_mtime_ns
 
 TABLE="kekorea_master_mail_outbox"
