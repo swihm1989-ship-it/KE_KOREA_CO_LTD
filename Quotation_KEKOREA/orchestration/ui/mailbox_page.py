@@ -258,7 +258,9 @@ def render_mailbox(principal):
             probe_smtp(config.smtp)
             st.success('발신 서버 TLS 인증 성공. 실제 메일은 발송하지 않았습니다.')
         except MailConnectionError as exc: st.error(str(exc))
-    st.caption('실제 메일 발송이나 앱을 닫은 상태의 24시간 수집은 별도 서버 작업자가 필요합니다.')
+    st.caption("이 메일함에서는 어떤 메일도 발송하지 않습니다. 실제 회신은 발송 대기에서 "
+               "사용자가 최종 내용을 확인하고 '발송' 버튼을 눌렀을 때만 이루어집니다. "
+               "앱을 닫은 상태의 상시 수신에는 별도 메일 작업자가 필요합니다.")
     _live_mailbox(config.pop, account)
 
 
@@ -459,4 +461,5 @@ def render_inbox(messages, account):
                 if _use_for_ai(selected, extract=False, attachments=chosen,
                                requested=chosen_kinds):
                     st.rerun(scope="app")
-            st.caption("이동 후 첨부파일과 문서 종류를 확인하고 'AI 거래조건 분석'을 실행하세요.")
+            st.caption("이동 후 문서가 필요한 경우 기존 PI/PO/CI/PL·계약서 작성 화면에서 분석합니다. "
+                       "문서가 필요 없으면 준비할 문서 종류를 비워 회신 후보 3개를 발송 대기로 보낼 수 있습니다.")

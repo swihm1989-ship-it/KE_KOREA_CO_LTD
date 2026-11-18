@@ -49,6 +49,8 @@ def render_email_outbox(principal: str):
     default=st.session_state.get("master_reply_selected")
     options=list(row_map)
     index=options.index(default) if default in row_map else 0
+    if st.session_state.get("master_email_outbox_selected") not in row_map:
+        st.session_state.pop("master_email_outbox_selected", None)
     chosen_id=st.selectbox("처리할 메일",options,index=index,
         format_func=lambda ident:(
             str(row_map[ident].get("source_subject") or "(제목 없음)")[:65]+" · "+
@@ -110,7 +112,7 @@ def render_email_outbox(principal: str):
     selected_index=st.radio("수정할 회신 후보",list(range(3)),
         horizontal=True,format_func=lambda i:str(i+1)+". "+STYLES[i],
         key="master_reply_choice_"+chosen_id)
-    stamp=sha256((row["source_hash"]+"|"+str(selected_index)+"|"+lang).encode()).hexdigest()[:12]
+    stamp=sha256((row["source_hash"]+"|"+str(selected_index)+"|"+lang+"|"+suggestions[selected_index]).encode()).hexdigest()[:12]
     recipient=st.text_input("받는 사람",value=str(row.get("recipient_email") or ""),
                             key="master_reply_to_"+chosen_id)
     subject=st.text_input("메일 제목",value=reply_subject(row.get("source_subject") or ""),
@@ -120,6 +122,8 @@ def render_email_outbox(principal: str):
     signature=st.text_area("Signature (기본값 · 수정 가능)",value=default_signature(lang),
                            height=135,key="master_reply_signature_"+chosen_id+"_"+lang)
     final_body=body.strip()+"\n\n"+signature.strip()
+    if not body.strip():
+        st.warning("답장 본문을 작성해야 발송할 수 있습니다.")
     st.markdown("**최종 발송 미리보기**")
     st.code(final_body, language=None)
 
@@ -129,7 +133,7 @@ def render_email_outbox(principal: str):
         "받는 사람·제목·본문·서명을 모두 확인했습니다. 발송 버튼을 누르면 실제 이메일이 전송됩니다.",
         key="master_reply_confirm_"+chosen_id+"_"+digest,
     )
-    if st.button("발송",type="primary",disabled=not approved,
+    if st.button("발송",type="primary",disabled=not approved or not body.strip(),
                  key="master_reply_send_"+chosen_id):
         try:
             from Quotation_KEKOREA.orchestration.ui.mailbox_page import _settings
