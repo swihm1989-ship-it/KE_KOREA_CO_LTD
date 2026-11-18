@@ -402,7 +402,16 @@ def render_email_outbox(principal: str):
             st.info(_safe_send_failure_status(env,principal,chosen_id,error))
         except Exception as error:
             _clear_send_approval(chosen_id)
-            st.error(_safe_send_failure_status(env,principal,chosen_id,error))
+            # Streamlit hot-deploy can reload email_outbox and create a new
+            # OutboxError class object. The already-imported OutboxError above
+            # will not match its subclasses, including SMTPBeforeDataError.
+            # Recover only known safe domain errors from the CURRENT module.
+            from Quotation_KEKOREA.orchestration.workflows import email_outbox as _active_outbox
+            if isinstance(error, _active_outbox.OutboxError):
+                st.error(str(error)[:350])
+                st.info(_safe_send_failure_status(env,principal,chosen_id,error))
+            else:
+                st.error(_safe_send_failure_status(env,principal,chosen_id,error))
         else:
             if result["status"]=="sent":
                 st.success("발송 완료가 확인되었습니다.")
