@@ -1570,6 +1570,23 @@ def _render_single_editor(digest: str, candidates: dict) -> None:
                      "단가 출처": "검증된 카탈로그" if item.get("master_price") is True else "개별 확인"}
                     for idx, item in enumerate(items) if isinstance(item, dict)],
                     hide_index=True, width="stretch")
+                if kind in {"PI", "PO", "CI"}:
+                    # This is a read-only preview from the SAME approved
+                    # calculation engine as the PDF, not an independent sum.
+                    # Partial totals are never presented as a full order total.
+                    try:
+                        calculated = _current_trade_export_review().review_trade_document(
+                            kind, doc, final=True, allow_incomplete=True)
+                        total = (calculated.get("render_data") or {}).get("total")
+                    except (ValueError, TypeError, KeyError, ArithmeticError):
+                        total = None
+                    if total is not None:
+                        st.caption(kind + " · 검토용 계산 합계: " +
+                                   str(doc.get("currency") or "통화 미확인") + " " +
+                                   str(total) + " (미확정 문서는 정식 발행 불가)")
+                    else:
+                        st.caption(kind + " · 일부 품목의 수량·단가·할인이 미확정되어 "
+                                   "전체 합계를 계산하지 않았습니다.")
                 # Show the current KE KOREA engine's unit review as ONE
                 # user-confirmed action. No per-product MASTER unit inference.
                 unit_only_indices = [
@@ -2488,8 +2505,10 @@ def render_ai_intake(principal: str):
                                   document_export_env(st.secrets, os.environ),
                                   edited_matches=not json_changed, principal=principal)
         st.markdown("#### 추가 검토용 기능 (선택)")
-        if st.button("기존 문서 엔진으로 검증·DRAFT 생성", key="ai_intake_prepare",
-                     disabled=not editor_matches):
+        # Keep the separate legacy smoke path, but make its diagnostic-only
+        # purpose clear. The standard user uses the single PDF button below.
+        if st.button("고급 진단 · 기존 문서 엔진 검증·DRAFT 생성",
+                     key="ai_intake_prepare", disabled=not editor_matches):
             st.session_state.pop("ai_intake_drafts", None)
             try:
                 data = json.loads(raw)
