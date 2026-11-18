@@ -5,6 +5,7 @@ successful owner-confirmed click on the Streamlit send button.
 """
 from __future__ import annotations
 from datetime import datetime, timezone
+from pathlib import Path
 from email.message import EmailMessage
 from email.utils import parseaddr
 from hashlib import sha256
@@ -18,6 +19,9 @@ from Quotation_KEKOREA.orchestration.adapters.whois_mail import mail_config
 from Quotation_KEKOREA.orchestration.workflows.email_reply_drafts import (
     reply_subject, source_hash, preferred_language,
 )
+
+EMAIL_SEND_RUNTIME_REVISION = "master-smtp-preclaim-20261118-v1"
+EMAIL_SEND_SOURCE_MTIME_NS = Path(__file__).stat().st_mtime_ns
 
 TABLE="kekorea_master_mail_outbox"
 ADDRESS=re.compile(r"^[A-Za-z0-9.!#$%&'*+/=?^_\x60{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$")

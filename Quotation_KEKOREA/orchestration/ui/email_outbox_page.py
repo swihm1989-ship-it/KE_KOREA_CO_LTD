@@ -6,7 +6,10 @@ from __future__ import annotations
 
 from hashlib import sha256
 from pathlib import Path
+import importlib
+import inspect
 import os
+import re
 import streamlit as st
 
 REPLY_RUNTIME_REVISION = "master-reply-20261118-http400-schema-v2"
@@ -19,6 +22,66 @@ from Quotation_KEKOREA.orchestration.workflows.email_reply_drafts import (
 from Quotation_KEKOREA.orchestration.workflows.email_outbox import (
     OutboxError, list_replies, get_reply, save_candidates, send_approved,
 )
+
+SEND_REVISION_EXPECTED = "master-smtp-preclaim-20261118-v1"
+
+
+def _resolve_send_approved():
+    """Reload stale SMTP pipeline on click, before any DB claim or transport.
+
+    Long-running Streamlit processes retain imported Python modules between
+    deployments. A stale send_approved that lacks signature_text/language
+    raises TypeError before claim, which used to be shown as a generic
+    'sent folder check' error even when no SMTP was called.
+    """
+    from Quotation_KEKOREA.orchestration.workflows import email_outbox as module
+
+    def current(mod):
+        try:
+            actual_mtime=Path(mod.__file__).stat().st_mtime_ns
+            params=inspect.signature(mod.send_approved).parameters
+        except (TypeError, ValueError, OSError, AttributeError):
+            return False
+        return (getattr(mod, "EMAIL_SEND_RUNTIME_REVISION", None)==SEND_REVISION_EXPECTED
+                and getattr(mod, "EMAIL_SEND_SOURCE_MTIME_NS", None)==actual_mtime
+                and {"confirmed", "signature_text", "language"}.issubset(params))
+
+    if not current(module):
+        try:
+            importlib.invalidate_caches()
+            module=importlib.reload(module)
+        except (ImportError, OSError, SyntaxError, RuntimeError):
+            raise OutboxError(
+                "메일 발송 모듈을 최신 상태로 불러오지 못했습니다. 발송을 시작하지 않았습니다."
+            ) from None
+    if not current(module):
+        raise OutboxError(
+            "메일 발송 모듈 버전이 일치하지 않습니다. 발송을 시작하지 않았습니다."
+        )
+    return module.send_approved
+
+
+def _safe_send_failure_status(env,principal,ident,error):
+    """Read-only DB check after an unexpected exception, never SMTP/retry."""
+    safe_type=type(error).__name__
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,60}",safe_type):
+        safe_type="Exception"
+    try:
+        fresh=get_reply(env,principal,ident)
+    except Exception:
+        return ("발송 중 오류 유형: "+safe_type+". 데이터베이스 상태도 확인하지 못했습니다. "
+                "중복 발송하지 말고 보낸편지함 및 운영 로그를 확인하세요.")
+    status=str(fresh.get("status") or "")
+    started=fresh.get("send_started_at")
+    if status=="draft" and not started:
+        return ("발송 준비 단계 오류 ("+safe_type+"). 데이터베이스에 발송 시작 기록이 없습니다. "
+                "현재 코드 흐름상 SMTP 전송 전에 중단된 상태입니다. 자동 재시도하지 않습니다.")
+    if status=="sent":
+        return ("발송 완료 기록이 데이터베이스에서 확인됩니다. 화면 처리 중 오류 ("+
+                safe_type+")가 발생했습니다. 다시 발송하지 마세요.")
+    return ("발송 상태가 '"+status+"'로 기록되어 있습니다. 오류 유형: "+safe_type+
+            ". 실제 전송 여부가 불확실합니다. 재발송하지 말고 보낸편지함을 확인하세요.")
+
 
 def _clear_send_approval(ident: str):
     """Any email edit invalidates the exact-value send approval."""
@@ -208,13 +271,17 @@ def render_email_outbox(principal: str):
         try:
             from Quotation_KEKOREA.orchestration.ui.mailbox_page import _settings
             with st.spinner("승인된 메일을 SMTP로 전송합니다."):
-                result=send_approved(env,principal,chosen_id,_settings(),
-                                     recipient,subject,final_body,confirmed=True,
-                                     signature_text=signature,language=lang)
+                current_send=_resolve_send_approved()
+                result=current_send(env,principal,chosen_id,_settings(),
+                                    recipient,subject,final_body,confirmed=True,
+                                    signature_text=signature,language=lang)
         except (OutboxError,ValueError,PermissionError) as error:
-            st.error(str(error))
-        except Exception:
-            st.error("발송 결과 확인에 실패했습니다. 보낸편지함을 확인한 뒤 조치하세요.")
+            _clear_send_approval(chosen_id)
+            st.error(str(error)[:350])
+            st.info(_safe_send_failure_status(env,principal,chosen_id,error))
+        except Exception as error:
+            _clear_send_approval(chosen_id)
+            st.error(_safe_send_failure_status(env,principal,chosen_id,error))
         else:
             if result["status"]=="sent":
                 st.success("발송 완료가 확인되었습니다.")
