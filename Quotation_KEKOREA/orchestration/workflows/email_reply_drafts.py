@@ -6,6 +6,8 @@ The model never controls signatures, transport, recipient or send approval.
 from __future__ import annotations
 
 from hashlib import sha256
+from email.header import decode_header, make_header
+from email.utils import parseaddr
 import json
 import re
 import urllib.error
@@ -13,7 +15,7 @@ import urllib.request
 
 from pathlib import Path
 
-REPLY_RUNTIME_REVISION = "master-reply-20261118-http400-schema-v2"
+REPLY_RUNTIME_REVISION = "master-reply-20261118-personal-salutation-v3"
 REPLY_SOURCE_MTIME_NS = Path(__file__).stat().st_mtime_ns
 
 STYLES = ("간결한 비즈니스형", "친근한 협력형", "상세하고 정중한 형식")
@@ -42,6 +44,149 @@ def preferred_language(subject: str, body: str) -> str:
 def default_signature(language: str) -> str:
     return SIGNATURE_KO if language == "ko" else SIGNATURE_EN
 
+
+
+# User-controlled recipient greeting, not a legal identity verification.
+# A display name or explicit signature is only a proposed salutation. We
+# never infer gender, position, or an individual from an email address.
+_KO_SURNAMES = (
+    r"(?:남궁|황보|제갈|선우|독고|사공|김|이|박|최|정|강|조|윤|장|임|"
+    r"한|오|서|신|권|황|안|송|전|홍|유|고|문|손|배|백|허|남|심|노|하|"
+    r"곽|성|차|주|우|구|나|민|류|진|지|엄|변|채|원|천|방|공|현|함|여|추|도|소)"
+)
+_KO_PERSON = re.compile(r"(?<![가-힣])(" + _KO_SURNAMES + r"[가-힣]{1,3})(?![가-힣])")
+_KO_ROLE = re.compile(
+    r"(대표이사|대표|프로|팀장|실장|부장|차장|과장|대리|이사|"
+    r"책임|선임|매니저|사원)(?:님)?"
+)
+_COMPANY_WORDS = re.compile(
+    r"(?i)\b(?:buyer|supplier|customer|sales|service|team|support|info|"
+    r"admin|administrator|no.?reply|notification|office|company|co|ltd|inc|corp)\b"
+    r"|(?:회사|주식회사|영업팀|고객센터|관리자|안내|대표메일|수신전용)"
+)
+_EN_PERSON = re.compile(
+    r"(?:(Mr|Ms|Mrs|Dr|Prof)\.?\s+)?"
+    r"([A-Z][A-Za-z'-]{1,39}(?:\s+[A-Z][A-Za-z'-]{1,39}){0,3})"
+)
+_OPENING_LINE = re.compile(
+    r"(?i)\A(?:"
+    r"Dear[ \t]+[^\r\n]{1,100}[,:]|"
+    r"Hello[ \t]*(?:[^\r\n]{1,60})?[,.!]|"
+    r"Hi[ \t]+[^\r\n]{1,60}[,:!]|"
+    r"안녕하세요[.!。,，]?|"
+    r"(?:수신\s*[:：]\s*)?[^\r\n]{1,40}님께[,:：]?"
+    r")[ \t]*(?:\r?\n[ \t]*){1,3}"
+)
+
+
+def _person_label(value: str) -> tuple[str, str]:
+    """Return a clearly visible human display name and explicit Korean title.
+
+    In particular, 'ECLADO Sales' and bare mailboxes are organizations,
+    not individuals. No role is created from department or domain.
+    """
+    label = re.sub(r"[\r\n\t]+", " ", str(value or ""))[:180].strip(" \"' \u200b")
+    if not label or "@" in label or len(label) > 120:
+        return "", ""
+    named = list(_KO_PERSON.finditer(label))
+    if named:
+        match = named[-1]
+        name = match.group(1)
+        # Reject plain words like "이메일", not a verified individual name.
+        if name not in {"이메일", "이벤트", "이용자", "이용료", "영업팀"}:
+            suffix = label[match.end():].lstrip(" \t([/{")
+            role_match = _KO_ROLE.match(suffix)
+            role = role_match.group(1) if role_match else ""
+            return name, role
+    # Prefer the first identifiable human token sequence, not a trailing
+    # organization description or mail address.
+    first = re.split(r"\s+[|/–—-]\s+|[,;]\s*", label, maxsplit=1)[0]
+    first = re.sub(r"\s*\([^)]*\)\s*$", "", first).strip()
+    if not first or _COMPANY_WORDS.search(first):
+        return "", ""
+    match = _EN_PERSON.fullmatch(first)
+    if not match:
+        return "", ""
+    title, name = match.groups()
+    if _COMPANY_WORDS.search(name) or name.isupper():
+        return "", ""
+    return (f"{title}. {name}" if title else name), ""
+
+
+def _signoff_details(body: str, expected_name: str) -> tuple[str, str]:
+    """Trust only a nearby closing signature for missing explicit title/name.
+
+    A 'Dear David' in the received mail addresses KE KOREA, not the sender.
+    Never interpret arbitrary references from the body as the reply recipient.
+    """
+    lines = [s.strip() for s in str(body or "")[:12000].splitlines()]
+    if not lines:
+        return "", ""
+    signature_mark = re.compile(
+        r"(?i)^(?:best regards|kind regards|warm regards|regards|sincerely|"
+        r"with thanks|thank you|cheers|감사합니다|고맙습니다)[!.,，。 ]*$"
+    )
+    starts = [i for i, line in enumerate(lines)
+              if signature_mark.match(line) and len(lines) - i <= 16]
+    if not starts:
+        return "", ""
+    tail = [s for s in lines[starts[-1] + 1:] if s]
+    if not tail:
+        return "", ""
+    for i, candidate in enumerate(tail[:4]):
+        name, role = _person_label(candidate)
+        if not name:
+            continue
+        if expected_name and name.casefold() != expected_name.casefold():
+            continue
+        if not role and i + 1 < len(tail):
+            explicit = _KO_ROLE.fullmatch(tail[i + 1].strip())
+            if explicit:
+                role = explicit.group(1)
+        return name, role
+    return "", ""
+
+
+def recipient_salutation(source: dict, language: str) -> str:
+    """Propose the recipient's greeting; never use the sender (KE KOREA) signoff."""
+    if language not in {"ko", "en"}:
+        raise ValueError("회신 언어가 유효하지 않습니다.")
+    header = str(source.get("sender") or source.get("sender_header") or "")
+    raw_display = parseaddr(header[:350])[0] if header else ""
+    try:
+        display = str(make_header(decode_header(raw_display)))
+    except (UnicodeError, ValueError, TypeError):
+        display = raw_display
+    name, role = _person_label(display)
+    footer_name, footer_role = _signoff_details(source.get("body") or "", name)
+    if not name and footer_name:
+        name, role = footer_name, footer_role
+    elif name and not role and footer_role:
+        role = footer_role
+    if language == "en":
+        return f"Dear {name}," if name else "Hello,"
+    if not name:
+        return "안녕하세요."
+    mapped = {"대표이사": "대표"}.get(role, role)
+    return f"{name} {mapped}님께" if mapped else f"{name}님께"
+
+
+def with_recipient_salutation(body: str, source: dict, language: str) -> str:
+    """Exactly one editable opening; safe on AI and already-saved legacy drafts.
+
+    No network, DB write, or additional pop-up. Does not alter a person's
+    explicit edit already present in the Streamlit text area.
+    """
+    opening = recipient_salutation(source, language)
+    text = str(body or "").strip()
+    if not text:
+        return opening
+    if text == opening or text.startswith(opening + "\n"):
+        return text
+    # Remove at most one AI-authored greeting so names are not duplicated.
+    # Preserve the rest of the business content exactly.
+    content = _OPENING_LINE.sub("", text, count=1).lstrip()
+    return opening + "\n\n" + content
 
 def source_hash(uid: str, sender: str, subject: str, body: str) -> str:
     return sha256(("\0".join((str(uid),str(sender),str(subject),str(body)))).encode("utf-8")).hexdigest()
@@ -186,8 +331,8 @@ def generate_candidates(source: dict, env: dict, language: str, *, opener=None) 
         "Do not invent or agree to prices, payment terms, discounts, inventory, delivery dates, contracts, "
         "commissions, purchases, or legal undertakings. For uncertain information, say it requires confirmation. "
         "Never claim any documents are attached, sent or finalized. "
-        "Do NOT include a name, sender signature, address, phone, email or sign-off block: "
-        "the app attaches an approved locale-specific signature itself. "
+        "Do NOT include an opening salutation, sender signature, address, phone, email or sign-off block: "
+        "the app adds the recipient's verified-display-name greeting and an approved signature itself. "
         "No Markdown or HTML; only the JSON object."
     )
     payload={
@@ -247,7 +392,11 @@ def generate_candidates(source: dict, env: dict, language: str, *, opener=None) 
         decoded=json.loads(raw_json)
     except (ValueError,TypeError):
         raise RuntimeError("AI 회신 결과 형식이 올바르지 않습니다.") from None
-    return _validated_candidates(decoded.get("candidates") if isinstance(decoded,dict) else None)
+    candidates = _validated_candidates(decoded.get("candidates") if isinstance(decoded,dict) else None)
+    proposed = [with_recipient_salutation(text, source, language) for text in candidates]
+    if any(len(text) > 4000 for text in proposed):
+        raise RuntimeError("수신 인사말이 포함된 AI 회신 초안의 길이를 확인해 주세요.")
+    return proposed
 
 
 def join_signature(body: str, language: str) -> str:
