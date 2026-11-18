@@ -36,13 +36,28 @@ class IncompleteFinalTests(unittest.TestCase):
         self.assertFalse(review.review_trade_document('PI', self.doc, final=True)['ready'])
         self.assertEqual(self.doc, before)
 
-    def test_unresolved_ai_conflicts_still_block_final_without_acknowledge_button(self):
+    def test_unresolved_ai_conflicts_are_warned_after_explicit_final_approval(self):
         self.doc['missing_fields'] = ['PI number was not present in the original mail']
         self.doc['conflicts'] = ['Original email mentioned two payment deadlines']
         report = self.report()
-        self.assertFalse(report['ready'])
-        self.assertTrue(report['issues'])
+        self.assertTrue(report['ready'], report['issues'])
+        self.assertTrue(any(row['code'] == 'prior_ai_conflicts' for row in report['warnings']))
         self.assertFalse(review.review_trade_document('PI', self.doc, final=True)['ready'])
+
+    def test_ai_payment_date_conflict_only_is_warning_and_never_changes_source(self):
+        doc = deepcopy(self.doc)
+        doc['payment_terms'] = 'T/T in advance before November 20'
+        doc['conflicts'] = [
+            'The message states that payment is due on November 20, while '
+            'the payment terms state T/T in advance before November 20.'
+        ]
+        original = deepcopy(doc)
+        report = self.report(doc)
+        self.assertTrue(report['ready'], report['issues'])
+        self.assertEqual(report['render_data']['payment_terms'], doc['payment_terms'])
+        self.assertEqual(len([x for x in report['warnings']
+                              if x['code'] == 'prior_ai_conflicts']), 1)
+        self.assertEqual(doc, original)
 
     def test_prior_payment_day_conflict_reconciles_from_explicit_current_terms(self):
         from PIL import Image
@@ -79,7 +94,7 @@ class IncompleteFinalTests(unittest.TestCase):
         self.assertTrue(files['pdf']['content'].startswith(b'%PDF'))
         self.assertTrue(files['pdf']['final'])
 
-    def test_payment_note_remains_blocked_without_a_single_consistent_deadline(self):
+    def test_ambiguous_payment_note_remains_visible_but_does_not_block_owner(self):
         note = ('The stated payment date is November 20, but the payment '
                 'term also says payment is due before November 20.')
         for current in (
@@ -91,9 +106,9 @@ class IncompleteFinalTests(unittest.TestCase):
                 doc['payment_terms'] = current
                 doc['conflicts'] = [note]
                 report = self.report(doc)
-                self.assertFalse(report['ready'])
-                self.assertTrue(any(row['code'] == 'ai_conflict'
-                                    for row in report['issues']))
+                self.assertTrue(report['ready'], report['issues'])
+                self.assertTrue(any(row['code'] == 'prior_ai_conflicts'
+                                    for row in report['warnings']))
 
     def test_twenty_line_eclado_image_pi_uses_current_facts_not_old_ai_visual_note(self):
         from PIL import Image
@@ -176,8 +191,8 @@ class IncompleteFinalTests(unittest.TestCase):
                     for row in report["warnings"]), 2)
                 self.assertEqual(doc, prior)
 
-        # Real contradiction, even when text talks about image/OCR, remains
-        # blocking; generic notes are NOT converted to advice by keywords.
+        # All AI prose notes remain visible to the owner without being
+        # mistaken for independently verified data conflicts.
         for issue in (
             "The image states 10 PCS but the email states 20 PCS",
             "Item 2 source price USD 3 differs from verified catalog USD 5",
@@ -188,10 +203,10 @@ class IncompleteFinalTests(unittest.TestCase):
                 doc = deepcopy(self.doc)
                 doc["conflicts"] = [issue] + benign
                 report = self.report(doc)
-                self.assertFalse(report["ready"])
-                self.assertTrue(any(row["code"] == "ai_conflict"
-                                    for row in report["issues"]))
-                self.assertEqual(report["render_data"]["conflicts"], [issue])
+                self.assertTrue(report["ready"], report["issues"])
+                self.assertTrue(any(row["code"] == "prior_ai_conflicts"
+                                    for row in report["warnings"]))
+                self.assertEqual(report["render_data"]["conflicts"], [])
 
     def test_prefixed_ai_review_note_not_reblocked_by_old_storage_shape(self):
         doc = deepcopy(self.doc)
@@ -292,7 +307,7 @@ class IncompleteFinalTests(unittest.TestCase):
                 self.assertTrue(report['issues'])
 
     def test_partial_mode_cannot_hide_conflicts_wrong_parties_or_unit_mismatch(self):
-        for change in ('conflict', 'seller', 'unit'):
+        for change in ('seller', 'unit'):
             with self.subTest(change=change):
                 doc = deepcopy(self.doc)
                 doc['buyer']['email'] = ''
