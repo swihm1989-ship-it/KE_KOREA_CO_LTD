@@ -357,6 +357,18 @@ def render_email_outbox(principal: str):
             if not prefilled_signature:
                 st.warning("이전 서명을 구분하지 못했습니다. 본문과 Signature를 "
                            "직접 확인한 후 새 발송을 승인하세요.")
+    # Document-aware sentence is added by the application, not invented by
+    # the AI (which deliberately never claims a document was attached).
+    if attached_pdfs:
+        kinds=", ".join(dict.fromkeys(str(doc.get("kind") or "PDF") for doc in attached_pdfs))
+        attachment_sentence=(
+            "요청하신 " + kinds + " 최종 PDF를 첨부합니다."
+            if lang=="ko" else
+            "Please find attached the requested final " + kinds + " PDF."
+        )
+        if attachment_sentence not in suggested_body:
+            suggested_body=(suggested_body.strip()+"\n\n" if suggested_body.strip()
+                            else "")+attachment_sentence
     if suggested_body:
         st.caption("첫 인사말은 원본 발신인 정보 기준으로 제안됩니다. "
                    "메일 내용에서 직접 수정할 수 있습니다.")
