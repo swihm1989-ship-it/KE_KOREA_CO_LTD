@@ -98,11 +98,14 @@ class OutboxLiveUiTests(unittest.TestCase):
         self.assertFalse(app.button(key="master_reply_send_"+self.mail_id).disabled)
         app.button(key="master_reply_send_"+self.mail_id).click().run()
         self.assertFalse(app.exception,[x.message for x in app.exception])
-        error_messages=" ".join(x.message for x in app.error)
+        error_messages=" ".join(str(x.value) for x in app.error)
         self.assertIn("발송 시작 기록이 없습니다",error_messages)
         self.assertIn("TypeError",error_messages)
         self.assertNotIn("PASSWORD-HIDDEN",error_messages)
         self.assertEqual(send.call_count,1)
+        # The approval is revoked in session state after the error; a rerun
+        # refreshes the existing button widget into its disabled state.
+        app.run()
         self.assertTrue(app.button(key="master_reply_send_"+self.mail_id).disabled)
 
     def test_approval_is_revoked_on_any_editor_change(self):
