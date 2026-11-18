@@ -20,7 +20,7 @@ from Quotation_KEKOREA.orchestration.workflows.email_reply_drafts import (
     reply_subject, source_hash, preferred_language,
 )
 
-EMAIL_SEND_RUNTIME_REVISION = "master-smtp-pdf-attachment-20261118-v3"
+EMAIL_SEND_RUNTIME_REVISION = "master-smtp-whois-legacy-optin-20261118-v4"
 EMAIL_SEND_SOURCE_MTIME_NS = Path(__file__).stat().st_mtime_ns
 
 TABLE="kekorea_master_mail_outbox"
@@ -268,7 +268,8 @@ def _validate_message(to_addr:str,subject:str,body:str):
 
 def send_smtp(config,recipient:str,subject:str,body:str,message_id:str="",*,
               html_body:str|None=None,logo_bytes:bytes|None=None,
-              attachments:list[dict]|None=None):
+              attachments:list[dict]|None=None,
+              allow_legacy_dh:bool=False):
     """One SMTP send, only after atomic owner-confirmed DB claim.
 
     Any connection/TLS/auth/composition failure that occurs BEFORE calling
@@ -313,7 +314,11 @@ def send_smtp(config,recipient:str,subject:str,body:str,message_id:str="",*,
                 raise OutboxError("PDF 첨부파일 형식이 유효하지 않습니다.")
             email.add_attachment(data,maintype="application",subtype="pdf",
                                  filename=filename)
-        tls=ssl.create_default_context()
+        from Quotation_KEKOREA.orchestration.adapters.whois_mail import (
+            _whois_legacy_dh_context,
+        )
+        tls=(_whois_legacy_dh_context(config.smtp) if allow_legacy_dh
+             else ssl.create_default_context())
         stage="connect"
         if config.smtp.security=="ssl":
             client=smtplib.SMTP_SSL(config.smtp.host,config.smtp.port,timeout=20,context=tls)
@@ -357,6 +362,7 @@ def send_approved(env:dict,principal:str,ident:str,config_values:dict,
                   recipient:str,subject:str,body:str,*,confirmed:bool=False,
                   signature_text:str|None=None,language:str|None=None,
                   expected_attachment_digest:str|None=None,
+                  allow_legacy_dh:bool=False,
                   transport=send_smtp):
     """No call without a real user's send-button click and confirmation."""
     if confirmed is not True:
@@ -405,6 +411,8 @@ def send_approved(env:dict,principal:str,ident:str,config_values:dict,
     approved_data=recipient+"\0"+subject+"\0"+body
     if expected_attachment_digest is not None:
         approved_data+="\0"+expected_attachment_digest
+    if allow_legacy_dh:
+        approved_data+="\0whois-legacy-dh-user-approved"
     digest=sha256(approved_data.encode("utf-8")).hexdigest()
     repo=_repo(env)
     stamp=datetime.now(timezone.utc).isoformat()
@@ -424,6 +432,9 @@ def send_approved(env:dict,principal:str,ident:str,config_values:dict,
     before_data_error = None
     try:
         attachment_kw=({"attachments":verified_attachments} if verified_attachments else {})
+        if allow_legacy_dh:
+            # Never weaken TLS unless the owner explicitly opted in.
+            attachment_kw["allow_legacy_dh"]=True
         if html_body is None:
             transport(config,recipient,subject,body,row.get("message_id") or "",
                       **attachment_kw)
