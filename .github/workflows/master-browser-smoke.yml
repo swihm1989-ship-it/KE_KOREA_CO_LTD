@@ -26,6 +26,21 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install 'streamlit[auth]>=1.48,<2' 'langgraph>=1.0,<2' 'python-docx>=1.1,<2' 'reportlab>=4,<5' 'PyMuPDF>=2,<3' 'Pillow>=10,<13' 'playwright==1.56.0'
           python -m playwright install chromium
+      - name: Diagnose WHOIS SMTP TLS anonymously (no login, no send)
+        continue-on-error: true
+        run: |
+          for host in smtp.whoisworks.com mail.w.ke-korea.com; do
+            for mode in "587 smtp" "465 implicit"; do
+              set -- $mode
+              port="$1"; protocol="$2"
+              echo "PROBE host=$host port=$port mode=$protocol"
+              if [ "$protocol" = smtp ]; then
+                timeout 9 openssl s_client -starttls smtp -connect "$host:$port" -servername "$host" -brief </dev/null 2>&1 | head -n 9 || true
+              else
+                timeout 9 openssl s_client -connect "$host:$port" -servername "$host" -brief </dev/null 2>&1 | head -n 9 || true
+              fi
+            done
+          done
       - name: Click synthetic Streamlit UI in Chromium without production secrets
         run: |
           python Quotation_KEKOREA/orchestration/tests/browser_smoke.py
