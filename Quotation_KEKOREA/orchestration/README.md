@@ -326,3 +326,11 @@ provider error의 HTTP 번호와 영숫자 code/param만 표시하며, error.mes
 Streamlit 배포 후 잔존 런타임 모듈을 메인 페이지·AI 업무요청·발송 대기에서 version check 후 갱신. 자동 메일 발송 없음. DRAFT 보존, 수동 작성 및 '이 내용으로 발송 전 승인'→'발송' 2단계 유지.
 회귀 테스트: HTTP400 형식 불일치 시 안전한 재시도 1회, 모델 파라미터 오류 시 재시도 금지, 비밀 원문 비노출, JSON schema, 모델 호환 진단, 코드 펜스 결과 정규화, 기존 UI·문서·계약 회귀.
 한계: 실운영 OpenAI API 키/모델의 응답과 Streamlit Cloud 실제 배포는 테스트 환경의 가상 응답만으로 확인할 수 없음. 직접 입력할 새 API 키는 필요하지 않음.
+
+
+### 2026-11-18 · 발송 승인 후 결과 확인 화면 오류 (발송 전 단계)
+운영 화면에서 '발송 결과 확인에 실패했습니다. 보낸편지함을 확인...' 메시지를 확인. 실제 Supabase `kekorea_master_mail_outbox`의 해당 메일은 DRAFT, `send_started_at`/`sent_at`/`approved_sha256`가 모두 NULL이고 AI 후보 3개는 보존됨. **현재 전송 코드상 SMTP는 DRAFT → sending 원자적 claim 이후에만 호출**, 따라서 이 시도의 DB 증거는 전송 시작 전 예외를 가리킴.
+기존 Streamlit은 UI 모듈만 갱신하고 `email_outbox.send_approved`를 정적 import로 유지해 오래된 함수가 `signature_text`/`language` 키워드를 받지 못하는 `TypeError`가 발생할 가능성이 있었음. UI 발송 버튼에서 전송 함수의 소스 수정 시각, 런타임 리비전, 함수 파라미터를 확인하고 필요할 때만 모듈을 안전하게 재로드하도록 수정.
+사용자 직접 발송 클릭 후 오류가 생기면 **DB를 읽기 전용으로 재조회**하여 DRAFT/전송 시작 전과 sending/sent/send_unknown 상태를 별도로 표시. 내부 예외 메시지·SMTP 비밀번호·거래처 메일 본문은 노출하지 않고 안전한 예외 종류만 표시. 오류 시 기존 발송 승인 상태를 해제하고, 자동으로 다시 보내지 않음.
+실제 전송이 시작된 상태로 조회된다면 중복 발송을 금지하고 보낸편지함 확인을 안내. AI 회신·서명·기존 문서 PDF 엔진·Supabase 스키마·메일 자동발송 금지 원칙은 유지. 새 테스트는 구형 함수 캐시 재로드, 오류 시 DB DRAFT 판별, 발송 후 상태 불확실 시 재발송 금지, Streamlit UI 모의 버튼, Chromium 브라우저 검증을 포함.
+운영 후이즈 SMTP에 대한 라이브 송신은 실제 사용자 수신자에게 자동으로 테스트하지 않으며, 운영 UI의 외부 계정 로그인 검증 여부와 구분한다.

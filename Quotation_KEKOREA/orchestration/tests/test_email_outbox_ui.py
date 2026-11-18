@@ -42,12 +42,13 @@ class OutboxLiveUiTests(unittest.TestCase):
             ("Quotation_KEKOREA.orchestration.ui.market_news_page._cached_news",([],None)),
             ("Quotation_KEKOREA.orchestration.ui.email_outbox_page._db_env",{}),
             ("Quotation_KEKOREA.orchestration.ui.email_outbox_page.list_replies",[self.record]),
+            ("Quotation_KEKOREA.orchestration.ui.email_outbox_page.get_reply",self.record),
             ("Quotation_KEKOREA.orchestration.ui.pdf_archive_page.render_pdf_archive",None),
         ]
         for target,return_value in patches:
             stack.enter_context(patch(target,return_value=return_value))
         stack.enter_context(patch(
-            "Quotation_KEKOREA.orchestration.ui.email_outbox_page.send_approved",send))
+            "Quotation_KEKOREA.orchestration.ui.email_outbox_page._resolve_send_approved",return_value=send))
         stack.enter_context(patch(
             "Quotation_KEKOREA.orchestration.workflows.email_reply_runtime.probe_connection",probe))
         app=AppTest.from_file(str(PAGE),default_timeout=40).run()
@@ -84,6 +85,28 @@ class OutboxLiveUiTests(unittest.TestCase):
         self.assertEqual(args.kwargs.get("confirmed"),True)
         self.assertEqual(args.kwargs.get("language"),"ko")
         self.assertIn("(주)케이이코리아",args.args[6])
+
+    def test_unexpected_send_preflight_typeerror_shows_draft_not_sent(self):
+        send=Mock(side_effect=TypeError(
+            "send_approved() got unexpected keyword 'signature_text' PASSWORD-HIDDEN"))
+        app,send,_probe=self._app(send=send)
+        areas=[t for t in app.text_area
+               if str(t.key or "").startswith("master_reply_body_"+self.mail_id)]
+        self.assertEqual(len(areas),1)
+        areas[0].set_value("안녕하세요. 입찰 문의 내용을 확인했습니다.").run()
+        app.button(key="master_reply_approve_"+self.mail_id).click().run()
+        self.assertFalse(app.button(key="master_reply_send_"+self.mail_id).disabled)
+        app.button(key="master_reply_send_"+self.mail_id).click().run()
+        self.assertFalse(app.exception,[x.message for x in app.exception])
+        error_messages=" ".join(str(x.value) for x in app.error)
+        self.assertIn("발송 시작 기록이 없습니다",error_messages)
+        self.assertIn("TypeError",error_messages)
+        self.assertNotIn("PASSWORD-HIDDEN",error_messages)
+        self.assertEqual(send.call_count,1)
+        # The approval is revoked in session state after the error; a rerun
+        # refreshes the existing button widget into its disabled state.
+        app.run()
+        self.assertTrue(app.button(key="master_reply_send_"+self.mail_id).disabled)
 
     def test_approval_is_revoked_on_any_editor_change(self):
         from Quotation_KEKOREA.orchestration.ui import email_outbox_page as outbox_page

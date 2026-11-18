@@ -60,7 +60,7 @@ with (
     patch.object(page,"_db_env",return_value={}),
     patch.object(page,"list_replies",side_effect=lambda *_:[st.session_state["fixture_record"]]),
     patch.object(page,"save_candidates",side_effect=save),
-    patch.object(page,"send_approved",side_effect=send),
+    patch.object(page,"_resolve_send_approved",return_value=send),
     patch.object(runtime,"generate_reply_candidates",side_effect=generate),
     patch.object(runtime,"probe_connection",return_value="진단 성공: 가상 AI 서버 응답"),
 ):
