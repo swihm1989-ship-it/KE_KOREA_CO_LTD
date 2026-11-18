@@ -125,8 +125,60 @@ def make_trade_candidate(kind: str, analysis: Mapping[str, Any],
         raise ValueError("무역 문서 유형은 PI/PO/CI/PL 중 하나여야 합니다.")
     if product_family not in _FAMILIES:
         raise ValueError("상품군을 확인해 주세요.")
-    terms = {term["key"]: str(term.get("value") if term.get("value") is not None else "")
-             for term in data["terms"] if term.get("key") in _TERM_KEYS}
+    # The contract extractor emits an ordered list of terms, sometimes with
+    # repeated products/quantities/prices for a multi-line order. A dict
+    # comprehension silently discarded all but the LAST product; preserve
+    # each product occurrence instead. Never fill mismatched price/quantity
+    # lists by reusing another product's commercial value.
+    term_groups = {}
+    for term in data["terms"]:
+        if term.get("key") in _TERM_KEYS:
+            term_groups.setdefault(term["key"], []).append(term)
+    terms = {
+        key: str(values[-1].get("value") if values[-1].get("value") is not None else "")
+        for key, values in term_groups.items()
+    }
+
+    products = term_groups.get("products") or []
+    if len(products) > 1:
+        product_count = len(products)
+
+        def row_value(key, row_index):
+            occurrences = term_groups.get(key) or []
+            # A single price or quantity across several products is
+            # ambiguous, not a universal default. Require one per product.
+            if len(occurrences) != product_count:
+                return ""
+            value = occurrences[row_index].get("value")
+            return str(value if value is not None else "")
+
+        item_rows = [{
+            "product_name": row_value("products", i),
+            "quantity": row_value("quantity", i),
+            "unit": row_value("unit", i),
+            "unit_price": row_value("unit_price", i),
+            "price_basis": row_value("unit", i),
+            "price_source": "",
+        } for i in range(product_count)]
+    else:
+        # Existing single-item input remains backward compatible.
+        item_rows = [{
+            "product_name": terms.get("products", ""),
+            "quantity": terms.get("quantity", ""),
+            "unit": terms.get("unit", ""),
+            "unit_price": terms.get("unit_price", ""),
+            "price_basis": terms.get("unit", ""),
+            "price_source": "",
+        }]
+    currencies = {
+        str(entry.get("value") or "").strip().upper()
+        for entry in (term_groups.get("currency") or [])
+        if str(entry.get("value") or "").strip()
+    }
+    if len(currencies) > 1:
+        # A single-currency invoice must not silently use the last rate
+        # from a mixed-currency extraction.
+        terms["currency"] = ""
     parties = {}
     for role in ("seller", "buyer"):
         p = next((p for p in data["parties"] if role in p.get("roles", ())), {})
@@ -146,14 +198,7 @@ def make_trade_candidate(kind: str, analysis: Mapping[str, Any],
         "seller": parties["seller"], "buyer": parties["buyer"],
         "incoterms": terms.get("delivery", ""),
         "payment_terms": terms.get("payment_trigger", ""),
-        "items": [{
-            "product_name": terms.get("products", ""),
-            "quantity": terms.get("quantity", ""),
-            "unit": terms.get("unit", ""),
-            "unit_price": terms.get("unit_price", ""),
-            "price_basis": terms.get("unit", ""),
-            "price_source": "",  # optional metadata; extraction is not verified provenance
-        }],
+        "items": item_rows,
     }
     return result
 
