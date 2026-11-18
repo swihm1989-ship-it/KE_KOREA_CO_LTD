@@ -7,6 +7,7 @@ No writing to repository, no automatic approval, finalization, or SMTP.
 from __future__ import annotations
 
 import os
+import re
 AI_WORKFLOW_REVISION = "shared-ke-korea-family-20261117-v3"
 AI_WORKFLOW_SOURCE_MTIME_NS = os.stat(__file__).st_mtime_ns
 from Quotation_KEKOREA.observability.core import traced
@@ -54,6 +55,9 @@ def extract_candidate(instruction: str, env: Mapping[str, str], *, consent: bool
 def _validated_analysis(analysis: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(analysis, Mapping):
         raise ValueError("추출 결과는 JSON 객체여야 합니다.")
+    # Never mutate the original raw extraction while normalizing party roles.
+    # The live UI keeps the raw result for human comparison with edited drafts.
+    analysis = deepcopy(dict(analysis))
     if analysis.get("contract_type") not in {"sale", "trade_commission", "investment_commission"}:
         raise ValueError("지원하지 않는 계약 유형입니다.")
     parties, terms = analysis.get("parties"), analysis.get("terms")
@@ -125,8 +129,131 @@ def make_trade_candidate(kind: str, analysis: Mapping[str, Any],
         raise ValueError("무역 문서 유형은 PI/PO/CI/PL 중 하나여야 합니다.")
     if product_family not in _FAMILIES:
         raise ValueError("상품군을 확인해 주세요.")
-    terms = {term["key"]: str(term.get("value") if term.get("value") is not None else "")
-             for term in data["terms"] if term.get("key") in _TERM_KEYS}
+    # The contract extractor emits an ordered list of terms, sometimes with
+    # repeated products/quantities/prices for a multi-line order. A dict
+    # comprehension silently discarded all but the LAST product; preserve
+    # each product occurrence instead. Never fill mismatched price/quantity
+    # lists by reusing another product's commercial value.
+    term_groups = {}
+    for term in data["terms"]:
+        if term.get("key") in _TERM_KEYS:
+            term_groups.setdefault(term["key"], []).append(term)
+    terms = {
+        key: str(values[-1].get("value") if values[-1].get("value") is not None else "")
+        for key, values in term_groups.items()
+    }
+
+    # Some AI responses compress several named products into ONE products
+    # term and keyed quantity/price terms:
+    #   products="mouse, keyboard, USB"
+    #   quantity="mouse: 10; keyboard: 8; USB: 15"
+    #   unit_price="mouse: 12.50; keyboard: 25; USB: 9.90"
+    # Only split when all names match in the SAME order. Do not guess at
+    # positional totals or invent a per-product price from a combined string.
+    def keyed_values(key, names):
+        rows = term_groups.get(key) or []
+        if len(rows) != 1:
+            return None
+        parts = [s.strip() for s in re.split(r"[;\n]+", str(rows[0].get("value") or "")) if s.strip()]
+        if len(parts) != len(names):
+            return None
+        values = []
+        for part, name in zip(parts, names):
+            m = re.fullmatch(r"(.+?)\s*[:：=]\s*(.+)", part)
+            if not m or m.group(1).strip().casefold() != name.strip().casefold():
+                return None
+            values.append(m.group(2).strip())
+        return values
+
+    product_terms = term_groups.get("products") or []
+    if len(product_terms) == 1:
+        joined = str(product_terms[0].get("value") or "")
+        possible_names = [x.strip() for x in re.split(r"[,，;\n]+", joined) if x.strip()]
+        if 1 < len(possible_names) <= 100:
+            keyed_qty = keyed_values("quantity", possible_names)
+            keyed_price = keyed_values("unit_price", possible_names)
+            if keyed_qty is not None and keyed_price is not None:
+                def simple_number(value, *, price=False):
+                    # Price may carry the same explicitly declared currency;
+                    # currency conflicts leave the value unresolved.
+                    expression = (r"(?:USD|KRW|EUR|CNY|US\$|\$|₩|€)?\s*"
+                                  if price else "")
+                    expression += r"([0-9]+(?:,[0-9]{3})*(?:\.[0-9]+)?)"
+                    expression += r"\s*(?:개|PCS?|PIECES?)?" if not price else r"\s*(?:/\s*(?:PCS?|PIECES?|ea))?"
+                    declared = str(terms.get("currency") or "").upper().strip()
+                    prefix = re.match(r"^(USD|KRW|EUR|CNY|US\$|\$|₩|€)", value.strip(), re.I) if price else None
+                    if prefix:
+                        found = {"US$": "USD", "$": "USD", "₩": "KRW", "€": "EUR"}.get(prefix.group(1).upper(), prefix.group(1).upper())
+                        if declared and found != declared:
+                            return ""
+                    m = re.fullmatch(expression, value.strip(), re.I)
+                    return m.group(1).replace(",", "") if m else ""
+                shared_unit = terms.get("unit", "")
+                item_rows = [{
+                    "product_name": name,
+                    "quantity": simple_number(keyed_qty[i]),
+                    "unit": shared_unit,
+                    "unit_price": simple_number(keyed_price[i], price=True),
+                    "price_basis": shared_unit,
+                    "price_source": "",
+                } for i, name in enumerate(possible_names)]
+                # The source labels above are still AI proposals, not a
+                # verified catalog. Rows with unparseable values stay blank.
+                products = []
+            else:
+                item_rows = None
+                products = product_terms
+        else:
+            item_rows = None
+            products = product_terms
+    else:
+        item_rows = None
+        products = product_terms
+
+    if item_rows is not None:
+        pass  # Named multi-product rows already conservatively parsed.
+    elif len(products) > 1:
+        product_count = len(products)
+
+        def row_value(key, row_index):
+            occurrences = term_groups.get(key) or []
+            # A single price or quantity across several products is
+            # ambiguous, not a universal default. Require one per product.
+            if key == "unit" and len(occurrences) == 1:
+                value = occurrences[0].get("value")
+                return str(value if value is not None else "")
+            if len(occurrences) != product_count:
+                return ""
+            value = occurrences[row_index].get("value")
+            return str(value if value is not None else "")
+
+        item_rows = [{
+            "product_name": row_value("products", i),
+            "quantity": row_value("quantity", i),
+            "unit": row_value("unit", i),
+            "unit_price": row_value("unit_price", i),
+            "price_basis": row_value("unit", i),
+            "price_source": "",
+        } for i in range(product_count)]
+    else:
+        # Existing single-item input remains backward compatible.
+        item_rows = [{
+            "product_name": terms.get("products", ""),
+            "quantity": terms.get("quantity", ""),
+            "unit": terms.get("unit", ""),
+            "unit_price": terms.get("unit_price", ""),
+            "price_basis": terms.get("unit", ""),
+            "price_source": "",
+        }]
+    currencies = {
+        str(entry.get("value") or "").strip().upper()
+        for entry in (term_groups.get("currency") or [])
+        if str(entry.get("value") or "").strip()
+    }
+    if len(currencies) > 1:
+        # A single-currency invoice must not silently use the last rate
+        # from a mixed-currency extraction.
+        terms["currency"] = ""
     parties = {}
     for role in ("seller", "buyer"):
         p = next((p for p in data["parties"] if role in p.get("roles", ())), {})
@@ -146,14 +273,7 @@ def make_trade_candidate(kind: str, analysis: Mapping[str, Any],
         "seller": parties["seller"], "buyer": parties["buyer"],
         "incoterms": terms.get("delivery", ""),
         "payment_terms": terms.get("payment_trigger", ""),
-        "items": [{
-            "product_name": terms.get("products", ""),
-            "quantity": terms.get("quantity", ""),
-            "unit": terms.get("unit", ""),
-            "unit_price": terms.get("unit_price", ""),
-            "price_basis": terms.get("unit", ""),
-            "price_source": "",  # optional metadata; extraction is not verified provenance
-        }],
+        "items": item_rows,
     }
     return result
 
