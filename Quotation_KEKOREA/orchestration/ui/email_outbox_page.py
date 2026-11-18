@@ -23,7 +23,7 @@ from Quotation_KEKOREA.orchestration.workflows.email_outbox import (
     OutboxError, list_replies, get_reply, save_candidates, send_approved,
 )
 
-SEND_REVISION_EXPECTED = "master-smtp-preclaim-20261118-v1"
+SEND_REVISION_EXPECTED = "master-smtp-stage-safe-20261118-v2"
 
 
 def _resolve_send_approved():
@@ -142,6 +142,31 @@ def render_email_outbox(principal: str):
     with st.expander("원본 메일 확인",expanded=False):
         st.text(str(row.get("source_subject") or ""))
         st.text(str(row.get("source_body") or "")[:12000])
+
+    # Explicit read-only SMTP diagnostics, available even after an ambiguous
+    # send. This connects/authenticates over TLS but NEVER issues MAIL FROM,
+    # RCPT TO, DATA, or any outbound email.
+    with st.expander("SMTP 연결·로그인 진단 (메일 발송 없음)", expanded=False):
+        st.caption("서버 접속, TLS, 로그인만 확인합니다. 메일은 전송하지 않습니다. "
+                   "기존 'send_unknown' 발송 기록의 성공 여부를 확인하는 기능은 아닙니다.")
+        if st.button("SMTP 접속·로그인 검사", key="master_reply_smtp_probe_"+chosen_id):
+            from Quotation_KEKOREA.orchestration.adapters.whois_mail import (
+                mail_config, probe_smtp, MailConnectionError,
+            )
+            from Quotation_KEKOREA.orchestration.ui.mailbox_page import _settings
+            try:
+                config=mail_config(_settings(),principal)
+                if config.smtp is None:
+                    st.error("SMTP 호스트·계정 설정이 필요합니다. 전송된 메일은 없습니다.")
+                else:
+                    with st.spinner("SMTP 연결·인증을 검사합니다. 실제 메일은 전송하지 않습니다."):
+                        probe_smtp(config.smtp)
+                    st.success("SMTP TLS 연결과 로그인 성공. 메일은 보내지 않았습니다. "
+                               "실제 발송 성공 여부는 별도 확인이 필요합니다.")
+            except (MailConnectionError, ValueError, PermissionError) as error:
+                st.error(str(error)[:250])
+            except Exception:
+                st.error("SMTP 접속·로그인 진단에 실패했습니다. 설정을 확인하세요.")
 
     if row.get("status")!="draft":
         st.warning("메일 전송이 이미 시작되었거나 결과가 불확실합니다. "
