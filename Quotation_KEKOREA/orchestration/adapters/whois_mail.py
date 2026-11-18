@@ -338,6 +338,7 @@ def probe_smtp(endpoint: Endpoint, *, allow_legacy_dh: bool = False) -> None:
             "CERTIFICATE_VERIFY_FAILED": "서버 인증서 검증 오류",
             "UNEXPECTED_EOF_WHILE_READING": "TLS 연결이 협상 중 종료됨",
             "SSLV3_ALERT_HANDSHAKE_FAILURE": "TLS 핸드셰이크 거부",
+            "DH_KEY_TOO_SMALL": "후이즈 임시 DH 키 1024비트가 현재 보안 기준에 미달",
         }
         kind = known_reasons.get(reason, "TLS 핸드셰이크 오류")
         mode = "STARTTLS" if endpoint.security == "starttls" else "SSL/TLS"
