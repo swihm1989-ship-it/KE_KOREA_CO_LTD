@@ -127,7 +127,7 @@ class AiIntakeUiTests(unittest.TestCase):
                           "old-90-second-timeout", create=True):
             self.assertTrue(ai_intake_page._ensure_trade_extractor_current())
             self.assertEqual(extractor.TRADE_EXTRACTOR_REVISION,
-                             "master-long-image-timeout-20261117-v1")
+                             "master-conditional-vision-recheck-20261118-v2")
             self.assertFalse(ai_intake_page._ensure_trade_extractor_current())
 
     def test_api_network_failure_preserves_previously_extracted_order(self):
