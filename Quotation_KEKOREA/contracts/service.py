@@ -105,7 +105,8 @@ def _http_error_detail(exc, api_key=""):
     return f"; OpenAI error: {', '.join(details)}" if details else ""
 
 
-def _call(instructions, user_data, *, env, opener=urllib.request.urlopen, timeout=90):
+def _call(instructions, user_data, *, env, opener=urllib.request.urlopen, timeout=90,
+          max_output_tokens=9000):
     snapshot = user_data.get('snapshot') or user_data.get('current_snapshot') or {}
     instructions += '\n' + drafting_guidance(snapshot)
     instructions += ('\nShared library reference_context contains reviewed sample guidance, not current transaction facts or legal authority. '
@@ -132,7 +133,7 @@ def _call(instructions, user_data, *, env, opener=urllib.request.urlopen, timeou
         "instructions": instructions,
         "input": [{"role": "user", "content": json.dumps(user_data, ensure_ascii=False)}],
         "text": {"format": {"type": "json_object"}},
-        "max_output_tokens": 9000,
+        "max_output_tokens": max_output_tokens,
     }
     request = urllib.request.Request(
         "https://api.openai.com/v1/responses",
@@ -450,14 +451,76 @@ def generate_draft(snapshot, preferred_clauses, *, env, reference_context=None,
          **({'drafting_plan': drafting_plan, 'drafting_task': 'repair' if repair_context else 'draft',
              'repair_context': repair_context} if drafting_plan is not None else {})},
         env=env, opener=client or urllib.request.urlopen, timeout=request_timeout)
+    def visible_draft(value):
+        """Accept a verified flat draft or one conventional JSON wrapper."""
+        if not isinstance(value, dict):
+            return {}
+        if isinstance(value.get("clauses"), list) and value["clauses"]:
+            return value
+        for key in ("draft", "contract", "agreement", "document"):
+            nested = value.get(key)
+            if isinstance(nested, dict) and isinstance(nested.get("clauses"), list) and nested["clauses"]:
+                return nested
+        return value
+
+    data = visible_draft(data)
     clauses = data.get("clauses")
-    if not isinstance(data.get("title"), str) or not isinstance(clauses, list) or not clauses:
-        raise ValueError("Contract AI did not return a complete draft.")
+    retry_used = False
+    if (not isinstance(clauses, list) or not clauses) and repair_context is None:
+        # An occasional completed JSON-mode response has no top-level clauses.
+        # Retry ONCE with a minimal business-terms-only envelope and explicit
+        # fields; this does not approve or persist any malformed draft, and no
+        # unreviewed reference contract or source document is transmitted.
+        topics = [str(row.get("key") or "") for row in
+                  (drafting_plan or {}).get("topics", []) if row.get("key")]
+        response = _call(
+            "Your preceding draft was missing the required clauses array. "
+            "Return EXACTLY ONE JSON object with top-level keys title, clauses, issues. "
+            "clauses MUST be a nonempty array with one operative provision for EACH required topic "
+            "and every clause must be {id: string, title: string, topic_key: string, order: number, "
+            "sentences: [{id: string, text: nonempty string, term_ids: [], source_refs: []}]}. "
+            "issues MUST be an array (empty is allowed). Write only the language indicated in "
+            "snapshot.language. Preserve the snapshot title if supplied. Do not fabricate "
+            "unconfirmed fees, prices, volumes, dates, legal entities, Incoterms, law, venues or "
+            "penalties. When a detail is unknown, use a short bracketed placeholder within the "
+            "relevant operative clause, without preventing a readable review draft. "
+            "Make each clause 2-4 commercially useful sentences covering the topic, not a heading "
+            "or abstract summary. Do not include commentary outside JSON.",
+            {"snapshot": {
+                "title": snapshot.get("title") or "",
+                "contract_type": snapshot["contract_type"],
+                "language": snapshot["language"],
+                "parties": snapshot.get("parties", []),
+                "terms": snapshot.get("terms", []),
+                "omissions": snapshot.get("omissions", {}),
+            }, "required_topics": topics},
+            env=env, opener=client or urllib.request.urlopen,
+            timeout=request_timeout, max_output_tokens=14000)
+        data = visible_draft(response)
+        clauses = data.get("clauses")
+        retry_used = True
+    if not isinstance(clauses, list) or not clauses:
+        raise ValueError("Contract AI did not return a complete draft after one schema recovery attempt.")
     result = deepcopy(snapshot)
-    result["title"] = snapshot.get("title") or data["title"]
+    # The earlier model call may omit a title despite providing usable clauses.
+    # Titles are presentation fields, not evidence of agreed commercial facts.
+    output_title = data.get("title")
+    if not isinstance(output_title, str) or not output_title.strip():
+        output_title = ("계약서 검토용 초안" if snapshot["language"] == "ko"
+                        else "Contract Draft for Review")
+    result["title"] = snapshot.get("title") or output_title
     result["clauses"] = clauses
     result["issues"] = _normalize_ai_issues(
         data.get("issues", []), "Contract AI returned an invalid draft issue list.")
+    if retry_used:
+        result["issues"].append({
+            "code": "ai_draft_structure_recovered",
+            "severity": "info",
+            "message": ("AI 초안 형식을 재요청해 복구했습니다. 조항을 직접 검토하세요."
+                        if snapshot["language"] == "ko" else
+                        "The AI draft schema was recovered after one retry. Review all clauses."),
+            "confirmed": False,
+        })
     for issue in result["issues"]:
         issue.setdefault("id", f"issue_{uuid4().hex}")
         issue.setdefault("confirmed", False)
