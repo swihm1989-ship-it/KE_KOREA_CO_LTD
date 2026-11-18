@@ -2248,11 +2248,15 @@ def render_ai_intake(principal: str):
             try:
                 with st.spinner("메일을 발송 대기에 저장하고 AI 답장을 준비합니다."):
                     from Quotation_KEKOREA.orchestration.ui.mailbox_page import _settings
-                    from Quotation_KEKOREA.orchestration.workflows.email_reply_runtime import (
-                        prepare_email_handoff,
-                    )
+                    from Quotation_KEKOREA.orchestration.workflows import email_reply_runtime as _reply_runtime
+                    _expected_reply_revision = "master-reply-20261118-http400-schema-v2"
+                    if getattr(_reply_runtime, "REPLY_RUNTIME_REVISION", None) != _expected_reply_revision:
+                        importlib.invalidate_caches()
+                        _reply_runtime = importlib.reload(_reply_runtime)
+                    if getattr(_reply_runtime, "REPLY_RUNTIME_REVISION", None) != _expected_reply_revision:
+                        raise RuntimeError("AI 회신 런타임 버전이 이전 상태입니다.")
                     db_env = document_export_env(st.secrets, os.environ)
-                    row, warning = prepare_email_handoff(
+                    row, warning = _reply_runtime.prepare_email_handoff(
                         db_env, principal, mail_source, _settings(),
                         _model_config(), lang, ai_consented=True)
             except (OutboxError,ValueError,RuntimeError) as error:

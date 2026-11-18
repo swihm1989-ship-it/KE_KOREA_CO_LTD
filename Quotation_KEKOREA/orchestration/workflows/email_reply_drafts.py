@@ -13,7 +13,7 @@ import urllib.request
 
 from pathlib import Path
 
-REPLY_RUNTIME_REVISION = "master-reply-20261118-live-diagnostic-v1"
+REPLY_RUNTIME_REVISION = "master-reply-20261118-http400-schema-v2"
 REPLY_SOURCE_MTIME_NS = Path(__file__).stat().st_mtime_ns
 
 STYLES = ("간결한 비즈니스형", "친근한 협력형", "상세하고 정중한 형식")
@@ -68,6 +68,100 @@ def _validated_candidates(candidates):
     return output
 
 
+
+# Strict JSON Schema is the supported Responses API format for modern models.
+# The exact count and content restrictions are checked again in local code:
+# not all JSON Schema array constraints are supported in strict mode.
+REPLY_CANDIDATES_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "candidates": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {"body": {"type": "string"}},
+                "required": ["body"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["candidates"],
+    "additionalProperties": False,
+}
+
+
+def _safe_http_failure(exc):
+    """Extract only safe HTTP code and identifier fields, never provider text.
+
+    Also detect when a specific *response-format* feature is unsupported.
+    The provider's untrusted message may be inspected for that single
+    classification but must never appear in logs or the UI.
+    """
+    status = int(getattr(exc, "code", 0) or 0)
+    data = {}
+    try:
+        parsed = json.loads(exc.read(4096).decode("utf-8"))
+        if isinstance(parsed, dict) and isinstance(parsed.get("error"), dict):
+            data = parsed["error"]
+    except (OSError, UnicodeError, ValueError, TypeError):
+        pass
+    finally:
+        exc.close()
+    def _identifier(key):
+        value = data.get(key)
+        return value if isinstance(value, str) and re.fullmatch(
+            r"[a-zA-Z0-9_.-]{1,80}", value
+        ) else ""
+    code = _identifier("code")
+    param = _identifier("param")
+    msg = str(data.get("message") or "").lower()[:900]
+    rejected_format = (status == 400 and (
+        param in {"text", "text.format", "response_format"} or
+        param.startswith(("text.format.", "response_format.")) or
+        (
+            any(word in msg for word in
+                ("json_schema", "json object", "json_object", "response format", "text.format"))
+            and any(word in msg for word in
+                ("unsupported", "not supported", "does not support", "invalid", "unrecognized"))
+        )
+    ))
+    extra = ", ".join(
+        f"{label}={value}" for label, value in (("code", code), ("param", param))
+        if value
+    )
+    hint = f" [{extra}]" if extra else ""
+    details = {
+        400: "요청 형식 또는 현재 선택된 모델의 지원 항목을 확인하세요.",
+        401: "OpenAI API 키 인증에 실패했습니다.",
+        403: "모델 접근 권한을 확인하세요.",
+        404: "설정된 모델 이름 또는 접근 권한을 확인하세요.",
+        408: "요청 시간이 초과되었습니다.",
+        429: "AI 사용 한도 또는 결제 한도를 확인하세요.",
+        500: "OpenAI 서버에서 오류가 발생했습니다.",
+        502: "OpenAI 서버 연결에 일시적인 문제가 있습니다.",
+        503: "OpenAI 서버가 일시적으로 이용 불가능합니다.",
+    }.get(status, "OpenAI 요청을 처리하지 못했습니다.")
+    return {
+        "status": status, "code": code, "param": param,
+        "format_rejected": rejected_format,
+        "message": f"AI 회신 API 오류 (HTTP {status}){hint}: {details}",
+    }
+
+
+def _post_response(payload, key, request_opener, timeout=75):
+    req = urllib.request.Request(
+        "https://api.openai.com/v1/responses",
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"},
+        method="POST",
+    )
+    with request_opener(req, timeout=timeout) as response:
+        raw = response.read(160001)
+    if len(raw) > 160000:
+        raise RuntimeError("AI 회신 응답이 너무 깁니다.")
+    return json.loads(raw.decode("utf-8"))
+
+
 def generate_candidates(source: dict, env: dict, language: str, *, opener=None) -> list[str]:
     """User consent must be checked by caller; this function never sends."""
     if language not in {"ko","en"}:
@@ -102,41 +196,38 @@ def generate_candidates(source: dict, env: dict, language: str, *, opener=None) 
         "input":[{"role":"user","content":json.dumps({
             "from":str(source.get("sender") or "")[:350],
             "subject":subject[:220],"body":body[:12000]},ensure_ascii=False)}],
-        "text":{"format":{"type":"json_object"}},
+        "text":{"format":{
+            "type":"json_schema",
+            "name":"mail_reply_candidates",
+            "strict":True,
+            "schema":REPLY_CANDIDATES_SCHEMA,
+        }},
         "max_output_tokens":3600,
         "store":False,
     }
-    request=urllib.request.Request(
-        "https://api.openai.com/v1/responses",
-        data=json.dumps(payload,ensure_ascii=False).encode("utf-8"),
-        headers={"Authorization":"Bearer "+api_key,"Content-Type":"application/json"},
-        method="POST",
-    )
     request_opener=opener or urllib.request.urlopen
     try:
-        with request_opener(request,timeout=75) as response:
-            raw=response.read(160001)
-        if len(raw)>160000:
-            raise RuntimeError("AI 회신 응답이 너무 깁니다.")
-        result=json.loads(raw.decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        # Never show raw OpenAI error bodies, request URLs, credentials, or mail.
-        # The HTTP status alone is enough to identify the next safe action.
-        http_code = exc.code
-        exc.close()
-        explanations = {
-            400: "모델 또는 AI 요청 형식을 확인해야 합니다.",
-            401: "서버의 OpenAI API 키가 유효하지 않거나 만료되었습니다.",
-            403: "이 API 키로 모델을 사용할 권한이 없습니다.",
-            404: "지정한 AI 모델을 찾을 수 없거나 접근할 수 없습니다.",
-            408: "AI 요청 시간이 초과되었습니다.",
-            429: "AI 사용량 제한 또는 결제 한도에 도달했습니다.",
-            500: "OpenAI 서버 오류가 발생했습니다.",
-            502: "AI 서비스 일시 오류가 발생했습니다.",
-            503: "AI 서비스가 일시적으로 이용 불가능합니다.",
-        }
-        detail = explanations.get(http_code, "OpenAI 서버와 통신하는 중 오류가 발생했습니다.")
-        raise RuntimeError(f"AI 회신 API 오류 (HTTP {http_code}): {detail}") from None
+        try:
+            result=_post_response(payload,api_key,request_opener)
+        except urllib.error.HTTPError as exc:
+            failure=_safe_http_failure(exc)
+            if not failure["format_rejected"]:
+                raise RuntimeError(failure["message"]) from None
+            # The configured model may not support Structured Outputs. Retry
+            # exactly once using the universal plain-text mode; original JSON
+            # instructions and strict local validation remain in force.
+            # Never relax store=False, change the model, or send an email.
+            fallback=dict(payload)
+            fallback["text"]={"format":{"type":"text"}}
+            try:
+                result=_post_response(fallback,api_key,request_opener)
+            except urllib.error.HTTPError as retry_error:
+                retry_failure=_safe_http_failure(retry_error)
+                raise RuntimeError(
+                    retry_failure["message"]+" (호환 출력 형식 재시도도 실패)"
+                ) from None
+    except RuntimeError:
+        raise
     except (urllib.error.URLError, OSError, TimeoutError):
         raise RuntimeError("AI 서비스 연결 또는 시간 초과 오류입니다. 네트워크 상태를 확인하세요.") from None
     except (UnicodeError, json.JSONDecodeError):
@@ -147,7 +238,13 @@ def generate_candidates(source: dict, env: dict, language: str, *, opener=None) 
            if isinstance(output,dict) for piece in output.get("content",[])
            if isinstance(piece,dict) and piece.get("type")=="output_text"]
     try:
-        decoded=json.loads("".join(texts))
+        raw_json="".join(texts).strip()
+        # Plain-text fallback models may wrap otherwise valid JSON in one
+        # Markdown code fence; unwrap ONLY a complete JSON fence.
+        fence=re.fullmatch(r"```(?:json)?[ \t]*\r?\n(.*)\r?\n```",raw_json,flags=re.S|re.I)
+        if fence:
+            raw_json=fence.group(1).strip()
+        decoded=json.loads(raw_json)
     except (ValueError,TypeError):
         raise RuntimeError("AI 회신 결과 형식이 올바르지 않습니다.") from None
     return _validated_candidates(decoded.get("candidates") if isinstance(decoded,dict) else None)

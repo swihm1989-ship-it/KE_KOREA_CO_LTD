@@ -123,6 +123,31 @@ class ReplyRuntimeTests(unittest.TestCase):
                 self.assertNotIn("customer",result)
                 self.assertNotIn("private-key",result)
 
+    def test_diagnostic_uses_current_strict_json_schema(self):
+        opener=Mock(return_value=FakeResponse('{"ok": true}'))
+        self.assertIn("진단 성공",runtime.probe_connection(self.env,opener=opener))
+        payload=json.loads(opener.call_args.args[0].data.decode("utf-8"))
+        self.assertEqual(payload["text"]["format"]["type"],"json_schema")
+        self.assertTrue(payload["text"]["format"]["strict"])
+        self.assertFalse(payload["store"])
+
+    def test_diagnostic_retries_plain_text_only_for_format_http400(self):
+        error=urllib.error.HTTPError(
+            "https://api.openai.com/v1/responses",400,"sensitive error",None,
+            io.BytesIO(json.dumps({"error":{
+                "code":"unsupported_parameter","param":"text.format",
+                "message":"Structured output not supported"
+            }}).encode("utf-8"))
+        )
+        opener=Mock(side_effect=[error,FakeResponse('{"ok": true}')])
+        status=runtime.probe_connection(self.env,opener=opener)
+        self.assertIn("진단 성공",status)
+        self.assertIn("일반 텍스트",status)
+        self.assertEqual(opener.call_count,2)
+        final=json.loads(opener.call_args_list[1].args[0].data.decode("utf-8"))
+        self.assertEqual(final["text"]["format"]["type"],"text")
+        self.assertFalse(final["store"])
+
     def test_diagnostics_show_only_configuration_presence(self):
         info=runtime.status(self.env)
         self.assertTrue(info["key_configured"])

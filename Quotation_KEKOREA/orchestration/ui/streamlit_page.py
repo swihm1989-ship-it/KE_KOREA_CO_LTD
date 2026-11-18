@@ -273,9 +273,18 @@ elif page == "저장된 계약서":
 elif page == "발송 대기":
     # Email replies are a separate, user-approved queue; preserve existing
     # DRAFT PDF -> FINAL workflow unchanged below.
-    from Quotation_KEKOREA.orchestration.workflows.email_reply_runtime import current_outbox_page
+    # Streamlit hot-deploy may keep the previous imported runtime module even
+    # when this entrypoint source changes. Resolve it before the UI module.
+    import importlib
+    from Quotation_KEKOREA.orchestration.workflows import email_reply_runtime as _reply_runtime
+    _expected_reply_revision = "master-reply-20261118-http400-schema-v2"
+    if getattr(_reply_runtime, "REPLY_RUNTIME_REVISION", None) != _expected_reply_revision:
+        importlib.invalidate_caches()
+        _reply_runtime = importlib.reload(_reply_runtime)
     try:
-        _email_ui = current_outbox_page()
+        if getattr(_reply_runtime, "REPLY_RUNTIME_REVISION", None) != _expected_reply_revision:
+            raise RuntimeError("AI 회신 모듈 버전이 다릅니다. 앱 재배포 상태를 확인해 주세요.")
+        _email_ui = _reply_runtime.current_outbox_page()
     except RuntimeError as error:
         st.error(str(error))
     else:
