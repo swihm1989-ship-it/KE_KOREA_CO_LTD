@@ -2248,7 +2248,7 @@ def render_ai_intake(principal: str):
             try:
                 with st.spinner("메일을 발송 대기에 저장하고 AI 답장을 준비합니다."):
                     from Quotation_KEKOREA.orchestration.ui.mailbox_page import _settings
-                    from Quotation_KEKOREA.orchestration.workflows.email_reply_handoff import (
+                    from Quotation_KEKOREA.orchestration.workflows.email_reply_runtime import (
                         prepare_email_handoff,
                     )
                     db_env = document_export_env(st.secrets, os.environ)

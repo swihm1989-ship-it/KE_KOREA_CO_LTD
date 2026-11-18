@@ -310,3 +310,9 @@ email_reply_handoff.prepare_email_handoff는 DRAFT를 먼저 저장한 뒤 AI �
 AI 회신 모델은 기존 계약서 엔진과 동일하게 CONTRACT_OPENAI_MODEL을 우선 사용한다.
 AI 후보 유무와 무관하게 SMTP 송신은 명시적 최종 확인 체크 + 발송 버튼 이후에만 실행된다. 자동 발송, 백그라운드 발송, AI 실패 시 자동 대체 발송 기능은 없다.
 실제 OpenAI API 인증 및 사용량/모델 권한은 운영 서버 상태에 따라 확인해야 하며, 모델 응답 원문이나 API 키는 화면에 표시하지 않는다.
+
+### 2026-11-18 · MASTER UI 회신 장애 재발 방지·진단
+Streamlit Cloud의 지속 실행 Python 프로세스는 화면을 새로고침해도 이미 import된 회신 생성/전달 모듈을 유지할 수 있다. email_reply_runtime.py에서 모듈 리비전 + 실제 파일 mtime을 비교해 최신 코드로 재로드하며, 이전 함수 객체가 handoff 기본 인자로 남는 문제는 호출 시점 인자로 덮어쓴다.
+발송 대기 → AI 연결 상태 진단은 서버 키의 설정 여부·모델 이름·실행 코드 버전만 보여 준다. 사용자가 명시적으로 동의하고 버튼을 누르면 가상 문장만 OpenAI Responses API에 보내 HTTP 상태와 안전한 오류 code/param만 안내한다. 원본 메일, 거래처 정보, API 키, provider 메시지 원문은 진단에 전송하거나 표시하지 않는다. AI 진단은 소량의 API 비용을 사용할 수 있다.
+AI 실패 시 기존 발송 대기 초안은 보존하고 직접 작성할 수 있다. 송신은 오직 사용자가 최종 확인 체크 후 발송 버튼을 누른 경우로 제한. UI·회신 런타임·DB 중복전송 회귀 테스트는 orchestration/tests 하위에서 자동 실행.
+실제 로그인된 Streamlit Cloud 브라우저 조작·실계정 SMTP 송신·운영 OpenAI 응답의 성공은 CI만으로 입증할 수 없으며 별도 운영 테스트가 필요하다.

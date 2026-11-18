@@ -80,6 +80,28 @@ def render_email_outbox(principal: str):
                          disabled=True,height=200,key="master_reply_sent_view_"+chosen_id)
         return
 
+    with st.expander("AI 연결 상태 진단 · 가상 데이터만 사용", expanded=False):
+        from Quotation_KEKOREA.orchestration.workflows.email_reply_runtime import (
+            status as reply_runtime_status, probe_connection,
+        )
+        from Quotation_KEKOREA.orchestration.ui.ai_intake_page import _model_config
+        diag_env = _model_config()
+        diag = reply_runtime_status(diag_env)
+        st.caption("실행 코드 버전: " + diag["runtime"])
+        st.caption("AI 키: " + ("설정됨" if diag["key_configured"] else "미설정")
+                   + " · 모델: " + diag["model"])
+        st.caption("연결 검사는 원본 메일을 전송하지 않습니다. 가상 문장만 보내며 적은 API 비용이 발생할 수 있습니다.")
+        probe_consent=st.checkbox("가상 AI 연결 테스트 실행에 동의합니다.",
+                                  key="master_reply_probe_consent_"+chosen_id)
+        if st.button("API 연결 진단 실행", disabled=not probe_consent,
+                     key="master_reply_probe_"+chosen_id):
+            with st.spinner("OpenAI 인증과 모델 응답을 확인합니다."):
+                probe_result=probe_connection(diag_env)
+            if probe_result.startswith("진단 성공"):
+                st.success(probe_result)
+            else:
+                st.warning(probe_result)
+
     stored_lang=row.get("language") if row.get("language") in {"ko","en"} else "en"
     lang=st.radio("회신 및 서명 언어",["ko","en"],
                   format_func=lambda value:"한국어" if value=="ko" else "English",
@@ -95,7 +117,8 @@ def render_email_outbox(principal: str):
         try:
             with st.spinner("세 가지 스타일의 회신을 작성합니다."):
                 from Quotation_KEKOREA.orchestration.ui.ai_intake_page import _model_config
-                options=generate_candidates({
+                from Quotation_KEKOREA.orchestration.workflows.email_reply_runtime import generate_reply_candidates
+                options=generate_reply_candidates({
                     "subject":row.get("source_subject",""),
                     "body":row.get("source_body",""),
                     "sender":row.get("sender_header",""),

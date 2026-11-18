@@ -6,6 +6,11 @@ This module has no SMTP calls and requires explicit AI consent from the caller.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
+REPLY_RUNTIME_REVISION = "master-reply-20261118-live-diagnostic-v1"
+REPLY_SOURCE_MTIME_NS = Path(__file__).stat().st_mtime_ns
+
 from Quotation_KEKOREA.orchestration.workflows.email_outbox import (
     queue_reply, save_candidates,
 )

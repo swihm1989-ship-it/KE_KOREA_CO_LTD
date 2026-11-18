@@ -11,6 +11,11 @@ import re
 import urllib.error
 import urllib.request
 
+from pathlib import Path
+
+REPLY_RUNTIME_REVISION = "master-reply-20261118-live-diagnostic-v1"
+REPLY_SOURCE_MTIME_NS = Path(__file__).stat().st_mtime_ns
+
 STYLES = ("간결한 비즈니스형", "친근한 협력형", "상세하고 정중한 형식")
 SIGNATURE_KO = (
     "임석원 (David Seokwon Ihm)\n"
