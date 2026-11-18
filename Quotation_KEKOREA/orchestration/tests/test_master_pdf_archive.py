@@ -87,6 +87,55 @@ class MasterPdfArchiveTests(TestCase):
         with self.assertRaises(archive.PdfArchiveError):
             archive.load_pdf(self.env, "owner@example.test", ident)
 
+    def test_delete_owned_final_pdf_metadata_and_private_object(self):
+        ident = "18d53c20-c2bc-493d-b992-6a1611f99857"
+        path = archive.owner_key("owner@example.test") + "/2026/11/" + ident + ".pdf"
+        row = {"id": ident, "kind": "CONTRACT", "status": "final",
+               "filename": "Supply-contract.pdf", "storage_path": path}
+        self.repo.request.side_effect = [
+            [row], None, None, [row],
+        ]
+        archive.delete_document(self.env, "owner@example.test", ident)
+        self.assertEqual(self.repo.request.call_count, 4)
+        get_call, parent_patch, child_patch, deleted = self.repo.request.call_args_list
+        self.assertEqual(get_call.args[:2], ("GET", archive.TABLE))
+        self.assertEqual(deleted.args[:2], ("DELETE", archive.TABLE))
+        self.assertEqual(dict(deleted.kwargs["query"])["owner_email"],
+                         "eq.owner@example.test")
+        self.assertEqual(dict(deleted.kwargs["query"])["status"], "eq.final")
+        self.assertEqual(parent_patch.kwargs["payload"], {"final_document_id": None})
+        self.assertEqual(child_patch.kwargs["payload"], {"parent_draft_id": None})
+        self.repo.delete_private_file.assert_called_once_with(archive.BUCKET, path)
+
+    def test_pdf_delete_cannot_remove_another_owner_storage_path(self):
+        ident = "18d53c20-c2bc-493d-b992-6a1611f99857"
+        row = {"id": ident, "status": "draft",
+               "storage_path": archive.owner_key("someone@example.test") +
+                               "/2026/11/" + ident + ".pdf"}
+        self.repo.request.return_value = [row]
+        with self.assertRaises(archive.PdfArchiveError):
+            archive.delete_document(self.env, "owner@example.test", ident)
+        self.repo.delete_private_file.assert_not_called()
+        self.assertEqual(self.repo.request.call_count, 1)
+
+    def test_failed_metadata_delete_never_purges_storage(self):
+        ident = "18d53c20-c2bc-493d-b992-6a1611f99857"
+        row = {"id": ident, "status": "draft", "storage_path":
+               archive.owner_key("owner@example.test") + "/2026/11/" + ident + ".pdf"}
+        self.repo.request.side_effect = [[row], None, None, []]
+        with self.assertRaises(archive.PdfArchiveError):
+            archive.delete_document(self.env, "owner@example.test", ident)
+        self.repo.delete_private_file.assert_not_called()
+
+    def test_storage_cleanup_failure_is_not_misreported_as_complete(self):
+        ident = "18d53c20-c2bc-493d-b992-6a1611f99857"
+        row = {"id": ident, "status": "final", "storage_path":
+               archive.owner_key("owner@example.test") + "/2026/11/" + ident + ".pdf"}
+        self.repo.request.side_effect = [[row], None, None, [row]]
+        self.repo.delete_private_file.side_effect = OSError("private storage failure")
+        with self.assertRaisesRegex(archive.PdfArchiveError, "파일 정리가 실패"):
+            archive.delete_document(self.env, "owner@example.test", ident)
+
     def test_mark_converted_only_updates_owned_pending_draft(self):
         draft_id = "18d53c20-c2bc-493d-b992-6a1611f99857"
         final_id = "8a7dc566-ed74-4b9b-b2d5-9e7b2aeb53b0"
