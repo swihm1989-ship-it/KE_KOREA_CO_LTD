@@ -119,6 +119,21 @@ class VisionRecheckTests(unittest.TestCase):
         self.assertEqual(requests[1]["text"]["format"]["name"], "vision_trade_audit")
         self.assertNotIn("50.00", requests[1]["instructions"])
         self.assertNotIn("50.00", image_blocks[0]["text"])
+        # No new confirmation UI: existing trade FINAL validator must
+        # reject the disputed source amount until the human resolves it.
+        from Quotation_KEKOREA.agent.trade_documents import validate_and_calculate
+        checked = validate_and_calculate({
+            **out,
+            "document_type": "PO", "product_family": "other",
+            "buyer": {"legal_name": "KE KOREA CO LTD", "address": "Seoul, Korea"},
+            "seller": {"legal_name": "SYNTHETIC SUPPLIER", "address": "Busan, Korea"},
+            "document_number": "DRAFT", "incoterms": "EXW Busan",
+            "payment_terms": "T/T",
+            "items": [{**out["items"][0], "price_basis": "PCS",
+                       "discount_percent": "0", "free_quantity": "0"}],
+        })
+        self.assertFalse(checked["ready_for_issue"])
+        self.assertTrue(any("Vision" in x for x in checked["blocking_issues"]))
 
     def test_missing_first_source_with_agreeing_secondary_is_not_overwritten(self):
         out, requests = self.run_extract(
