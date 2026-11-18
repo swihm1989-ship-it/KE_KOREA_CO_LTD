@@ -1854,6 +1854,10 @@ def _archive_generated_pdf(principal: str, kind: str, status: str,
     """Archive only the PDF, never generate alternate layouts or expose secrets."""
     if not principal or not (files or {}).get("pdf"):
         return False
+    # Rename the displayed/downloaded PDF AND the archived/attached PDF
+    # consistently; archive storage itself remains UUID-addressed.
+    from Quotation_KEKOREA.orchestration.workflows.pdf_filename import pdf_filename
+    files["pdf"]["filename"] = pdf_filename(kind, snapshot)
     env = document_export_env(st.secrets, os.environ)
     if not env.get("SUPABASE_URL") or not env.get("SUPABASE_SECRET_KEY"):
         st.warning("PDF는 생성되었지만 MASTER 비공개 저장소 환경변수가 없어 자동 보관하지 못했습니다.")
