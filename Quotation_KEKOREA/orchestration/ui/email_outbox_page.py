@@ -20,6 +20,34 @@ from Quotation_KEKOREA.orchestration.workflows.email_outbox import (
     OutboxError, list_replies, get_reply, save_candidates, send_approved,
 )
 
+def _clear_send_approval(ident: str):
+    """Edits invalidate prior recipient/body approval."""
+    st.session_state["master_reply_confirm_"+ident] = False
+    st.session_state.pop("master_reply_confirm_digest_"+ident, None)
+
+
+def _capture_send_approval(ident: str, to_key: str, subject_key: str,
+                           body_key: str, signature_key: str):
+    """Bind consent to the exact CURRENT widget values on user click."""
+    marker="master_reply_confirm_"+ident
+    saved="master_reply_confirm_digest_"+ident
+    if not st.session_state.get(marker):
+        st.session_state.pop(saved,None)
+        return
+    recipient=str(st.session_state.get(to_key) or "").strip()
+    subject=str(st.session_state.get(subject_key) or "").strip()
+    body=str(st.session_state.get(body_key) or "").strip()
+    signature=str(st.session_state.get(signature_key) or "").strip()
+    if not body or not signature:
+        st.session_state[marker]=False
+        st.session_state.pop(saved,None)
+        return
+    combined=body+"\n\n"+signature
+    st.session_state[saved]=sha256(
+        ("\0".join((recipient,subject,combined))).encode("utf-8")
+    ).hexdigest()[:20]
+
+
 def _db_env():
     return document_export_env(st.secrets,os.environ)
 
@@ -110,7 +138,8 @@ def render_email_outbox(principal: str):
     lang=st.radio("회신 및 서명 언어",["ko","en"],
                   format_func=lambda value:"한국어" if value=="ko" else "English",
                   index=0 if stored_lang=="ko" else 1,
-                  horizontal=True,key="master_reply_language_"+chosen_id)
+                  horizontal=True,key="master_reply_language_"+chosen_id,
+                  on_change=_clear_send_approval,args=(chosen_id,))
     suggestions=row.get("candidate_bodies") or []
     if lang!=stored_lang and len(suggestions)==3:
         st.warning("언어를 바꿨습니다. 아래에서 새 언어로 후보를 다시 생성한 후 발송하세요.")
@@ -141,7 +170,8 @@ def render_email_outbox(principal: str):
                 st.text(candidate)
         selected_index=st.radio("수정할 회신 후보",list(range(3)),
             horizontal=True,format_func=lambda i:str(i+1)+". "+STYLES[i],
-            key="master_reply_choice_"+chosen_id)
+            key="master_reply_choice_"+chosen_id,
+            on_change=_clear_send_approval,args=(chosen_id,))
         suggested_body=suggestions[selected_index]
     else:
         st.info("AI 후보가 아직 없거나 선택한 언어와 일치하지 않습니다. "
@@ -150,14 +180,18 @@ def render_email_outbox(principal: str):
         selected_index="manual"
         suggested_body=""
     stamp=sha256((row["source_hash"]+"|"+str(selected_index)+"|"+lang+"|"+suggested_body).encode()).hexdigest()[:12]
+    to_key="master_reply_to_"+chosen_id
+    sub_key="master_reply_subject_"+chosen_id
+    body_key="master_reply_body_"+chosen_id+"_"+stamp
+    sig_key="master_reply_signature_"+chosen_id+"_"+lang
     recipient=st.text_input("받는 사람",value=str(row.get("recipient_email") or ""),
-                            key="master_reply_to_"+chosen_id)
+                            key=to_key,on_change=_clear_send_approval,args=(chosen_id,))
     subject=st.text_input("메일 제목",value=reply_subject(row.get("source_subject") or ""),
-                          key="master_reply_subject_"+chosen_id)
+                          key=sub_key,on_change=_clear_send_approval,args=(chosen_id,))
     body=st.text_area("메일 내용 (직접 수정 가능)",value=suggested_body,
-                      height=235,key="master_reply_body_"+chosen_id+"_"+stamp)
+                      height=235,key=body_key,on_change=_clear_send_approval,args=(chosen_id,))
     signature=st.text_area("Signature (기본값 · 수정 가능)",value=default_signature(lang),
-                           height=150,key="master_reply_signature_"+chosen_id+"_"+lang)
+                           height=150,key=sig_key,on_change=_clear_send_approval,args=(chosen_id,))
     final_body=body.strip()+"\n\n"+signature.strip()
     if not body.strip():
         st.warning("답장 본문을 작성해야 발송할 수 있습니다.")
@@ -176,12 +210,17 @@ def render_email_outbox(principal: str):
     with st.expander("일반 텍스트 메일 미리보기"):
         st.code(final_body, language=None)
 
-    # Confirmation is tied to the EXACT current envelope. Any edit invalidates it.
+    # A stable checkbox key avoids losing the click when Streamlit batches a
+    # textarea blur and approval in one event. Exact-value digest is retained.
     digest=sha256(("\0".join((recipient,subject,final_body))).encode()).hexdigest()[:20]
-    approved=st.checkbox(
+    checked=st.checkbox(
         "받는 사람·제목·본문·서명을 모두 확인했습니다. 발송 버튼을 누르면 실제 이메일이 전송됩니다.",
-        key="master_reply_confirm_"+chosen_id+"_"+digest,
+        key="master_reply_confirm_"+chosen_id,
+        on_change=_capture_send_approval,
+        args=(chosen_id,to_key,sub_key,body_key,sig_key),
     )
+    approved=(checked and st.session_state.get(
+        "master_reply_confirm_digest_"+chosen_id)==digest)
     if st.button("발송",type="primary",disabled=not approved or not body.strip(),
                  key="master_reply_send_"+chosen_id):
         try:

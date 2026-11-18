@@ -86,6 +86,26 @@ class OutboxLiveUiTests(unittest.TestCase):
         self.assertEqual(args.kwargs.get("language"),"ko")
         self.assertIn("(주)케이이코리아",args.args[6])
 
+    def test_exact_envelope_consent_is_captured_and_reset_on_edit(self):
+        from hashlib import sha256
+        from Quotation_KEKOREA.orchestration.ui import email_outbox_page as outbox_page
+        keys=("to","sub","body","sig")
+        state={
+            "to":"buyer@example.test","sub":"Re: Tender",
+            "body":"안녕하세요. 검토하겠습니다.","sig":"임석원\n(주)케이이코리아",
+            "master_reply_confirm_unit":True,
+        }
+        with patch.object(outbox_page.st,"session_state",state):
+            outbox_page._capture_send_approval("unit",*keys)
+            want=sha256(("\0".join((
+                "buyer@example.test","Re: Tender",
+                "안녕하세요. 검토하겠습니다.\n\n임석원\n(주)케이이코리아",
+            ))).encode("utf-8")).hexdigest()[:20]
+            self.assertEqual(state["master_reply_confirm_digest_unit"],want)
+            outbox_page._clear_send_approval("unit")
+            self.assertFalse(state["master_reply_confirm_unit"])
+            self.assertNotIn("master_reply_confirm_digest_unit",state)
+
     def test_provider_diagnostic_requires_one_explicit_click_with_dummy_content(self):
         app,_send,probe=self._app()
         self.assertTrue(app.button(key="master_reply_probe_"+self.mail_id).disabled)
