@@ -15,6 +15,7 @@ import urllib.error
 import urllib.request
 
 REPLY_RUNTIME_REVISION = "master-reply-20261118-personal-salutation-v3"
+REPLY_RUNTIME_SOURCE_MTIME_NS = Path(__file__).stat().st_mtime_ns
 DRAFT_MODULE = "Quotation_KEKOREA.orchestration.workflows.email_reply_drafts"
 HANDOFF_MODULE = "Quotation_KEKOREA.orchestration.workflows.email_reply_handoff"
 MAIL_UI_MODULE = "Quotation_KEKOREA.orchestration.ui.email_outbox_page"
