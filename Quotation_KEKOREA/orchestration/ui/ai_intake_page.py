@@ -41,7 +41,7 @@ MAIL_PARTY_BRIDGE_REVISION = "master-po-party-hot-reload-20261117-v1"
 MAIL_INTAKE_MODULE = "Quotation_KEKOREA.orchestration.workflows.mail_intake"
 MAIL_INTAKE_REVISION = "shared-trade-payment-unit-20261117-v2"
 AI_WORKFLOW_REVISION = "shared-ke-korea-family-20261118-v6"
-AI_INTAKE_REVISION = "master-mail-final-pdf-handoff-20261118-v28"
+AI_INTAKE_REVISION = "master-final-pdf-to-outbox-button-20261118-v29"
 # Detect a changed source file even when the cached module has the same revision.
 AI_INTAKE_SOURCE_MTIME_NS = os.stat(__file__).st_mtime_ns
 
@@ -1414,6 +1414,7 @@ def _render_trade_final_panel(digest: str, sources: dict, env: dict, *, edited_m
                     st.download_button(kind + " " + fmt.upper() + " FINAL 다운로드",
                                        data=asset['content'], file_name=asset['filename'],
                                        mime=asset['mime'], key="master_trade_final_download_" + kind + "_" + fmt)
+                _show_final_pdf_outbox_button(kind, saved["files"], key)
 
 
 def _render_contact_inputs(digest: str, candidates: dict, field: str, label: str) -> bool:
@@ -1849,6 +1850,30 @@ def _render_single_editor(digest: str, candidates: dict) -> None:
 
 
 
+def _show_final_pdf_outbox_button(kind: str, files: dict, key: str) -> None:
+    """Navigate only when THIS generated FINAL was linked to its source mail.
+
+    Never sends SMTP. Streamlit page selection is handled on the next rerun,
+    before the sidebar radio widget is instantiated.
+    """
+    handoff=(st.session_state.get("master_final_pdf_outbox_handoff") or {}).get(kind)
+    pdf=(files or {}).get("pdf") or {}
+    content=pdf.get("content")
+    if not handoff or not isinstance(content, bytes):
+        return
+    if handoff.get("sha256") != sha256(content).hexdigest():
+        return
+    reply_id=str(handoff.get("reply_id") or "").strip()
+    if not reply_id:
+        return
+    if st.button("첨부된 AI 추천 이메일 확인 → 발송 대기", type="secondary",
+                 key="master_final_pdf_outbox_open_" + key):
+        st.session_state["master_reply_selected"]=reply_id
+        st.session_state["master_reply_select_pending"]=reply_id
+        st.session_state["master_reply_navigation_pending"]=True
+        st.rerun()
+
+
 def _archive_generated_pdf(principal: str, kind: str, status: str,
                            files: dict, snapshot: dict) -> bool:
     """Archive only the PDF, never generate alternate layouts or expose secrets."""
@@ -1874,6 +1899,11 @@ def _archive_generated_pdf(principal: str, kind: str, status: str,
     # Preserve the existing archive screen and original document renderers.
     # Only a FINAL generated from a selected source mail enters its outbox.
     source_mail=st.session_state.get("ai_intake_mail_source")
+    if status == "final":
+        # Do not expose a stale navigation button for a newly generated PDF.
+        handoffs=dict(st.session_state.get("master_final_pdf_outbox_handoff") or {})
+        handoffs.pop(kind, None)
+        st.session_state["master_final_pdf_outbox_handoff"]=handoffs
     if status == "final" and isinstance(source_mail,dict) and all(
             str(source_mail.get(k) or "").strip()
             for k in ("uid","sender","subject","body")):
@@ -1893,6 +1923,12 @@ def _archive_generated_pdf(principal: str, kind: str, status: str,
             link_final_pdf(env,principal,reply["id"],archived["id"])
             st.session_state["master_reply_selected"]=str(reply["id"])
             st.session_state["master_reply_select_pending"]=str(reply["id"])
+            handoffs=dict(st.session_state.get("master_final_pdf_outbox_handoff") or {})
+            handoffs[kind]={
+                "reply_id":str(reply["id"]),
+                "sha256":sha256(files["pdf"]["content"]).hexdigest(),
+            }
+            st.session_state["master_final_pdf_outbox_handoff"]=handoffs
             st.success("해당 메일의 발송 대기에 최종 PDF를 첨부했습니다. "
                        "AI 회신·수신인·본문·첨부파일을 검토하고 승인 후 발송하세요.")
             if st.session_state.get("ai_intake_reply_candidate_consent"):
@@ -2034,6 +2070,7 @@ def _render_original_contract_final(principal: str, snapshot: dict,
                     data=output["content"], file_name=output["filename"],
                     mime=mime, key="master_contract_final_download_" +
                     fingerprint[:20] + "_" + ext)
+        _show_final_pdf_outbox_button("CONTRACT", result[1], fingerprint[:20])
 
 
 def _reference_panel():
