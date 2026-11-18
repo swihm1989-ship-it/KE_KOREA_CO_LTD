@@ -56,8 +56,10 @@ def _item(source):
     other=len(entries)-1
     if product and other:
         product += " 외 "+str(other)+"종"
-    quantity=_part(first.get("shipped_quantity") or first.get("quantity") or
-                   first.get("paid_quantity"),22)
+    quantity_value=next((first.get(key) for key in
+                         ("shipped_quantity", "quantity", "paid_quantity")
+                         if first.get(key) is not None and str(first.get(key)).strip() != ""), "")
+    quantity=_part(quantity_value,22)
     unit=_part(first.get("unit"),12)
     amount=(quantity+" "+unit).strip()
     if amount:
