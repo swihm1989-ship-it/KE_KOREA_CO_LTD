@@ -41,7 +41,7 @@ MAIL_PARTY_BRIDGE_REVISION = "master-po-party-hot-reload-20261117-v1"
 MAIL_INTAKE_MODULE = "Quotation_KEKOREA.orchestration.workflows.mail_intake"
 MAIL_INTAKE_REVISION = "shared-trade-payment-unit-20261117-v2"
 AI_WORKFLOW_REVISION = "shared-ke-korea-family-20261118-v4"
-AI_INTAKE_REVISION = "master-numeric-term-hotdeploy-20261118-v23"
+AI_INTAKE_REVISION = "master-contract-rag-health-20261118-v24"
 # Detect a changed source file even when the cached module has the same revision.
 AI_INTAKE_SOURCE_MTIME_NS = os.stat(__file__).st_mtime_ns
 
@@ -1570,6 +1570,23 @@ def _render_single_editor(digest: str, candidates: dict) -> None:
                      "단가 출처": "검증된 카탈로그" if item.get("master_price") is True else "개별 확인"}
                     for idx, item in enumerate(items) if isinstance(item, dict)],
                     hide_index=True, width="stretch")
+                if kind in {"PI", "PO", "CI"}:
+                    # This is a read-only preview from the SAME approved
+                    # calculation engine as the PDF, not an independent sum.
+                    # Partial totals are never presented as a full order total.
+                    try:
+                        calculated = _current_trade_export_review().review_trade_document(
+                            kind, doc, final=True, allow_incomplete=True)
+                        total = (calculated.get("render_data") or {}).get("total")
+                    except (ValueError, TypeError, KeyError, ArithmeticError):
+                        total = None
+                    if total is not None:
+                        st.caption(kind + " · 검토용 계산 합계: " +
+                                   str(doc.get("currency") or "통화 미확인") + " " +
+                                   str(total) + " (미확정 문서는 정식 발행 불가)")
+                    else:
+                        st.caption(kind + " · 일부 품목의 수량·단가·할인이 미확정되어 "
+                                   "전체 합계를 계산하지 않았습니다.")
                 # Show the current KE KOREA engine's unit review as ONE
                 # user-confirmed action. No per-product MASTER unit inference.
                 unit_only_indices = [
@@ -2488,8 +2505,10 @@ def render_ai_intake(principal: str):
                                   document_export_env(st.secrets, os.environ),
                                   edited_matches=not json_changed, principal=principal)
         st.markdown("#### 추가 검토용 기능 (선택)")
-        if st.button("기존 문서 엔진으로 검증·DRAFT 생성", key="ai_intake_prepare",
-                     disabled=not editor_matches):
+        # Keep the separate legacy smoke path, but make its diagnostic-only
+        # purpose clear. The standard user uses the single PDF button below.
+        if st.button("고급 진단 · 기존 문서 엔진 검증·DRAFT 생성",
+                     key="ai_intake_prepare", disabled=not editor_matches):
             st.session_state.pop("ai_intake_drafts", None)
             try:
                 data = json.loads(raw)
@@ -2615,6 +2634,26 @@ def render_ai_intake(principal: str):
                 principal, candidates[1]["CONTRACT"],
                 edited_matches=(raw_snapshot == candidates[1]["CONTRACT"] and editor_matches))
         doc = candidates[1].get("CONTRACT")
+        if isinstance(doc, dict) and doc.get("clauses"):
+            # User-visible provenance: the checkbox alone does not prove RAG
+            # retrieval actually contributed to this contract.
+            with st.expander("계약서 검토 · 사용된 RAG 참고자료", expanded=False):
+                sources = doc.get("library_sources") or []
+                quality = doc.get("draft_quality") or {}
+                comparison = quality.get("source_comparison") or {}
+                if sources:
+                    st.caption(str(len(sources)) + "개 승인 참고조항 사용 (계약 원문 자동 복사 아님)")
+                    for source in sources[:20]:
+                        st.write(
+                            str(source.get("title") or source.get("filename") or "승인 참고자료"),
+                            " · 위치: " + str(source.get("locator") or "확인 필요"),
+                            " · 주제: " + ", ".join(str(k) for k in source.get("matched_topics") or []),
+                        )
+                else:
+                    st.info("이 초안에서 실제로 활용된 승인 RAG 참고조항은 없습니다. "
+                            "RAG 체크박스 선택은 자료 검색 완료를 의미하지 않습니다.")
+                st.caption("교차 문맥 비교: " + str(comparison.get("status") or "미확인") +
+                           " · 생성된 문구는 사용자 검토 전까지 확정이 아닙니다.")
         if doc and not doc.get("clauses"):
             st.divider()
             st.markdown("#### 기존 LangGraph로 계약서 AI 초안 작성")
@@ -2626,6 +2665,58 @@ def render_ai_intake(principal: str):
                 value=True, key="ai_intake_use_approved_rag",
                 help="현재 계약의 조건이 우선합니다. 기존 계약서 원문이나 개별 계약 자료는 자동 전송하지 않습니다.",
             )
+            # Owner-only, explicit, idempotent maintenance. It updates
+            # vectors for reviewed anonymous guidance, NOT contract originals.
+            # Do not backfill automatically as a side effect of drafting.
+            if str(principal or "").strip().casefold() == "david.ihm@ke-korea.com":
+                with st.expander("계약서 RAG 상태·임베딩 복구 (관리자)", expanded=False):
+                    st.caption("승인·비식별 참고 청크만 대상입니다. 실계약 원문과 승인 상태는 변경하지 않습니다.")
+                    def rag_environment():
+                        credentials = {k: _server_value(k) for k in
+                                       ("SUPABASE_URL", "SUPABASE_SECRET_KEY",
+                                        "CONTRACT_LIBRARY_EMBEDDING_MODEL")}
+                        return dict(config, **credentials)
+                    if st.button("승인 RAG 청크 상태 조회",
+                                 key="ai_master_rag_status"):
+                        try:
+                            from Quotation_KEKOREA.contracts.repository import ContractRepository
+                            from Quotation_KEKOREA.contracts.library import library_embedding_status
+                            env = rag_environment()
+                            repo = ContractRepository(env)
+                            st.session_state["ai_master_rag_health"] = library_embedding_status(
+                                repo.list_library_records(approved_only=True),
+                                model=env.get("CONTRACT_LIBRARY_EMBEDDING_MODEL") or
+                                "text-embedding-3-small")
+                        except Exception:
+                            st.error("RAG 조회 실패. 관리자 Supabase 연결 설정을 점검하세요.")
+                    health = st.session_state.get("ai_master_rag_health")
+                    if health:
+                        st.write("승인 자료:", health["documents"], "건 · 청크:",
+                                 health["chunks"], "개 · 임베딩:",
+                                 health["embedded"], "개 · 누락:", health["missing"], "개")
+                    if st.button("누락 임베딩 복구 (OpenAI API 사용)",
+                                 key="ai_master_rag_backfill", disabled=not ready):
+                        try:
+                            from Quotation_KEKOREA.contracts.repository import ContractRepository
+                            from Quotation_KEKOREA.contracts.library import (
+                                backfill_library_embeddings, library_embedding_status,
+                            )
+                            env = rag_environment()
+                            repo = ContractRepository(env)
+                            with st.spinner("승인된 참고자료의 누락 벡터를 검증·복구합니다."):
+                                receipt = backfill_library_embeddings(
+                                    repo, env=env, document_limit=50, chunk_limit=256)
+                            st.session_state["ai_master_rag_health"] = library_embedding_status(
+                                repo.list_library_records(approved_only=True),
+                                model=env.get("CONTRACT_LIBRARY_EMBEDDING_MODEL") or
+                                "text-embedding-3-small")
+                            st.success(
+                                "복구 결과: " + str(receipt["chunks_updated"]) + "개 갱신, "
+                                + str(receipt["remaining"]) + "개 미완료, "
+                                + str(receipt["failed_documents"]) + "개 충돌/실패")
+                        except Exception:
+                            st.error("RAG 임베딩 복구에 실패했습니다. 승인 자료는 변경하지 않고 "
+                                     "서버 설정과 모델 연결 상태를 확인하세요.")
             if st.button("AI 계약서 초안 작성", disabled=not (draft_consent and ready),
                          key="ai_intake_contract_draft"):
                 try:
