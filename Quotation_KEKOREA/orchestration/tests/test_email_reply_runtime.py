@@ -47,6 +47,14 @@ class ReplyRuntimeTests(unittest.TestCase):
             self.assertEqual(current.REPLY_RUNTIME_REVISION,runtime.REPLY_RUNTIME_REVISION)
         self.assertIs(current,handoff)
 
+    def test_stale_streamlit_outbox_page_is_reloaded_before_render(self):
+        from Quotation_KEKOREA.orchestration.ui import email_outbox_page
+        with patch.object(email_outbox_page, "REPLY_RUNTIME_REVISION", "old-ui-module"):
+            current=runtime.current_outbox_page()
+            self.assertIs(current,email_outbox_page)
+            self.assertEqual(current.REPLY_RUNTIME_REVISION,runtime.REPLY_RUNTIME_REVISION)
+            self.assertTrue(callable(current.render_email_outbox))
+
     def test_current_draft_generator_is_injected_in_handoff(self):
         # Regression for default-bound legacy generate_candidates in long
         # running Streamlit processes after a source deployment.

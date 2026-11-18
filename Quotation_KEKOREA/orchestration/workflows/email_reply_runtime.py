@@ -17,6 +17,7 @@ import urllib.request
 REPLY_RUNTIME_REVISION = "master-reply-20261118-live-diagnostic-v1"
 DRAFT_MODULE = "Quotation_KEKOREA.orchestration.workflows.email_reply_drafts"
 HANDOFF_MODULE = "Quotation_KEKOREA.orchestration.workflows.email_reply_handoff"
+MAIL_UI_MODULE = "Quotation_KEKOREA.orchestration.ui.email_outbox_page"
 
 
 _RELOAD_LOCK = threading.RLock()
@@ -39,6 +40,11 @@ def _latest(module_name, expected):
                 getattr(module, "REPLY_SOURCE_MTIME_NS", None) != Path(module.__file__).stat().st_mtime_ns):
             raise RuntimeError("실행 중인 AI 회신 모듈이 배포 버전과 다릅니다. Streamlit Cloud에서 앱 재시작이 필요합니다.")
         return module
+
+
+def current_outbox_page():
+    """Refresh Streamlit page module before rendering the outbox UI."""
+    return _latest(MAIL_UI_MODULE, REPLY_RUNTIME_REVISION)
 
 
 def _drafts():

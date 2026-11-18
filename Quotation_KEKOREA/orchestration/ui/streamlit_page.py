@@ -273,8 +273,13 @@ elif page == "저장된 계약서":
 elif page == "발송 대기":
     # Email replies are a separate, user-approved queue; preserve existing
     # DRAFT PDF -> FINAL workflow unchanged below.
-    from Quotation_KEKOREA.orchestration.ui.email_outbox_page import render_email_outbox
-    render_email_outbox(_authenticated_principal)
+    from Quotation_KEKOREA.orchestration.workflows.email_reply_runtime import current_outbox_page
+    try:
+        _email_ui = current_outbox_page()
+    except RuntimeError as error:
+        st.error(str(error))
+    else:
+        _email_ui.render_email_outbox(_authenticated_principal)
     st.divider()
     from Quotation_KEKOREA.orchestration.ui.pdf_archive_page import render_pdf_archive
     render_pdf_archive(_authenticated_principal, "draft")

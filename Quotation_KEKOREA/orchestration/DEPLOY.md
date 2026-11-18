@@ -99,3 +99,5 @@ MASTER GRAPH 독립 UI의 `AI 업무 요청` 메뉴는 이제 기존 `AI 거래�
 `.github/workflows/master-browser-smoke.yml`는 Streamlit 실제 `email_outbox_page` 컴포넌트를 localhost 테스트 서버에서 열고 Playwright Chromium으로 클릭한다. 여기서 Supabase, OpenAI, SMTP는 모두 테스트용 가상 함수로 대체되어 영업 데이터나 실제 메일은 사용하지 않는다.
 검사: DRAFT 표시, AI 연결 진단 사전 동의, 가상 AI 회신 후보 3개, 직접 편집, 최종 확인 없이는 발송 버튼 비활성화, 확인 후 전송 클릭 시 정확히 1회의 가상 발신, 단계별 브라우저 캡처를 GitHub Actions artifact에 저장.
 이 테스트는 인증된 실제 운영 사이트가 아니라 동일 코드의 합성 데이터를 사용하는 CI 환경에서 실행된다. 실제 Streamlit Cloud 로그인·배포·실OpenAI·실SMTP 결과를 검증했다고 주장하면 안 된다.
+
+Streamlit 메인 네비게이션에서도 발송 대기 UI를 importlib 모듈 객체로 갱신한다. 하위 API 모듈뿐 아니라 화면 모듈도 소스 수정 시 자동 재로드하며, 버전 불일치 시 구버전 UI를 조용히 사용하지 않는다.
