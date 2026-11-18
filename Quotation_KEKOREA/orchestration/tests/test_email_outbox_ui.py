@@ -43,6 +43,7 @@ class OutboxLiveUiTests(unittest.TestCase):
             ("Quotation_KEKOREA.orchestration.ui.email_outbox_page._db_env",{}),
             ("Quotation_KEKOREA.orchestration.ui.email_outbox_page.list_replies",[self.record]),
             ("Quotation_KEKOREA.orchestration.ui.email_outbox_page.get_reply",self.record),
+            ("Quotation_KEKOREA.orchestration.workflows.mail_pdf_attachments.list_attachments",[]),
             ("Quotation_KEKOREA.orchestration.ui.pdf_archive_page.render_pdf_archive",None),
         ]
         for target,return_value in patches:

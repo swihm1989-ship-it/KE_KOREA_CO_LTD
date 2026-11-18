@@ -25,7 +25,7 @@ from Quotation_KEKOREA.orchestration.workflows.email_outbox import (
     requeue_reply, delete_reply,
 )
 
-SEND_REVISION_EXPECTED = "master-smtp-stage-safe-20261118-v2"
+SEND_REVISION_EXPECTED = "master-smtp-pdf-attachment-20261118-v3"
 
 
 def _resolve_send_approved():
@@ -46,7 +46,8 @@ def _resolve_send_approved():
             return False
         return (getattr(mod, "EMAIL_SEND_RUNTIME_REVISION", None)==SEND_REVISION_EXPECTED
                 and getattr(mod, "EMAIL_SEND_SOURCE_MTIME_NS", None)==actual_mtime
-                and {"confirmed", "signature_text", "language"}.issubset(params))
+                and {"confirmed", "signature_text", "language",
+                     "expected_attachment_digest"}.issubset(params))
 
     if not current(module):
         try:
@@ -226,6 +227,28 @@ def render_email_outbox(principal: str):
 
     _render_delete_reply(env, principal, row)
 
+    from Quotation_KEKOREA.orchestration.workflows.mail_pdf_attachments import (
+        list_attachments, attachment_digest,
+    )
+    try:
+        attached_pdfs=list_attachments(env,principal,chosen_id)
+    except OutboxError as error:
+        st.error(str(error))
+        return
+    except Exception:
+        st.error("첨부할 PDF 목록을 확인하지 못했습니다.")
+        return
+    attached_stamp=attachment_digest(attached_pdfs)
+    if attached_pdfs:
+        st.markdown("#### 이 메일에 자동 연결된 최종 PDF")
+        for pdf in attached_pdfs:
+            st.caption("📎 "+str(pdf.get("filename") or "FINAL.pdf")+" · "+
+                       str(pdf.get("kind") or "PDF"))
+        st.caption("이 파일들은 실제 발송 시 PDF 첨부파일로 포함됩니다. "
+                   "삭제는 기존 '저장된 계약서' 메뉴에서 관리합니다.")
+    elif row.get("status")=="draft":
+        st.caption("이 메일에 연결된 최종 PDF는 아직 없습니다.")
+
     if row.get("status")!="draft":
         if row.get("status")=="sending":
             st.warning("현재 발송 처리 중입니다. 상태가 확정되면 새 발송 건을 만들 수 있습니다.")
@@ -334,6 +357,18 @@ def render_email_outbox(principal: str):
             if not prefilled_signature:
                 st.warning("이전 서명을 구분하지 못했습니다. 본문과 Signature를 "
                            "직접 확인한 후 새 발송을 승인하세요.")
+    # Document-aware sentence is added by the application, not invented by
+    # the AI (which deliberately never claims a document was attached).
+    if attached_pdfs:
+        kinds=", ".join(dict.fromkeys(str(doc.get("kind") or "PDF") for doc in attached_pdfs))
+        attachment_sentence=(
+            "요청하신 " + kinds + " 최종 PDF를 첨부합니다."
+            if lang=="ko" else
+            "Please find attached the requested final " + kinds + " PDF."
+        )
+        if attachment_sentence not in suggested_body:
+            suggested_body=(suggested_body.strip()+"\n\n" if suggested_body.strip()
+                            else "")+attachment_sentence
     if suggested_body:
         st.caption("첫 인사말은 원본 발신인 정보 기준으로 제안됩니다. "
                    "메일 내용에서 직접 수정할 수 있습니다.")
@@ -374,7 +409,7 @@ def render_email_outbox(principal: str):
     # state can be lost when Streamlit batches a text edit + checkbox event.
     # The exact current recipient/subject/body/signature is hashed and any
     # subsequent edit invalidates the stored approval before sending.
-    digest=sha256(("\0".join((recipient,subject,final_body))).encode()).hexdigest()[:20]
+    digest=sha256(("\0".join((recipient,subject,final_body,attached_stamp))).encode()).hexdigest()[:20]
     approved_key="master_reply_approved_digest_"+chosen_id
     if st.button("이 내용으로 발송 전 승인",type="secondary",
                  disabled=not body.strip() or not signature.strip(),
@@ -395,7 +430,8 @@ def render_email_outbox(principal: str):
                 current_send=_resolve_send_approved()
                 result=current_send(env,principal,chosen_id,_settings(),
                                     recipient,subject,final_body,confirmed=True,
-                                    signature_text=signature,language=lang)
+                                    signature_text=signature,language=lang,
+                                    expected_attachment_digest=attached_stamp)
         except (OutboxError,ValueError,PermissionError) as error:
             _clear_send_approval(chosen_id)
             st.error(str(error)[:350])

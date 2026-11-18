@@ -90,7 +90,8 @@ class UserOwnedOutboxOperations(TestCase):
         with patch.object(outbox,"get_reply",return_value=self.original), \
              patch.object(outbox,"_repo",return_value=repo), \
              patch.object(outbox,"mail_config",return_value=self.config), \
-             patch.object(outbox,"send_smtp") as send:
+             patch.object(outbox,"send_smtp") as send, \
+             patch("Quotation_KEKOREA.orchestration.workflows.mail_pdf_attachments.copy_links"):
             draft=outbox.requeue_reply({},self.owner,self.identifier,{})
         self.assertEqual(draft["status"],"draft")
         self.assertIsNone(draft["approved_sha256"])
@@ -108,7 +109,8 @@ class UserOwnedOutboxOperations(TestCase):
                                     "mail_uid":"manual-repeat-test","status":"draft"}]
         with patch.object(outbox,"get_reply",return_value=original), \
              patch.object(outbox,"_repo",return_value=repo), \
-             patch.object(outbox,"mail_config",return_value=self.config):
+             patch.object(outbox,"mail_config",return_value=self.config), \
+             patch("Quotation_KEKOREA.orchestration.workflows.mail_pdf_attachments.copy_links"):
             new=outbox.requeue_reply({},self.owner,self.identifier,{})
         self.assertEqual(new["status"],"draft")
         self.assertEqual(original["status"],"send_unknown")

@@ -20,7 +20,7 @@ from Quotation_KEKOREA.orchestration.workflows.email_reply_drafts import (
     reply_subject, source_hash, preferred_language,
 )
 
-EMAIL_SEND_RUNTIME_REVISION = "master-smtp-stage-safe-20261118-v2"
+EMAIL_SEND_RUNTIME_REVISION = "master-smtp-pdf-attachment-20261118-v3"
 EMAIL_SEND_SOURCE_MTIME_NS = Path(__file__).stat().st_mtime_ns
 
 TABLE="kekorea_master_mail_outbox"
@@ -166,6 +166,8 @@ def requeue_reply(env: dict, principal: str, ident: str,
         raise OutboxError("새 발송 건을 작성하지 못했습니다. 기존 발송 기록은 유지됩니다.") from None
     if not isinstance(fresh, list) or len(fresh) != 1:
         raise OutboxError("새 발송 건 저장을 확인하지 못했습니다. 기존 발송 기록은 유지됩니다.")
+    from Quotation_KEKOREA.orchestration.workflows.mail_pdf_attachments import copy_links
+    copy_links(env, owner, ident, fresh[0]["id"])
     return fresh[0]
 
 
@@ -265,7 +267,8 @@ def _validate_message(to_addr:str,subject:str,body:str):
     return recipient,subject,body
 
 def send_smtp(config,recipient:str,subject:str,body:str,message_id:str="",*,
-              html_body:str|None=None,logo_bytes:bytes|None=None):
+              html_body:str|None=None,logo_bytes:bytes|None=None,
+              attachments:list[dict]|None=None):
     """One SMTP send, only after atomic owner-confirmed DB claim.
 
     Any connection/TLS/auth/composition failure that occurs BEFORE calling
@@ -300,6 +303,16 @@ def send_smtp(config,recipient:str,subject:str,body:str,message_id:str="",*,
             html_part.add_related(logo_bytes,maintype="image",subtype="png",
                                   cid="<"+LOGO_CID+">",disposition="inline",
                                   filename="ke-korea-logo.png")
+        # Attach verified private FINAL PDF bytes to the actual outgoing MIME
+        # message. Inline logo and PDF files are separate MIME parts.
+        for attachment in attachments or []:
+            filename=str(attachment["filename"]).replace("\\", "/").split("/")[-1]
+            data=attachment["data"]
+            if (not filename.lower().endswith(".pdf") or
+                    not isinstance(data,bytes) or not data.startswith(b"%PDF")):
+                raise OutboxError("PDF 첨부파일 형식이 유효하지 않습니다.")
+            email.add_attachment(data,maintype="application",subtype="pdf",
+                                 filename=filename)
         tls=ssl.create_default_context()
         stage="connect"
         if config.smtp.security=="ssl":
@@ -343,6 +356,7 @@ def send_smtp(config,recipient:str,subject:str,body:str,message_id:str="",*,
 def send_approved(env:dict,principal:str,ident:str,config_values:dict,
                   recipient:str,subject:str,body:str,*,confirmed:bool=False,
                   signature_text:str|None=None,language:str|None=None,
+                  expected_attachment_digest:str|None=None,
                   transport=send_smtp):
     """No call without a real user's send-button click and confirmation."""
     if confirmed is not True:
@@ -379,7 +393,19 @@ def send_approved(env:dict,principal:str,ident:str,config_values:dict,
             html_body=delivery_signature_html(reply_text,signature)
         except (ValueError,OSError,RuntimeError):
             raise OutboxError("KE KOREA 이메일 서명 디자인을 준비하지 못했습니다.") from None
-    digest=sha256((recipient+"\0"+subject+"\0"+body).encode("utf-8")).hexdigest()
+    # Verify every attachment and its hash BEFORE claiming a send.
+    # The UI passes an approval-bound snapshot of attachment ids/hashes.
+    verified_attachments=[]
+    if expected_attachment_digest is not None:
+        from Quotation_KEKOREA.orchestration.workflows.mail_pdf_attachments import (
+            load_approved_attachments,
+        )
+        verified_attachments=load_approved_attachments(
+            env,owner,ident,expected_attachment_digest)
+    approved_data=recipient+"\0"+subject+"\0"+body
+    if expected_attachment_digest is not None:
+        approved_data+="\0"+expected_attachment_digest
+    digest=sha256(approved_data.encode("utf-8")).hexdigest()
     repo=_repo(env)
     stamp=datetime.now(timezone.utc).isoformat()
     try:
@@ -397,11 +423,13 @@ def send_approved(env:dict,principal:str,ident:str,config_values:dict,
     status="sent"
     before_data_error = None
     try:
+        attachment_kw=({"attachments":verified_attachments} if verified_attachments else {})
         if html_body is None:
-            transport(config,recipient,subject,body,row.get("message_id") or "")
+            transport(config,recipient,subject,body,row.get("message_id") or "",
+                      **attachment_kw)
         else:
             transport(config,recipient,subject,body,row.get("message_id") or "",
-                      html_body=html_body,logo_bytes=logo_bytes)
+                      html_body=html_body,logo_bytes=logo_bytes,**attachment_kw)
     except SMTPBeforeDataError as error:
         # No SMTP DATA was attempted. Restore the single draft atomically,
         # clearing approval and send-start. An existing ambiguous attempt
