@@ -240,14 +240,46 @@ def render_email_outbox(principal: str):
         return
     attached_stamp=attachment_digest(attached_pdfs)
     if attached_pdfs:
-        st.markdown("#### 이 메일에 자동 연결된 최종 PDF")
+        from Quotation_KEKOREA.orchestration.workflows import pdf_archive
+        st.markdown("#### 발송할 PDF 첨부파일")
+        st.caption("저장된 계약서에 보관된 실제 파일을 다시 불러와 확인합니다.")
+        invalid_attachment=False
         for pdf in attached_pdfs:
-            st.caption("📎 "+str(pdf.get("filename") or "FINAL.pdf")+" · "+
-                       str(pdf.get("kind") or "PDF"))
-        st.caption("이 파일들은 실제 발송 시 PDF 첨부파일로 포함됩니다. "
-                   "삭제는 기존 '저장된 계약서' 메뉴에서 관리합니다.")
+            filename=str(pdf.get("filename") or "FINAL.pdf")
+            try:
+                record,blob=pdf_archive.load_pdf(env,principal,pdf["id"])
+                if (record.get("status")!="final"
+                        or record.get("content_sha256")!=pdf.get("content_sha256")):
+                    raise ValueError("saved PDF metadata changed")
+            except Exception:
+                invalid_attachment=True
+                st.error("첨부 검증 실패 · "+filename+" · PDF를 읽을 수 없습니다. "
+                         "보관 파일을 확인한 뒤 다시 승인해 주세요.")
+                continue
+            with st.container(border=True):
+                st.success("첨부 확인 완료 · "+filename)
+                st.caption(str(pdf.get("kind") or "PDF")+" · "+
+                           f"{len(blob)/1024:,.1f} KB · PDF 원본 무결성 검증 완료")
+                st.download_button("첨부 PDF 확인·다운로드",
+                    data=blob,file_name=filename,mime="application/pdf",
+                    key="master_reply_pdf_download_"+chosen_id+"_"+str(pdf["id"]))
+                with st.expander("첨부 PDF 미리보기 · "+filename,expanded=False):
+                    if hasattr(st,"pdf"):
+                        try:
+                            st.pdf(blob,height=620)
+                        except Exception:
+                            st.info("PDF 미리보기를 표시할 수 없습니다. 위 다운로드로 확인하세요.")
+                    else:
+                        st.info("이 환경에서는 PDF 미리보기가 지원되지 않습니다. 위 다운로드로 확인하세요.")
+        if invalid_attachment:
+            st.error("첨부파일 검증에 실패하여 이 메일의 발송을 진행할 수 없습니다.")
+            if row.get("status")=="draft":
+                return
+        else:
+            st.success(f"총 {len(attached_pdfs)}개 PDF 첨부 준비 완료 · 승인 후 발송 버튼을 누르면 함께 전송됩니다.")
+        st.caption("파일 삭제와 보관 관리는 기존 '저장된 계약서' 메뉴에서 가능합니다.")
     elif row.get("status")=="draft":
-        st.caption("이 메일에 연결된 최종 PDF는 아직 없습니다.")
+        st.info("연결된 최종 PDF가 없습니다. 문서가 필요한 메일이라면 최종 PDF 생성 후 연결 상태를 확인하세요.")
 
     if row.get("status")!="draft":
         if row.get("status")=="sending":
