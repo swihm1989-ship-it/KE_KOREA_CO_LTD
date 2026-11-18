@@ -84,7 +84,8 @@ def archive_pdf(env: Mapping[str, str], principal: str, kind: str, status: str,
     snapshot = json.loads(json.dumps(source, ensure_ascii=False, default=str))
     fingerprint = source_fingerprint(snapshot)
     ident = str(uuid4())
-    filename = _safe_name(asset.get("filename", ""), kind, status)
+    from Quotation_KEKOREA.orchestration.workflows.pdf_filename import pdf_filename
+    filename = _safe_name(pdf_filename(kind, snapshot), kind, status)
     path = f"{owner_key(owner)}/{datetime.now(timezone.utc):%Y/%m}/{ident}.pdf"
     record = {
         "id": ident, "owner_email": owner, "kind": kind, "status": status,
