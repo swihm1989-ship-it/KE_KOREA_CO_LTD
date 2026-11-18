@@ -7,7 +7,10 @@ from __future__ import annotations
 
 import base64
 import hmac
+import importlib
+import logging
 import os
+from pathlib import Path
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -18,6 +21,34 @@ from Quotation_KEKOREA.orchestration.workflows import pdf_archive as archive
 from Quotation_KEKOREA.orchestration.workflows.document_assets import document_export_env
 
 KST = ZoneInfo("Asia/Seoul")
+_LOG = logging.getLogger(__name__)
+
+
+def _current_delete_document():
+    """Resolve the current archive implementation after Streamlit hot deploy.
+
+    Streamlit can retain an older imported pdf_archive module with no
+    delete_document even though the new UI exposes the delete control.
+    Resolve the function at click time and reload when the on-disk module
+    differs. Never delete anything during rendering/reloading.
+    """
+    module = archive
+    try:
+        source_mtime = Path(module.__file__).stat().st_mtime_ns
+        loaded_mtime = getattr(module, "PDF_ARCHIVE_SOURCE_MTIME_NS", None)
+    except (TypeError, AttributeError, OSError):
+        source_mtime, loaded_mtime = None, None
+    if (not callable(getattr(module, "delete_document", None))
+            or (loaded_mtime is not None and loaded_mtime != source_mtime)):
+        importlib.invalidate_caches()
+        module = importlib.reload(module)
+    delete = getattr(module, "delete_document", None)
+    if not callable(delete):
+        raise archive.PdfArchiveError(
+            "PDF 삭제 기능이 이전 배포 버전으로 실행 중입니다. 앱을 재시작한 뒤 다시 시도하세요."
+        )
+    return delete
+
 
 
 def _env() -> dict:
@@ -229,11 +260,17 @@ def render_pdf_archive(principal: str, status: str) -> None:
                      disabled=not delete_ok,
                      key="master_pdf_delete_" + chosen):
             try:
-                archive.delete_document(_env(),principal,chosen)
+                _current_delete_document()(_env(),principal,chosen)
             except archive.PdfArchiveError as error:
                 st.error(str(error))
-            except Exception:
-                st.error("PDF 삭제에 실패했습니다. 저장소 설정을 확인하세요.")
+            except Exception as error:
+                # Never expose account details, storage paths or secrets.
+                # Keep traceback available to the app operator in Cloud logs.
+                _LOG.exception("MASTER PDF delete failed before completion")
+                st.error(
+                    "PDF 삭제 요청이 완료되지 않았습니다 (오류 유형: "
+                    + type(error).__name__ + "). 운영 로그를 확인해 주세요."
+                )
             else:
                 st.session_state.pop("master_pdf_selected_" + status,None)
                 st.success("선택한 PDF 문서를 삭제했습니다.")
