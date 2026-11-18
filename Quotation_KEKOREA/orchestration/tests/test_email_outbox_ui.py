@@ -108,6 +108,53 @@ class OutboxLiveUiTests(unittest.TestCase):
         app.run()
         self.assertTrue(app.button(key="master_reply_send_"+self.mail_id).disabled)
 
+    def test_user_can_prepare_new_send_from_sent_record(self):
+        self.record["status"]="sent"
+        self.record["approved_subject"]="Re: 입찰 건 관련"
+        self.record["approved_body"]="안녕하세요.\n\n확인했습니다.\n\n"
+        self.record["approved_sha256"]="f"*64
+        clone={**self.record,"id":str(uuid4()),"status":"draft",
+               "approved_sha256":None}
+        with patch("Quotation_KEKOREA.orchestration.ui.email_outbox_page.requeue_reply",
+                   return_value=clone) as repeat:
+            app,send,_probe=self._app()
+            button=app.button(key="master_reply_repeat_"+self.mail_id)
+            self.assertFalse(button.disabled)
+            button.click().run()
+        repeat.assert_called_once()
+        send.assert_not_called()
+        self.assertFalse(app.exception,[x.message for x in app.exception])
+
+    def test_unknown_delivery_can_explicitly_prepare_another_draft(self):
+        self.record["status"]="send_unknown"
+        self.record["approved_subject"]="Re: 입찰 건 관련"
+        self.record["approved_body"]="안녕하세요.\n\n확인했습니다."
+        self.record["approved_sha256"]="f"*64
+        clone={**self.record,"id":str(uuid4()),"status":"draft",
+               "approved_sha256":None}
+        with patch("Quotation_KEKOREA.orchestration.ui.email_outbox_page.requeue_reply",
+                   return_value=clone) as repeat:
+            app,send,_probe=self._app()
+            self.assertTrue(any("중복" in str(x.value) for x in app.warning))
+            app.button(key="master_reply_repeat_"+self.mail_id).click().run()
+        repeat.assert_called_once()
+        send.assert_not_called()
+        self.assertFalse(app.exception,[x.message for x in app.exception])
+
+    def test_owner_can_delete_draft_with_single_explicit_confirmation(self):
+        with patch("Quotation_KEKOREA.orchestration.ui.email_outbox_page.delete_reply"
+                   ) as delete:
+            app,send,_probe=self._app()
+            button=app.button(key="master_reply_delete_"+self.mail_id)
+            self.assertTrue(button.disabled)
+            delete.assert_not_called()
+            app.checkbox(key="master_reply_delete_confirm_"+self.mail_id).check().run()
+            self.assertFalse(app.button(key="master_reply_delete_"+self.mail_id).disabled)
+            app.button(key="master_reply_delete_"+self.mail_id).click().run()
+        delete.assert_called_once()
+        send.assert_not_called()
+        self.assertFalse(app.exception,[x.message for x in app.exception])
+
     def test_approval_is_revoked_on_any_editor_change(self):
         from Quotation_KEKOREA.orchestration.ui import email_outbox_page as outbox_page
         state={"master_reply_approved_digest_unit":"sample-digest"}
