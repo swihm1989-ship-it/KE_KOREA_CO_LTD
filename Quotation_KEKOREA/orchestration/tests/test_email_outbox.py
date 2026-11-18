@@ -141,6 +141,88 @@ class EmailOutboxTests(unittest.TestCase):
         self.assertEqual(msg["In-Reply-To"],"<parent@example.test>")
         self.assertEqual(msg["To"],"buyer@example.test")
 
+
+    def test_smtp_connect_error_is_certainly_before_data(self):
+        with patch.object(outbox.smtplib,"SMTP",
+                          side_effect=ConnectionRefusedError("fake-private-host")):
+            with self.assertRaises(outbox.SMTPBeforeDataError) as error:
+                outbox.send_smtp(self.config,"buyer@example.test",
+                                 "Re: Test","Test")
+        self.assertEqual(error.exception.stage,"connect")
+        self.assertIn("메일은 전송되지 않았습니다",str(error.exception))
+        self.assertNotIn("fake-private-host",str(error.exception))
+
+    def test_smtp_login_rejection_restores_draft_without_duplicate_send(self):
+        import smtplib
+        db=MemoryRepo(dict(self.row))
+        client=Mock()
+        client.login.side_effect=smtplib.SMTPAuthenticationError(
+            535,b"synthetic-private-user")
+        with patch.object(outbox,"_repo",return_value=db), \
+             patch.object(outbox,"mail_config",return_value=self.config), \
+             patch.object(outbox.smtplib,"SMTP",return_value=client):
+            with self.assertRaises(outbox.SMTPBeforeDataError) as error:
+                outbox.send_approved({},self.owner,self.row["id"],{},
+                    "buyer@example.test","Re: Hello","Test message",
+                    confirmed=True,transport=outbox.send_smtp)
+        self.assertIn("SMTP 인증 실패",str(error.exception))
+        self.assertIn("535",str(error.exception))
+        self.assertNotIn("synthetic-private-user",str(error.exception))
+        self.assertEqual(db.row["status"],"draft")
+        self.assertIsNone(db.row["send_started_at"])
+        self.assertIsNone(db.row["approved_sha256"])
+        self.assertIsNone(db.row["approved_body"])
+        client.send_message.assert_not_called()
+
+    def test_tls_failure_keeps_editable_draft(self):
+        db=MemoryRepo(dict(self.row))
+        client=Mock()
+        client.starttls.side_effect=OSError("private-route")
+        with patch.object(outbox,"_repo",return_value=db), \
+             patch.object(outbox,"mail_config",return_value=self.config), \
+             patch.object(outbox.smtplib,"SMTP",return_value=client):
+            with self.assertRaises(outbox.SMTPBeforeDataError) as error:
+                outbox.send_approved({},self.owner,self.row["id"],{},
+                    "buyer@example.test","Re: Hello","Test message",
+                    confirmed=True,transport=outbox.send_smtp)
+        self.assertEqual(db.row["status"],"draft")
+        self.assertIn("starttls",str(error.exception))
+        self.assertNotIn("private-route",str(error.exception))
+        client.login.assert_not_called()
+        client.send_message.assert_not_called()
+
+    def test_timeout_inside_send_message_remains_unknown_and_locked(self):
+        db=MemoryRepo(dict(self.row))
+        client=Mock()
+        client.send_message.side_effect=TimeoutError("server may have accepted")
+        with patch.object(outbox,"_repo",return_value=db), \
+             patch.object(outbox,"mail_config",return_value=self.config), \
+             patch.object(outbox.smtplib,"SMTP",return_value=client):
+            with self.assertRaises(outbox.OutboxError):
+                outbox.send_approved({},self.owner,self.row["id"],{},
+                    "buyer@example.test","Re: Hello","Test message",
+                    confirmed=True,transport=outbox.send_smtp)
+            self.assertEqual(db.row["status"],"send_unknown")
+            with self.assertRaises(outbox.OutboxError):
+                outbox.send_approved({},self.owner,self.row["id"],{},
+                    "buyer@example.test","Re: Hello","Test message",
+                    confirmed=True,transport=outbox.send_smtp)
+        client.send_message.assert_called_once()
+        self.assertIsNotNone(db.row["send_started_at"])
+
+    def test_older_unknown_record_is_never_reset_by_predata_fix(self):
+        row=dict(self.row,status="send_unknown",send_started_at="2026-11-18T07:16:08Z")
+        db=MemoryRepo(row)
+        sender=Mock()
+        with patch.object(outbox,"_repo",return_value=db), \
+             patch.object(outbox,"mail_config",return_value=self.config):
+            with self.assertRaises(outbox.OutboxError):
+                outbox.send_approved({},self.owner,self.row["id"],{},
+                    "buyer@example.test","Re: Hello","Test message",
+                    confirmed=True,transport=sender)
+        self.assertEqual(db.row["status"],"send_unknown")
+        sender.assert_not_called()
+
     def test_no_header_injection(self):
         for input_ in ("person@example.com\r\nBcc:bad@example.com","two@example.com,other@example.com","bad"):
             with self.subTest(input_=input_),self.assertRaises(ValueError):
