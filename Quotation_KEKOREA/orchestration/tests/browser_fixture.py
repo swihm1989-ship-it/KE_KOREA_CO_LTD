@@ -49,8 +49,9 @@ def save(_env,_principal,_ident,candidates,lang):
     return st.session_state["fixture_record"]
 
 def send(_env,_principal,_ident,_settings,recipient,subject,body,*,confirmed,
-         signature_text,language,expected_attachment_digest=None):
+         signature_text,language,expected_attachment_digest=None,allow_legacy_dh=False):
     assert confirmed is True
+    assert allow_legacy_dh is False
     assert expected_attachment_digest==attachments.attachment_digest([FIXTURE_PDF])
     assert recipient=="buyer@example.test"
     assert "www.ke-korea.co.kr" in signature_text
