@@ -12,15 +12,17 @@ import os
 import re
 import streamlit as st
 
-REPLY_RUNTIME_REVISION = "master-reply-20261118-http400-schema-v2"
+REPLY_RUNTIME_REVISION = "master-reply-20261118-personal-salutation-v3"
 REPLY_SOURCE_MTIME_NS = Path(__file__).stat().st_mtime_ns
 
 from Quotation_KEKOREA.orchestration.workflows.document_assets import document_export_env
 from Quotation_KEKOREA.orchestration.workflows.email_reply_drafts import (
-    STYLES, default_signature, generate_candidates, reply_subject,
+    STYLES, default_signature, reply_subject, recipient_salutation,
+    with_recipient_salutation,
 )
 from Quotation_KEKOREA.orchestration.workflows.email_outbox import (
     OutboxError, list_replies, get_reply, save_candidates, send_approved,
+    requeue_reply, delete_reply,
 )
 
 SEND_REVISION_EXPECTED = "master-smtp-stage-safe-20261118-v2"
@@ -91,6 +93,56 @@ def _clear_send_approval(ident: str):
 def _db_env():
     return document_export_env(st.secrets,os.environ)
 
+
+def _body_prefill_from_previous(full: str, language: str):
+    """Keep an explicitly duplicated draft editable, without double signatures.
+
+    For earlier records the signature is not separately persisted. An
+    unrecognized custom block requires human review, not silent deletion.
+    """
+    message = str(full or "").strip()
+    signature = default_signature(language)
+    if message.endswith("\n\n" + signature):
+        return message[:-(len(signature) + 2)].strip(), signature
+    blocks = message.rsplit("\n\n", 1)
+    if len(blocks) == 2 and (
+        "www.ke-korea.co.kr" in blocks[1] or
+        "KE Korea Co. Ltd" in blocks[1] or
+        "(주)케이이코리아" in blocks[1]
+    ):
+        return blocks[0].strip(), blocks[1].strip()
+    # The previous text is displayed in full so it can be edited. Do not
+    # silently add a second signature if a custom one cannot be identified.
+    return message, ""
+
+
+def _render_delete_reply(env, principal, row):
+    ident = str(row.get("id") or "")
+    if row.get("status") == "sending":
+        st.caption("전송 중인 발송 기록은 삭제할 수 없습니다.")
+        return
+    with st.expander("이 발송 기록 삭제", expanded=False):
+        st.caption("선택한 기록을 영구 삭제합니다. 이미 보낸 이메일은 취소되지 않습니다.")
+        acknowledged = st.checkbox(
+            "이 메일 기록을 삭제하겠습니다.",
+            key="master_reply_delete_confirm_" + ident,
+        )
+        if st.button("선택 메일 삭제", type="secondary",
+                     disabled=not acknowledged,
+                     key="master_reply_delete_" + ident):
+            try:
+                delete_reply(env, principal, ident)
+            except OutboxError as error:
+                st.error(str(error))
+            except Exception:
+                st.error("메일 기록을 삭제하지 못했습니다.")
+            else:
+                st.session_state.pop("master_reply_selected", None)
+                st.session_state.pop("master_email_outbox_selected", None)
+                st.success("선택한 발송 기록을 삭제했습니다.")
+                st.rerun()
+
+
 def render_email_outbox(principal: str):
     if not principal:
         raise PermissionError("로그인이 필요합니다.")
@@ -114,15 +166,9 @@ def render_email_outbox(principal: str):
         st.info("발송 대기 중인 이메일이 없습니다. 메일함 → AI 업무 요청에서 문서 불필요 메일을 보내세요.")
         return
 
-    pending=[r for r in rows if r.get("status")!="sent"]
-    if not pending:
-        st.info("미발송 메일이 없습니다.")
-        with st.expander("발송 완료 내역"):
-            for r in rows:
-                st.caption((r.get("source_subject") or "(제목 없음)")+" · 발송 완료")
-        return
-
-    row_map={str(r["id"]):r for r in pending}
+    # Previous sent and ambiguous attempts remain selectable for the owner's
+    # explicit 'make another draft' action and deletion. Never auto-retry.
+    row_map={str(r["id"]):r for r in rows}
     default=st.session_state.get("master_reply_selected")
     options=list(row_map)
     index=options.index(default) if default in row_map else 0
@@ -132,7 +178,7 @@ def render_email_outbox(principal: str):
         format_func=lambda ident:(
             str(row_map[ident].get("source_subject") or "(제목 없음)")[:65]+" · "+
             str(row_map[ident].get("recipient_email") or "")[:45]+" · "+
-            {"draft":"DRAFT","sending":"발송 상태 확인 필요","send_unknown":"발송 여부 미확인"}.get(
+            {"draft":"DRAFT","sending":"발송 처리 중","send_unknown":"발송 여부 미확인","sent":"발송 완료"}.get(
                 row_map[ident].get("status"),"확인 필요")
         ),key="master_email_outbox_selected")
     if not chosen_id:
@@ -168,13 +214,35 @@ def render_email_outbox(principal: str):
             except Exception:
                 st.error("SMTP 접속·로그인 진단에 실패했습니다. 설정을 확인하세요.")
 
+    _render_delete_reply(env, principal, row)
+
     if row.get("status")!="draft":
-        st.warning("메일 전송이 이미 시작되었거나 결과가 불확실합니다. "
-                   "이 화면에서 다시 발송할 수 없습니다. 실제 보낸편지함을 먼저 확인하세요.")
+        if row.get("status")=="sending":
+            st.warning("현재 발송 처리 중입니다. 상태가 확정되면 새 발송 건을 만들 수 있습니다.")
+        else:
+            st.info("이전 발송 기록은 그대로 보관됩니다. 같은 내용을 다시 보내려면 "
+                    "아래에서 별도의 새 DRAFT를 만들고 발송 버튼을 직접 누르세요.")
+            if row.get("status")=="send_unknown":
+                st.warning("기존 발송 성공 여부가 확인되지 않았습니다. 새로 발송하면 "
+                           "중복으로 도착할 수 있으며, 재발송 여부는 사용자가 결정합니다.")
         if row.get("approved_subject"):
-            st.text("발송 시도 제목: "+str(row.get("approved_subject")))
-            st.text_area("발송 시도 본문",value=str(row.get("approved_body") or ""),
+            st.text("기존 발송 제목: "+str(row.get("approved_subject")))
+            st.text_area("기존 발송 본문",value=str(row.get("approved_body") or ""),
                          disabled=True,height=200,key="master_reply_sent_view_"+chosen_id)
+        if row.get("status") in ("sent","send_unknown"):
+            if st.button("같은 메일로 새 발송 건 작성",type="primary",
+                         key="master_reply_repeat_"+chosen_id):
+                try:
+                    from Quotation_KEKOREA.orchestration.ui.mailbox_page import _settings
+                    fresh=requeue_reply(env,principal,chosen_id,_settings())
+                except (OutboxError,ValueError,PermissionError) as error:
+                    st.error(str(error))
+                except Exception:
+                    st.error("새 발송 초안을 작성하지 못했습니다.")
+                else:
+                    st.session_state["master_reply_selected"]=fresh["id"]
+                    st.session_state.pop("master_email_outbox_selected",None)
+                    st.rerun()
         return
 
     with st.expander("AI 연결 상태 진단 · 가상 데이터만 사용", expanded=False):
@@ -227,23 +295,38 @@ def render_email_outbox(principal: str):
             st.error("AI 회신 생성 실패: "+str(error)[:300])
         except Exception:
             st.error("AI 회신 생성에 실패했습니다. 설정을 확인하세요.")
+    salutation_source={"sender":row.get("sender_header") or "",
+                       "body":row.get("source_body") or ""}
     has_ai_candidates=len(suggestions)==3 and lang==stored_lang
+    prefilled_signature=default_signature(lang)
     if has_ai_candidates:
         st.markdown("#### AI 추천 회신 후보 3개")
         for index,candidate in enumerate(suggestions):
             with st.expander("후보 "+str(index+1)+" · "+STYLES[index]):
-                st.text(candidate)
+                st.text(with_recipient_salutation(candidate,salutation_source,lang))
         selected_index=st.radio("수정할 회신 후보",list(range(3)),
             horizontal=True,format_func=lambda i:str(i+1)+". "+STYLES[i],
             key="master_reply_choice_"+chosen_id,
             on_change=_clear_send_approval,args=(chosen_id,))
-        suggested_body=suggestions[selected_index]
+        suggested_body=with_recipient_salutation(
+            suggestions[selected_index],salutation_source,lang)
     else:
         st.info("AI 후보가 아직 없거나 선택한 언어와 일치하지 않습니다. "
                 "상단에서 AI 회신 후보를 다시 생성하거나, 아래에서 직접 회신을 작성할 수 있습니다. "
                 "직접 작성한 메일도 최종 승인 전에는 발송되지 않습니다.")
         selected_index="manual"
         suggested_body=""
+        # Only intentionally copied drafts have previously approved text
+        # but NO approved digest. Restore it as editable, not approved.
+        if row.get("approved_body") and not row.get("approved_sha256") and lang==stored_lang:
+            suggested_body,prefilled_signature=_body_prefill_from_previous(
+                row["approved_body"],lang)
+            if not prefilled_signature:
+                st.warning("이전 서명을 구분하지 못했습니다. 본문과 Signature를 "
+                           "직접 확인한 후 새 발송을 승인하세요.")
+    if suggested_body:
+        st.caption("첫 인사말은 원본 발신인 정보 기준으로 제안됩니다. "
+                   "메일 내용에서 직접 수정할 수 있습니다.")
     stamp=sha256((row["source_hash"]+"|"+str(selected_index)+"|"+lang+"|"+suggested_body).encode()).hexdigest()[:12]
     to_key="master_reply_to_"+chosen_id
     sub_key="master_reply_subject_"+chosen_id
@@ -251,13 +334,15 @@ def render_email_outbox(principal: str):
     sig_key="master_reply_signature_"+chosen_id+"_"+lang
     recipient=st.text_input("받는 사람",value=str(row.get("recipient_email") or ""),
                             key=to_key,on_change=_clear_send_approval,args=(chosen_id,))
-    subject=st.text_input("메일 제목",value=reply_subject(row.get("source_subject") or ""),
+    subject=st.text_input("메일 제목",value=(row.get("approved_subject")
+                         if row.get("approved_body") and not row.get("approved_sha256")
+                         else reply_subject(row.get("source_subject") or "")),
                           key=sub_key,on_change=_clear_send_approval,args=(chosen_id,))
     body=st.text_area("메일 내용 (직접 수정 가능)",value=suggested_body,
                       height=235,key=body_key,on_change=_clear_send_approval,args=(chosen_id,))
-    signature=st.text_area("Signature (기본값 · 수정 가능)",value=default_signature(lang),
+    signature=st.text_area("Signature (기본값 · 수정 가능)",value=prefilled_signature,
                            height=150,key=sig_key,on_change=_clear_send_approval,args=(chosen_id,))
-    final_body=body.strip()+"\n\n"+signature.strip()
+    final_body=body.strip()+("\n\n"+signature.strip() if signature.strip() else "")
     if not body.strip():
         st.warning("답장 본문을 작성해야 발송할 수 있습니다.")
     st.markdown("**최종 발송 미리보기 · KE KOREA 기업형 서명**")
