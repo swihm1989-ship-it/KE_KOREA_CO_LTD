@@ -151,12 +151,12 @@ def make_trade_candidate(kind: str, analysis: Mapping[str, Any],
         rows = term_groups.get(key) or []
         if len(rows) != 1:
             return None
-        parts = [s.strip() for s in re.split(r"[;\\n]+", str(rows[0].get("value") or "")) if s.strip()]
+        parts = [s.strip() for s in re.split(r"[;\n]+", str(rows[0].get("value") or "")) if s.strip()]
         if len(parts) != len(names):
             return None
         values = []
         for part, name in zip(parts, names):
-            m = re.fullmatch(r"(.+?)\\s*[:：=]\\s*(.+)", part)
+            m = re.fullmatch(r"(.+?)\s*[:：=]\s*(.+)", part)
             if not m or m.group(1).strip().casefold() != name.strip().casefold():
                 return None
             values.append(m.group(2).strip())
@@ -165,7 +165,7 @@ def make_trade_candidate(kind: str, analysis: Mapping[str, Any],
     product_terms = term_groups.get("products") or []
     if len(product_terms) == 1:
         joined = str(product_terms[0].get("value") or "")
-        possible_names = [x.strip() for x in re.split(r"[,，;\\n]+", joined) if x.strip()]
+        possible_names = [x.strip() for x in re.split(r"[,，;\n]+", joined) if x.strip()]
         if 1 < len(possible_names) <= 100:
             keyed_qty = keyed_values("quantity", possible_names)
             keyed_price = keyed_values("unit_price", possible_names)
@@ -173,10 +173,16 @@ def make_trade_candidate(kind: str, analysis: Mapping[str, Any],
                 def simple_number(value, *, price=False):
                     # Price may carry the same explicitly declared currency;
                     # currency conflicts leave the value unresolved.
-                    expression = (r"(?:USD|KRW|EUR|CNY|US\\$|\\$|₩|€)?\\s*"
+                    expression = (r"(?:USD|KRW|EUR|CNY|US\$|\$|₩|€)?\s*"
                                   if price else "")
-                    expression += r"([0-9]+(?:,[0-9]{3})*(?:\\.[0-9]+)?)"
-                    expression += r"\\s*(?:개|PCS?|PIECES?)?" if not price else r"\\s*(?:/\\s*(?:PCS?|PIECES?|ea))?"
+                    expression += r"([0-9]+(?:,[0-9]{3})*(?:\.[0-9]+)?)"
+                    expression += r"\s*(?:개|PCS?|PIECES?)?" if not price else r"\s*(?:/\s*(?:PCS?|PIECES?|ea))?"
+                    declared = str(terms.get("currency") or "").upper().strip()
+                    prefix = re.match(r"^(USD|KRW|EUR|CNY|US\$|\$|₩|€)", value.strip(), re.I) if price else None
+                    if prefix:
+                        found = {"US$": "USD", "$": "USD", "₩": "KRW", "€": "EUR"}.get(prefix.group(1).upper(), prefix.group(1).upper())
+                        if declared and found != declared:
+                            return ""
                     m = re.fullmatch(expression, value.strip(), re.I)
                     return m.group(1).replace(",", "") if m else ""
                 shared_unit = terms.get("unit", "")
