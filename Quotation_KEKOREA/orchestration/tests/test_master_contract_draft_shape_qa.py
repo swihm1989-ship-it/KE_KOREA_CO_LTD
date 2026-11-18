@@ -70,7 +70,7 @@ class MasterDraftShapeRecoveryTests(unittest.TestCase):
     def test_existing_clauses_still_must_be_reviewed_not_replaced(self):
         output = approved_synthetic_clause()
         with patch("Quotation_KEKOREA.contracts.service._call", return_value=output):
-            with self.assertRaisesRegex(ValueError, "draft"):
+            with self.assertRaisesRegex(ValueError, "automatically regenerate"):
                 altered = deepcopy(self.snapshot)
                 altered["clauses"] = output["clauses"]
                 # The draft graph's outer guard is authoritative.
