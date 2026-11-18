@@ -1,4 +1,5 @@
 """FINAL PDF mail attachment regression tests; synthetic data only."""
+from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import Mock, patch
 from uuid import uuid4
@@ -31,7 +32,7 @@ class MailPdfAttachmentTests(TestCase):
         with patch.object(attachments, "get_reply",
                           return_value={"status": "sent"}), \
              patch.object(attachments, "_repo") as db:
-            with self.assertRaises(outbox.OutboxError):
+            with self.assertRaises(attachments.OutboxError):
                 attachments.link_final_pdf({}, self.owner, self.outbox_id, self.pdf_id)
             db.assert_not_called()
 
@@ -47,12 +48,11 @@ class MailPdfAttachmentTests(TestCase):
         self.assertEqual(loaded[0]["filename"], "PI-FINAL.pdf")
         self.assertTrue(loaded[0]["data"].startswith(b"%PDF"))
         with patch.object(attachments, "list_attachments", return_value=[]):
-            with self.assertRaises(outbox.OutboxError):
+            with self.assertRaises(attachments.OutboxError):
                 attachments.load_approved_attachments(
                     {}, self.owner, self.outbox_id, stamp)
 
     def test_smtp_mime_contains_actual_pdf_attachment(self):
-        from types import SimpleNamespace
         smtp = SimpleNamespace(host="smtp.example.test", port=587,
                                security="starttls", username="owner@example.test",
                                password="dummy")
