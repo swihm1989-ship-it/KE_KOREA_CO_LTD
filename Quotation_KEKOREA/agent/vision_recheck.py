@@ -18,7 +18,7 @@ VISION_RECHECK_REVISION = "conditional-vision-recheck-20261118-v1"
 MAX_IMAGES = 4
 _NUMERIC_FIELDS = {"quantity", "unit_price", "source_line_total",
                    "package_count", "net_weight_kg", "gross_weight_kg", "volume_cbm"}
-_CHECK_FIELDS = ("product_code", "capacity", "quantity", "unit", "unit_price",
+_CHECK_FIELDS = ("product_name", "product_code", "capacity", "quantity", "unit", "unit_price",
                  "source_line_total", "package_count", "net_weight_kg",
                  "gross_weight_kg", "volume_cbm")
 _SUSPECT = re.compile(
@@ -243,6 +243,13 @@ def _compare(candidate, second, partial):
                 continue
             for field in _CHECK_FIELDS:
                 left, right = a.get(field), b.get(field)
+                # The first model may translate Chinese/Indonesian names while
+                # the independent visual transcription retains original script.
+                # Cross-script text is not proof of a recognition conflict.
+                if (field == "product_name" and _present(left) and _present(right)
+                        and bool(re.search(r"[\u3400-\u9fff\uac00-\ud7a3]", str(left))) !=
+                            bool(re.search(r"[\u3400-\u9fff\uac00-\ud7a3]", str(right)))):
+                    continue
                 if not _present(right):
                     continue  # It might be an input-only fact not printed in image.
                 if not _present(left):
