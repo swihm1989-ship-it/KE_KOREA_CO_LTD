@@ -120,12 +120,24 @@ def render_email_outbox(principal: str):
     body=st.text_area("메일 내용 (직접 수정 가능)",value=suggestions[selected_index],
                       height=235,key="master_reply_body_"+chosen_id+"_"+stamp)
     signature=st.text_area("Signature (기본값 · 수정 가능)",value=default_signature(lang),
-                           height=135,key="master_reply_signature_"+chosen_id+"_"+lang)
+                           height=150,key="master_reply_signature_"+chosen_id+"_"+lang)
     final_body=body.strip()+"\n\n"+signature.strip()
     if not body.strip():
         st.warning("답장 본문을 작성해야 발송할 수 있습니다.")
-    st.markdown("**최종 발송 미리보기**")
-    st.code(final_body, language=None)
+    st.markdown("**최종 발송 미리보기 · KE KOREA 기업형 서명**")
+    # The actual sent email includes this same escaped corporate HTML and an
+    # inline company logo. This is a no-network, no-send preview only.
+    try:
+        from Quotation_KEKOREA.orchestration.workflows.email_signature_design import (
+            preview_signature_html,
+        )
+        import streamlit.components.v1 as components
+        rendered = preview_signature_html(body, signature)
+        components.html(rendered, height=350, scrolling=True)
+    except (ValueError,OSError,ImportError,RuntimeError):
+        st.warning("회사 로고 미리보기를 표시할 수 없습니다. 발송 전 로고 파일을 확인하세요.")
+    with st.expander("일반 텍스트 메일 미리보기"):
+        st.code(final_body, language=None)
 
     # Confirmation is tied to the EXACT current envelope. Any edit invalidates it.
     digest=sha256(("\0".join((recipient,subject,final_body))).encode()).hexdigest()[:20]
@@ -139,7 +151,8 @@ def render_email_outbox(principal: str):
             from Quotation_KEKOREA.orchestration.ui.mailbox_page import _settings
             with st.spinner("승인된 메일을 SMTP로 전송합니다."):
                 result=send_approved(env,principal,chosen_id,_settings(),
-                                     recipient,subject,final_body,confirmed=True)
+                                     recipient,subject,final_body,confirmed=True,
+                                     signature_text=signature,language=lang)
         except (OutboxError,ValueError,PermissionError) as error:
             st.error(str(error))
         except Exception:

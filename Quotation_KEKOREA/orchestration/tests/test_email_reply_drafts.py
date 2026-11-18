@@ -22,11 +22,16 @@ class EmailDraftTests(unittest.TestCase):
     def test_locale_uses_mail_language_not_unverified_country(self):
         self.assertEqual(draft.preferred_language("견적 문의","안녕하세요"),"ko")
         self.assertEqual(draft.preferred_language("Quote request","Hello"),"en")
-        self.assertIn("임석원",draft.default_signature("ko"))
-        self.assertIn("서울특별시 영등포구",draft.default_signature("ko"))
+        self.assertEqual(draft.default_signature("ko"),
+                         "임석원 (David Seokwon Ihm)\n"
+                         "대표이사 (Managing Director)\n"
+                         "(주)케이이코리아\n"
+                         "서울특별시 영등포구 양평로 157, 1510호\n"
+                         "www.ke-korea.co.kr")
         self.assertIn("David Seokwon Ihm",draft.default_signature("en"))
         self.assertIn("#1510, 157 Yangpyung Ro",draft.default_signature("en"))
         self.assertIn("Managing Director",draft.default_signature("en"))
+        self.assertTrue(draft.default_signature("en").endswith("www.ke-korea.co.kr"))
 
     def test_ai_creates_three_without_signature_or_sending(self):
         opener=Mock(return_value=FakeResponse())

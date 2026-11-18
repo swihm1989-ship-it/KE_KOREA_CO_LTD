@@ -144,8 +144,13 @@ def _validate_message(to_addr:str,subject:str,body:str):
         raise OutboxError("발송 본문을 확인해 주세요.")
     return recipient,subject,body
 
-def send_smtp(config,recipient:str,subject:str,body:str,message_id:str=""):
-    """Actual transport, exclusively after an atomic user-approved claim."""
+def send_smtp(config,recipient:str,subject:str,body:str,message_id:str="",*,
+              html_body:str|None=None,logo_bytes:bytes|None=None):
+    """Actual transport, exclusively after an atomic user-approved claim.
+
+    Send multipart/alternative (plain text + corporate HTML), with an inline
+    Content-ID logo. Never fetch remote branding assets at send time.
+    """
     if config.smtp is None:
         raise OutboxError("SMTP 발신 서버 연결 설정이 필요합니다.")
     from_addr=email_address(config.smtp.username)
@@ -158,6 +163,17 @@ def send_smtp(config,recipient:str,subject:str,body:str,message_id:str=""):
         email["In-Reply-To"]=msg_id
         email["References"]=msg_id
     email.set_content(body)
+    if html_body is not None:
+        from Quotation_KEKOREA.orchestration.workflows.email_signature_design import LOGO_CID
+        if not logo_bytes or not logo_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
+            raise OutboxError("KE KOREA 로고 파일을 확인할 수 없습니다.")
+        if "cid:" + LOGO_CID not in html_body:
+            raise OutboxError("서명의 회사 로고 연결이 올바르지 않습니다.")
+        email.add_alternative(html_body, subtype="html")
+        html_part=email.get_body(preferencelist=("html",))
+        html_part.add_related(logo_bytes,maintype="image",subtype="png",
+                              cid="<"+LOGO_CID+">",disposition="inline",
+                              filename="ke-korea-logo.png")
     client=None
     try:
         tls=ssl.create_default_context()
@@ -183,6 +199,7 @@ def send_smtp(config,recipient:str,subject:str,body:str,message_id:str=""):
 
 def send_approved(env:dict,principal:str,ident:str,config_values:dict,
                   recipient:str,subject:str,body:str,*,confirmed:bool=False,
+                  signature_text:str|None=None,language:str|None=None,
                   transport=send_smtp):
     """No call without a real user's send-button click and confirmation."""
     if confirmed is not True:
@@ -197,6 +214,25 @@ def send_approved(env:dict,principal:str,ident:str,config_values:dict,
     if row["status"]!="draft" or len(row.get("candidate_bodies") or [])!=3:
         raise OutboxError("발송할 AI 후보를 먼저 선택하고 수정해 주세요.")
     recipient,subject,body=_validate_message(recipient,subject,body)
+    html_body=None
+    logo_bytes=None
+    if signature_text is not None:
+        from Quotation_KEKOREA.orchestration.workflows.email_signature_design import (
+            optimized_logo, delivery_signature_html,
+        )
+        signature=str(signature_text).strip()
+        if language not in ("ko","en") or not signature or not body.endswith("\n\n"+signature):
+            raise OutboxError("현재 승인할 메일 본문과 서명이 일치하지 않습니다.")
+        reply_text=body[:-(len(signature)+2)]
+        if not reply_text.strip():
+            raise OutboxError("회신 본문을 작성해 주세요.")
+        # Resolve the logo and email HTML BEFORE claiming a send, so a
+        # missing/corrupt asset cannot create an uncertain outbound attempt.
+        try:
+            logo_bytes=optimized_logo()
+            html_body=delivery_signature_html(reply_text,signature)
+        except (ValueError,OSError,RuntimeError):
+            raise OutboxError("KE KOREA 이메일 서명 디자인을 준비하지 못했습니다.") from None
     digest=sha256((recipient+"\0"+subject+"\0"+body).encode("utf-8")).hexdigest()
     repo=_repo(env)
     stamp=datetime.now(timezone.utc).isoformat()
@@ -214,7 +250,11 @@ def send_approved(env:dict,principal:str,ident:str,config_values:dict,
         raise OutboxError("다른 창에서 발송이 시작됐습니다. 중복 발송하지 않습니다.")
     status="sent"
     try:
-        transport(config,recipient,subject,body,row.get("message_id") or "")
+        if html_body is None:
+            transport(config,recipient,subject,body,row.get("message_id") or "")
+        else:
+            transport(config,recipient,subject,body,row.get("message_id") or "",
+                      html_body=html_body,logo_bytes=logo_bytes)
     except Exception:
         status="send_unknown"
     try:

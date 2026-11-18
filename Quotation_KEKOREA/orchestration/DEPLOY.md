@@ -81,3 +81,7 @@ MASTER GRAPH 독립 UI의 `AI 업무 요청` 메뉴는 이제 기존 `AI 거래�
 - 필요한 비밀설정은 기존 WHOIS_POP_*, WHOIS_SMTP_*, WHOIS_MAIL_OWNER_EMAILS와 MASTER용 SUPABASE_URL/SUPABASE_SECRET_KEY 및 OPENAI_API_KEY/OPENAI_MODEL이다. 서버만 이 키를 읽고 메일 원문/키/수신자 정보가 로그에 출력되지 않도록 한다.
 - 'AI 업무 요청'에서 무서류 메일 분류, 외부 AI 전송 동의, '발송 대기'에서 최종 수정/내용별 승인 체크 후 '발송' 버튼만 SMTP로 연결한다. 신뢰할 수 없는 본문을 AI 프롬프트 명령으로 취급하지 않는다.
 - 이 개발 PR은 아직 main에 병합·배포되지 않았고 실 계정 SMTP 송신/운영 사용자 E2E 테스트는 수행하지 않았다. 배포 후 테스트는 허용된 본인 테스트 주소를 대상으로 사용자가 최종 확인한 테스트 메일만 보낸다.
+
+
+### 2026-11-18 · 이메일 서명 배포 점검
+기존 `Quotation_KEKOREA/assets/company_logo.png`가 포함되어 있어야 한다. 서버 Pillow로 최대 320×200의 인라인 PNG를 준비하고 MIME HTML(Content-ID)/일반 텍스트 대안을 동시에 구성한다. 회사명 `(주)케이이코리아`, 대표이사 직함, 홈페이지 링크가 양 언어 서명에 출력되는지 시험한다. 실제 Gmail/Outlook/후이즈 수신측의 로고 표시 및 링크 동작은 승인된 테스트 메일로 별도 E2E 검증해야 하며, 사용자 발송 버튼을 누르지 않고는 어떤 메일도 보내지 않는다.
