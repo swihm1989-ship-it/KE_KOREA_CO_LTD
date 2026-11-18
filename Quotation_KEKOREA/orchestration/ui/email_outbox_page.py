@@ -171,9 +171,18 @@ def render_email_outbox(principal: str):
     row_map={str(r["id"]):r for r in rows}
     default=st.session_state.get("master_reply_selected")
     options=list(row_map)
-    index=options.index(default) if default in row_map else 0
-    if st.session_state.get("master_email_outbox_selected") not in row_map:
-        st.session_state.pop("master_email_outbox_selected", None)
+    # One-shot navigation after an explicitly created repeat draft. Streamlit
+    # widget state overrides selectbox(index=...), so set its value BEFORE
+    # the widget is instantiated. Do not force it on ordinary reruns.
+    pending=st.session_state.pop("master_reply_select_pending", None)
+    if pending in row_map and row_map[pending].get("status") == "draft":
+        st.session_state["master_email_outbox_selected"]=pending
+        st.session_state["master_reply_selected"]=pending
+    elif st.session_state.get("master_email_outbox_selected") not in row_map:
+        st.session_state["master_email_outbox_selected"]=(
+            default if default in row_map else options[0])
+    current=st.session_state["master_email_outbox_selected"]
+    index=options.index(current)
     chosen_id=st.selectbox("처리할 메일",options,index=index,
         format_func=lambda ident:(
             str(row_map[ident].get("source_subject") or "(제목 없음)")[:65]+" · "+
@@ -183,6 +192,7 @@ def render_email_outbox(principal: str):
         ),key="master_email_outbox_selected")
     if not chosen_id:
         return
+    st.session_state["master_reply_selected"]=chosen_id
     row=row_map[chosen_id]
     st.caption("받은 사람: "+str(row.get("sender_header") or "")[:160])
     with st.expander("원본 메일 확인",expanded=False):
@@ -240,8 +250,8 @@ def render_email_outbox(principal: str):
                 except Exception:
                     st.error("새 발송 초안을 작성하지 못했습니다.")
                 else:
-                    st.session_state["master_reply_selected"]=fresh["id"]
-                    st.session_state.pop("master_email_outbox_selected",None)
+                    st.session_state["master_reply_selected"]=str(fresh["id"])
+                    st.session_state["master_reply_select_pending"]=str(fresh["id"])
                     st.rerun()
         return
 
@@ -370,7 +380,8 @@ def render_email_outbox(principal: str):
                  disabled=not body.strip() or not signature.strip(),
                  key="master_reply_approve_"+chosen_id):
         st.session_state[approved_key]=digest
-        st.rerun()
+        # The button click already reruns Streamlit. A second forced rerun
+        # can restore a stale selected item and hide the approval controls.
     approved=(st.session_state.get(approved_key)==digest)
     if approved:
         st.success("현재 받는 사람·제목·본문·서명이 확인되었습니다. 아래 발송 버튼을 누를 때만 전송됩니다.")
