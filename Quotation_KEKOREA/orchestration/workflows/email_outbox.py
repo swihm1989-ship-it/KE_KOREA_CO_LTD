@@ -211,7 +211,7 @@ def send_smtp(config,recipient:str,subject:str,body:str,message_id:str="",*,
         email.set_content(body)
         if html_body is not None:
             from Quotation_KEKOREA.orchestration.workflows.email_signature_design import LOGO_CID
-            if not logo_bytes or not logo_bytes.startswith(b"\\x89PNG\\r\\n\\x1a\\n"):
+            if not logo_bytes or not logo_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
                 raise OutboxError("KE KOREA 로고 파일을 확인할 수 없습니다.")
             if "cid:" + LOGO_CID not in html_body:
                 raise OutboxError("서명의 회사 로고 연결이 올바르지 않습니다.")
