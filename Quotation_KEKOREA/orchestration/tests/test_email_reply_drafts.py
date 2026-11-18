@@ -56,6 +56,31 @@ class EmailDraftTests(unittest.TestCase):
             draft.generate_candidates(self.source,{}, "ko",opener=opener)
         opener.assert_not_called()
 
+    def test_http_errors_are_actionable_without_exposing_secrets(self):
+        from io import BytesIO
+        import urllib.error
+        for status in (400, 401, 403, 404, 429, 500):
+            with self.subTest(status=status):
+                response=urllib.error.HTTPError(
+                    "https://api.openai.com/v1/responses", status,
+                    "fake-error-includes-sensitive-value", None,
+                    BytesIO(b'{"error":{"message":"fake-secret key and sensitive email"}}')
+                )
+                with self.assertRaisesRegex(RuntimeError, "HTTP "+str(status)) as caught:
+                    draft.generate_candidates(self.source,self.env,"en",
+                        opener=lambda *_a,**_k: (_ for _ in ()).throw(response))
+                self.assertNotIn("fake-secret",str(caught.exception))
+                self.assertNotIn("sensitive email",str(caught.exception))
+                self.assertNotIn("dummy-secret",str(caught.exception))
+
+    def test_model_matches_contract_engine_priority(self):
+        opener=Mock(return_value=FakeResponse())
+        env={**self.env,"CONTRACT_OPENAI_MODEL":"contract-model"}
+        draft.generate_candidates(self.source,env,"en",opener=opener)
+        data=json.loads(opener.call_args.args[0].data)
+        self.assertEqual(data["model"],"contract-model")
+        self.assertFalse(data["store"])
+
     def test_signature_attaches_once_after_editor(self):
         result=draft.join_signature("We will check.","en")
         self.assertIn("KE Korea Co. Ltd",result)

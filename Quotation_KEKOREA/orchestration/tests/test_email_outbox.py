@@ -58,6 +58,30 @@ class EmailOutboxTests(unittest.TestCase):
                                      "Test message",confirmed=True,transport=transport)
             transport.assert_called_once()
 
+    def test_manual_reply_allowed_when_ai_is_unavailable(self):
+        # AI model errors must not prevent a fully human-written, explicitly
+        # approved reply, and must never trigger an automatic SMTP call.
+        row=dict(self.row)
+        row["candidate_bodies"]=[]
+        db=MemoryRepo(row)
+        transport=Mock()
+        from Quotation_KEKOREA.orchestration.workflows.email_reply_drafts import default_signature
+        signature=default_signature("ko")
+        composed="문의 확인 후 회신드리겠습니다.\n\n"+signature
+        with patch.object(outbox,"_repo",return_value=db), \
+             patch.object(outbox,"mail_config",return_value=self.config):
+            with self.assertRaises(outbox.OutboxError):
+                outbox.send_approved({},self.owner,self.row["id"],{},
+                    "buyer@example.test","Re: 문의",composed,confirmed=False,
+                    signature_text=signature,language="ko",transport=transport)
+            transport.assert_not_called()
+            result=outbox.send_approved({},self.owner,self.row["id"],{},
+                "buyer@example.test","Re: 문의",composed,confirmed=True,
+                signature_text=signature,language="ko",transport=transport)
+        self.assertEqual(result["status"],"sent")
+        self.assertEqual(db.row["status"],"sent")
+        self.assertEqual(transport.call_count,1)
+
     def test_ambiguous_smtp_result_does_not_retry(self):
         db=MemoryRepo(dict(self.row))
         sender=Mock(side_effect=OSError("provider may have accepted"))
