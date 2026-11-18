@@ -250,6 +250,7 @@ def render_email_outbox(principal: str):
         st.error("첨부할 PDF 목록을 확인하지 못했습니다.")
         return
     attached_stamp=attachment_digest(attached_pdfs)
+    verified_pdf_details=[]
     if attached_pdfs:
         from Quotation_KEKOREA.orchestration.workflows import pdf_archive
         st.markdown("#### 발송할 PDF 첨부파일")
@@ -267,6 +268,7 @@ def render_email_outbox(principal: str):
                 st.error("첨부 검증 실패 · "+filename+" · PDF를 읽을 수 없습니다. "
                          "보관 파일을 확인한 뒤 다시 승인해 주세요.")
                 continue
+            verified_pdf_details.append((pdf,blob))
             with st.container(border=True):
                 st.success("첨부 확인 완료 · "+filename)
                 st.caption(str(pdf.get("kind") or "PDF")+" · "+
@@ -447,6 +449,25 @@ def render_email_outbox(principal: str):
         st.warning("회사 로고 미리보기를 표시할 수 없습니다. 발송 전 로고 파일을 확인하세요.")
     with st.expander("일반 텍스트 메일 미리보기"):
         st.code(final_body, language=None)
+
+    # Repeat the attachment proof next to the actual editor and send approval.
+    # The archive-level preview above remains available; the sender no longer
+    # has to scroll away from the email to see whether the file is attached.
+    st.markdown("#### 최종 발송 첨부파일 확인")
+    if verified_pdf_details:
+        st.success(f"PDF {len(verified_pdf_details)}개 첨부 확인 완료 · 발송 시 실제 PDF 파일이 포함됩니다.")
+        for attachment,verified_blob in verified_pdf_details:
+            name=str(attachment.get("filename") or "FINAL.pdf")
+            st.markdown("📎 **"+name+"** · "+f"{len(verified_blob)/1024:,.1f} KB")
+            st.download_button("첨부 PDF 다운로드 · "+name,
+                data=verified_blob,file_name=name,mime="application/pdf",
+                key="master_reply_pdf_final_check_"+chosen_id+"_"+str(attachment["id"]))
+        st.caption("상단 '발송할 PDF 첨부파일' 영역에서도 원본 PDF를 미리 볼 수 있습니다.")
+    elif attached_pdfs:
+        st.error("PDF 연결 기록은 있지만 검증된 첨부파일이 없습니다. 발송할 수 없습니다.")
+    else:
+        st.warning("첨부 PDF 0개 · 현재 메일에는 실제 PDF가 연결되지 않았습니다. "
+                   "최종 PDF 생성 화면에서 이 원본 메일의 첨부 연결을 확인하세요.")
 
     # Approval is a separate deliberate BUTTON click, not a checkbox whose
     # state can be lost when Streamlit batches a text edit + checkbox event.
