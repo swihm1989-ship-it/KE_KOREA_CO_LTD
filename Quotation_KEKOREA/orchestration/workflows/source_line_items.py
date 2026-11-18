@@ -102,6 +102,22 @@ def restore_explicit_priced_rows(candidate_map: dict, instruction: str):
     revised = deepcopy(candidate_map)
     recovered = extract_explicit_priced_rows(instruction)
     if not recovered:
+        # A combined product name plus 2+ separately declared quantities is
+        # demonstrably not a verified *single* unit-price row. Fail safely
+        # rather than printing the last item's amount as the FULL invoice.
+        count = len(_QUANTITY_EVIDENCE.findall(str(instruction or "")))
+        if count >= 2:
+            for kind, doc in revised.items():
+                if kind not in {"PI", "PO", "CI", "PL"} or not isinstance(doc, dict):
+                    continue
+                items = doc.get("items") or []
+                if (len(items) == 1 and isinstance(items[0], dict)
+                        and re.search(r"[,，;]", str(items[0].get("product_name") or ""))):
+                    items[0]["unit_price"] = ""
+                    items[0]["price_source"] = ""
+                    doc.setdefault("missing_fields", []).append(
+                        "원본 요청에 여러 품목 수량이 있지만 AI가 한 행으로 합쳤습니다. "
+                        "상품별 수량·단가를 각각 확인하세요.")
         return revised, 0
     currency = recovered[0]["currency"]
     total_replaced = 0
