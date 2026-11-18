@@ -41,7 +41,7 @@ MAIL_PARTY_BRIDGE_REVISION = "master-po-party-hot-reload-20261117-v1"
 MAIL_INTAKE_MODULE = "Quotation_KEKOREA.orchestration.workflows.mail_intake"
 MAIL_INTAKE_REVISION = "shared-trade-payment-unit-20261117-v2"
 AI_WORKFLOW_REVISION = "shared-ke-korea-family-20261118-v6"
-AI_INTAKE_REVISION = "master-reply-runtime-sync-20261118-v27"
+AI_INTAKE_REVISION = "master-mail-final-pdf-handoff-20261118-v28"
 # Detect a changed source file even when the cached module has the same revision.
 AI_INTAKE_SOURCE_MTIME_NS = os.stat(__file__).st_mtime_ns
 
@@ -1860,12 +1860,57 @@ def _archive_generated_pdf(principal: str, kind: str, status: str,
         return False
     try:
         from Quotation_KEKOREA.orchestration.ui.pdf_archive_page import store_generated
-        store_generated(principal, kind, status, files, snapshot)
+        archived = store_generated(principal, kind, status, files, snapshot)
     except Exception:
         st.warning("PDF는 생성되었지만 비공개 보관에 실패했습니다. 아래에서 다운로드하고 저장소 연결을 점검하세요.")
         return False
     st.caption("PDF를 " + ("발송 대기" if status == "draft" else "저장된 계약서") +
                " 메뉴에 자동 보관했습니다.")
+
+    # Preserve the existing archive screen and original document renderers.
+    # Only a FINAL generated from a selected source mail enters its outbox.
+    source_mail=st.session_state.get("ai_intake_mail_source")
+    if status == "final" and isinstance(source_mail,dict) and all(
+            str(source_mail.get(k) or "").strip()
+            for k in ("uid","sender","subject","body")):
+        try:
+            from Quotation_KEKOREA.orchestration.ui.mailbox_page import _settings
+            from Quotation_KEKOREA.orchestration.workflows.email_outbox import (
+                queue_reply, requeue_reply, save_candidates,
+            )
+            from Quotation_KEKOREA.orchestration.workflows.mail_pdf_attachments import (
+                link_final_pdf,
+            )
+            reply=queue_reply(env,principal,source_mail,_settings())
+            if reply["status"] in ("sent","send_unknown"):
+                reply=requeue_reply(env,principal,reply["id"],_settings())
+            if reply["status"] != "draft":
+                raise RuntimeError("발송 처리 중인 기록에는 첨부할 수 없습니다.")
+            link_final_pdf(env,principal,reply["id"],archived["id"])
+            st.session_state["master_reply_selected"]=str(reply["id"])
+            st.session_state["master_reply_select_pending"]=str(reply["id"])
+            st.success("해당 메일의 발송 대기에 최종 PDF를 첨부했습니다. "
+                       "AI 회신·수신인·본문·첨부파일을 검토하고 승인 후 발송하세요.")
+            if st.session_state.get("ai_intake_reply_candidate_consent"):
+                try:
+                    if not reply.get("candidate_bodies"):
+                        from Quotation_KEKOREA.orchestration.workflows.email_reply_runtime import (
+                            generate_reply_candidates,
+                        )
+                        from Quotation_KEKOREA.orchestration.workflows.email_reply_drafts import (
+                            preferred_language,
+                        )
+                        language=preferred_language(
+                            source_mail["subject"],source_mail["body"])
+                        options=generate_reply_candidates(
+                            source_mail,_model_config(),language)
+                        save_candidates(env,principal,reply["id"],options,language)
+                except Exception:
+                    st.warning("PDF는 발송 대기에 연결됐으나 AI 회신 추천 생성이 실패했습니다. "
+                               "발송 대기에서 다시 생성하거나 직접 작성할 수 있습니다.")
+        except Exception:
+            st.warning("최종 PDF는 '저장된 계약서'에 보관됐지만 원본 메일과 "
+                       "발송 대기 연결에는 실패했습니다. 메일 발송은 하지 않았습니다.")
     return True
 
 def _render_original_contract_final(principal: str, snapshot: dict,
@@ -2215,6 +2260,11 @@ def render_ai_intake(principal: str):
     attachments = []
     if mail_mode:
         st.caption('선택한 메일에서 가져온 요청입니다. 문서 종류를 수정할 수 있습니다. CIPL = CI + PL.')
+        st.checkbox(
+            "최종 PDF를 발송 대기에 첨부할 때 AI 회신 후보 3개도 생성 (선택)",
+            key="ai_intake_reply_candidate_consent",
+            help="체크하면 원본 메일의 제목·본문·발신인 정보가 AI 회신 추천을 위해 전송됩니다. 메일은 자동 발송되지 않습니다.",
+        )
         requested = st.multiselect('준비할 문서', list(DOC_TYPES),
             default=mail_source.get('kinds', []), key='ai_intake_mail_kinds')
         attachments = st.session_state.get('ai_intake_mail_attachments', [])
