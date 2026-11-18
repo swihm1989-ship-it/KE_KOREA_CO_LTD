@@ -40,8 +40,8 @@ MAIL_PARTY_BRIDGE_MODULE = "Quotation_KEKOREA.agent.mail_party_bridge"
 MAIL_PARTY_BRIDGE_REVISION = "master-po-party-hot-reload-20261117-v1"
 MAIL_INTAKE_MODULE = "Quotation_KEKOREA.orchestration.workflows.mail_intake"
 MAIL_INTAKE_REVISION = "shared-trade-payment-unit-20261117-v2"
-AI_WORKFLOW_REVISION = "shared-ke-korea-family-20261118-v5"
-AI_INTAKE_REVISION = "master-priced-rows-contract-cache-20261118-v25"
+AI_WORKFLOW_REVISION = "shared-ke-korea-family-20261118-v6"
+AI_INTAKE_REVISION = "master-contract-stage-progress-20261118-v26"
 # Detect a changed source file even when the cached module has the same revision.
 AI_INTAKE_SOURCE_MTIME_NS = os.stat(__file__).st_mtime_ns
 
@@ -2742,16 +2742,36 @@ def render_ai_intake(principal: str):
                     current = edited.get("CONTRACT")
                     if not isinstance(current, dict):
                         raise ValueError("현재 계약서 데이터를 입력해 주세요.")
-                    with st.spinner("기존 계약서 LangGraph가 검토용 조항을 생성합니다."):
+                    # The audited graph can take several minutes. Expose its
+                    # existing real progress stages instead of one indefinite
+                    # spinner; do not fabricate percentages or bypass review.
+                    with st.status("계약서 AI · 입력 조건 검증", expanded=True) as contract_status:
+                        def show_contract_stage(stage):
+                            contract_status.update(
+                                label="계약서 AI · " + str(stage)[:90],
+                                state="running",
+                            )
                         draft_config = dict(config)
                         if use_approved_rag:
                             draft_config.update({key: _server_value(key) for key in (
                                 "SUPABASE_URL", "SUPABASE_SECRET_KEY",
                                 "CONTRACT_LIBRARY_EMBEDDING_MODEL",
                             )})
-                        generated = generate_contract_draft(
-                            current, draft_config, consent=draft_consent,
-                            use_library=use_approved_rag,
+                        try:
+                            generated = generate_contract_draft(
+                                current, draft_config, consent=draft_consent,
+                                use_library=use_approved_rag,
+                                progress_callback=show_contract_stage,
+                            )
+                        except Exception:
+                            contract_status.update(
+                                label="계약서 AI · 생성 실패 (기존 입력 유지)",
+                                state="error",
+                            )
+                            raise
+                        contract_status.update(
+                            label="계약서 AI · 초안 및 품질 검토 완료",
+                            state="complete", expanded=False,
                         )
                     # Use an explicit callback state, never modify saved contract.
                     updated = deepcopy(edited)
