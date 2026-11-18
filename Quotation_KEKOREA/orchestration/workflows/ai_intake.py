@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 import re
-AI_WORKFLOW_REVISION = "shared-ke-korea-family-20261118-v5"
+AI_WORKFLOW_REVISION = "shared-ke-korea-family-20261118-v6"
 AI_WORKFLOW_SOURCE_MTIME_NS = os.stat(__file__).st_mtime_ns
 from Quotation_KEKOREA.observability.core import traced
 from copy import deepcopy
@@ -307,7 +307,8 @@ def selected_contract_reference(repo, contract_id: str, revision: int) -> dict[s
 
 @traced('contract.generate')
 def generate_contract_draft(snapshot: Mapping[str, Any], env: Mapping[str, str],
-                            *, consent: bool, use_library: bool = False) -> dict[str, Any]:
+                            *, consent: bool, use_library: bool = False,
+                            progress_callback=None) -> dict[str, Any]:
     """Call the existing reviewed drafting graph on a NEW in-memory candidate.
 
     No saved private contract content is passed. When explicitly opted in,
@@ -356,6 +357,7 @@ def generate_contract_draft(snapshot: Mapping[str, Any], env: Mapping[str, str],
     generated = generate_contract_draft_graph(
         candidate, [], env=dict(env), reference_context=[],
         transaction_messages=[], repo=repo, use_library=bool(use_library),
+        progress_callback=progress_callback,
     )
     reviewed = validate_snapshot(generated)
     if not reviewed["clauses"]:
