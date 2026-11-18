@@ -91,7 +91,7 @@ def _person_label(value: str) -> tuple[str, str]:
     named = list(_KO_PERSON.finditer(label))
     if named:
         match = named[-1]
-        name = match.group(1)
+        name = match.group(1).removesuffix("님")
         # Reject plain words like "이메일", not a verified individual name.
         if name not in {"이메일", "이벤트", "이용자", "이용료", "영업팀"}:
             suffix = label[match.end():].lstrip(" \t([/{")
