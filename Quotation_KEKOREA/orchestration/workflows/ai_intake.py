@@ -48,6 +48,7 @@ def extract_candidate(instruction: str, env: Mapping[str, str], *, consent: bool
     snapshot = new_snapshot("temp-ai-intake", "sale", "ko")
     analysis = analyze_trade(
         [{"role": "user", "content": normalize_trade_labels(instruction)}], snapshot, [], env=dict(env),
+        allow_numeric_terms=True,
     )
     return deepcopy(analysis)
 
