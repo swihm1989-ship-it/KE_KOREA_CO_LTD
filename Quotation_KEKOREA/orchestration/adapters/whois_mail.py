@@ -56,6 +56,12 @@ class MailMessage:
     received_at: str = ''
     attachments: tuple[Attachment,...] = ()
     notice: str = ''
+    # RFC headers for safe threaded acknowledgements; old callers stay valid.
+    message_id: str = ''
+    reply_to: str = ''
+    auto_submitted: str = ''
+    list_id: str = ''
+    precedence: str = ''
 
 
 def mail_config(values, principal: str) -> MailConfig:
@@ -363,7 +369,12 @@ def parse_message(uid: str, raw: bytes) -> MailMessage:
         if name in {'.','..'}: name='attachment.bin'
         attachments.append(Attachment(name,payload,part.get_content_type()))
     return MailMessage(uid,str(msg.get('From',''))[:500],str(msg.get('Subject','(제목 없음)'))[:500],
-                       body[:20000],str(msg.get('Date',''))[:100],tuple(attachments),' '.join(set(notices)))
+                       body[:20000],str(msg.get('Date',''))[:100],tuple(attachments),' '.join(set(notices)),
+                       message_id=str(msg.get('Message-ID',''))[:250],
+                       reply_to=str(msg.get('Reply-To',''))[:500],
+                       auto_submitted=str(msg.get('Auto-Submitted',''))[:100],
+                       list_id=str(msg.get('List-ID',''))[:250],
+                       precedence=str(msg.get('Precedence',''))[:100])
 
 
 @traced('mail.collect')

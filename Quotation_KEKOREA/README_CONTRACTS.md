@@ -608,3 +608,7 @@ Master 관리자 모니터링 메뉴에 JSON 실행 로그, 모델별 호출/응
 ### MASTER PDF archive and sidebar workflow (2026-11-17)
 
 MASTER sidebar now shows: 시장 뉴스, 메일함, AI 업무 요청, 통합 업무 흐름, 문서 검토, 발송 대기, 저장된 계약서. The old sample dashboard, execution log, admin monitoring, draft preview, and engine preflight are hidden from the menu (underlying diagnostics and original engines remain untouched). Successful MASTER DRAFT PDF generation archives the exact PDF to the private Supabase bucket `kekorea-master-pdfs`, with owner-scoped metadata in `kekorea_master_pdf_archive`; FINAL PDFs are likewise archived. Saved lists show filenames, KST dates and times, click-to-preview and download. The 발송 대기 screen requires a new user approval (and the original seal authorization for contracts) before converting the immutable draft snapshot into a new PDF using the original KE KOREA rendering engine. Converted drafts leave the pending list, retaining the historical record. No automatic SMTP send. The original KE KOREA contracts database and document renderer are unchanged. New archive records require server-only Supabase credentials and a private bucket. GitHub merge is not by itself proof of live Streamlit deployment; verify the deployed menus and a fresh DRAFT -> FINAL workflow on the running app.
+
+
+### 자동 메일 답장과 계약 승인 경계 (2026-11-18)
+MASTER 메일 자동 접수 안내 및 사용자 검토용 AI 답장 초안은 계약서 서명, 계약 조건 확정, 지급 조건 수락, PI/PO 발행 및 기존 계약 엔진 승인을 대체하지 않는다. 금액·날짜·지급·관할·직인·법률 문서는 명시적 사용자 검토가 필요하다. 기존 계약 엔진 파일은 이번 브랜치에서 변경하지 않았다.

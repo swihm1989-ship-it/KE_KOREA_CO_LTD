@@ -73,3 +73,7 @@ Streamlit이 출력하는 로컬 주소(일반적으로 `http://localhost:8501`)
 ## 2026-11-11 · AI 업무 요청 메뉴 통합 및 부족정보 직접입력 (PR #40)
 
 MASTER GRAPH 독립 UI의 `AI 업무 요청` 메뉴는 이제 기존 `AI 거래조건 추출` 실제 분석 화면을 직접 제공하며, 중복된 `AI 거래조건 추출` 사이드바 메뉴 및 사용자용 Mock 요청 폼을 제거한다. 내부 `mock_workflow`/샘플 메일 테스트는 유지된다. AI 거래조건 추출 후 Buyer/Seller 법인명·주소·국가, 상품명·수량·단가·단가출처 및 필수 무역 조건이 누락된 경우 **별도 텍스트 입력칸**이 표시된다. 사용자가 해당 칸에 입력하고 Enter를 누르거나 포커스를 이동하면 Streamlit rerun으로 최신 문서 후보(JSON, 화면 거래 요약)에 반영되며, 동일한 거래조건을 PI/PO/CI/PL과 계약서 후보에 동기화한다. 기존 DRAFT 파일과 검토 상태는 즉시 무효화하고, 조건이 바뀐 기존 AI 계약서 조항도 폐기하여 재생성을 요구한다. 기존 문서 엔진 규칙에 따라 정확한 법인명/주소/지급조건을 사람이 검증해야 하며 **AI/인간 입력을 자동으로 confirmed로 승격하지 않는다**. 안전한 발행·발송 승인 기능은 아직 분리되어 있다. 상세 테스트 `orchestration/tests/test_intake_followups.py` 및 `test_ai_intake_ui.py`.
+
+
+## 2026-11-18 · 자동 접수 회신 (운영 전 검토)
+기능은 본 Master Streamlit 프로세스가 아닌 독립 \`mail_worker\` Cron에서만 실행한다. 우선 \`orchestration/mail_worker/schema.sql\`을 권한 있는 운영자만 적용하고, 계정 허용 목록·TLS·POP3/SMTP 서버 연결·가격이나 계약 확약이 없는 고정 문구를 검토해야 한다. 설정 지침은 \`orchestration/mail_worker/README.md\`를 참고한다. \`MAIL_AUTO_ACK_ENABLED\`, \`MAIL_AUTO_ACK_SEND_ENABLED\` 둘 다 기본 미설정으로 발송 불가. 실제 수신·발신 검증, 크론 배포, 위험 평가 없이 ON 하지 않는다. 불확실한 송신 결과는 \`send_unknown\`으로 남기고 자동 재송신하지 않는다. 본 PR은 서비스 배포 및 운영 환경변수 변경을 수행하지 않는다.

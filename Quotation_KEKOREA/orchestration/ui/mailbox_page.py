@@ -460,3 +460,38 @@ def render_inbox(messages, account):
                                requested=chosen_kinds):
                     st.rerun(scope="app")
             st.caption("이동 후 첨부파일과 문서 종류를 확인하고 'AI 거래조건 분석'을 실행하세요.")
+
+            # Email reply drafting is separate from document automation. The
+            # owner must explicitly consent to sending this mail to OpenAI.
+            from Quotation_KEKOREA.orchestration.workflows.reply_draft import (
+                draft_reply, mail_hash,
+            )
+            with st.expander("AI 답장 초안 (검토 전용 · 자동 발송 없음)"):
+                st.caption("받은 메일의 언어와 내용에 맞춰 회신 문안을 제안합니다. "
+                           "가격·납기·계약 수락은 확정하지 않습니다.")
+                consent = st.checkbox(
+                    "선택한 메일 제목·본문을 OpenAI에 전송해 답장 초안을 작성하는 데 동의합니다.",
+                    key="whois_reply_ai_consent_" + account[:12] + "_" + selected.uid,
+                )
+                if st.button("AI 답장 초안 만들기", disabled=not consent or not bool(selected.body),
+                             key="whois_reply_ai_generate_" + account[:12] + "_" + selected.uid):
+                    try:
+                        draft = draft_reply(selected, _settings())
+                        st.session_state["whois_reply_ai_draft"] = (account, selected.uid, draft)
+                    except (RuntimeError, ValueError) as error:
+                        st.error(str(error))
+                    except Exception:
+                        st.error("AI 답장 초안 생성에 실패했습니다. 서버 설정을 확인하세요.")
+                saved = st.session_state.get("whois_reply_ai_draft")
+                if saved and saved[0] == account and saved[1] == selected.uid:
+                    draft = saved[2]
+                    if draft.source_hash == mail_hash(selected):
+                        st.text_input("답장 제목", value=draft.subject,
+                                      key="whois_reply_subject_" + selected.uid + "_" + draft.source_hash[:12])
+                        st.text_area("답장 내용 (직접 수정 가능)", value=draft.body, height=220,
+                                     key="whois_reply_body_" + selected.uid + "_" + draft.source_hash[:12])
+                        st.caption("위 초안은 자동 발송되지 않습니다. 실발송에는 별도 수신자·본문 승인 및 "
+                                   "발송 이력 관리가 필요합니다.")
+                    else:
+                        st.warning("메일 내용이 변경되어 이전 답장 초안을 표시하지 않습니다. 다시 생성하세요.")
+
