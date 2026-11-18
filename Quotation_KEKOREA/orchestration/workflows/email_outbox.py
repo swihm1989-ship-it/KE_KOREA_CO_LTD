@@ -20,7 +20,7 @@ from Quotation_KEKOREA.orchestration.workflows.email_reply_drafts import (
     reply_subject, source_hash, preferred_language,
 )
 
-EMAIL_SEND_RUNTIME_REVISION = "master-smtp-preclaim-20261118-v1"
+EMAIL_SEND_RUNTIME_REVISION = "master-smtp-stage-safe-20261118-v2"
 EMAIL_SEND_SOURCE_MTIME_NS = Path(__file__).stat().st_mtime_ns
 
 TABLE="kekorea_master_mail_outbox"
@@ -29,6 +29,42 @@ MESSAGE_ID=re.compile(r"^<[^<>\s@]+@[^<>\s@]+>$")
 
 class OutboxError(RuntimeError):
     pass
+
+
+class SMTPBeforeDataError(OutboxError):
+    """Transport failed before send_message was called. No DATA was submitted.
+
+    This is intentionally distinct from an ambiguous send_message exception.
+    Only this class can safely restore a claimed draft, never auto-retry it.
+    """
+    def __init__(self, safe_message: str, *, stage: str):
+        super().__init__(safe_message)
+        self.stage = stage
+
+
+def _predata_message(stage: str, exc: Exception) -> str:
+    # Never expose SMTP server replies: they can include customer addresses
+    # and account details. Numeric SMTP codes are safe.
+    if isinstance(exc, smtplib.SMTPAuthenticationError):
+        code = getattr(exc, "smtp_code", None)
+        number = f" (SMTP {code})" if type(code) is int else ""
+        return ("SMTP 인증 실패"+number+". 메일은 전송되지 않았습니다. "
+                "후이즈 SMTP 계정·비밀번호 및 SMTP 사용 권한을 확인하세요.")
+    if isinstance(exc, smtplib.SMTPNotSupportedError):
+        return ("SMTP STARTTLS 지원 오류. 메일은 전송되지 않았습니다. "
+                "서버 호스트·포트·TLS 설정을 확인하세요.")
+    if isinstance(exc, ssl.SSLCertVerificationError):
+        return "SMTP 인증서 검증 실패. 메일은 전송되지 않았습니다. 서버 TLS 설정을 확인하세요."
+    if isinstance(exc, (TimeoutError, ConnectionError)):
+        return (f"SMTP {stage} 단계 응답 시간 초과/연결 실패. "
+                "메일은 전송되지 않았습니다. 서버 연결을 확인하세요.")
+    if isinstance(exc, smtplib.SMTPResponseException):
+        code = getattr(exc, "smtp_code", None)
+        number = f" (SMTP {code})" if type(code) is int else ""
+        return (f"SMTP {stage} 단계 서버 거부"+number+". "
+                "메일은 전송되지 않았습니다. 서버 정책을 확인하세요.")
+    return (f"SMTP {stage} 단계 오류. 메일은 전송되지 않았습니다. "
+            "발송 대기의 'SMTP 연결·로그인 진단'에서 확인하세요.")
 
 def email_address(value: str) -> str:
     raw=str(value or "").strip()
@@ -150,56 +186,79 @@ def _validate_message(to_addr:str,subject:str,body:str):
 
 def send_smtp(config,recipient:str,subject:str,body:str,message_id:str="",*,
               html_body:str|None=None,logo_bytes:bytes|None=None):
-    """Actual transport, exclusively after an atomic user-approved claim.
+    """One SMTP send, only after atomic owner-confirmed DB claim.
 
-    Send multipart/alternative (plain text + corporate HTML), with an inline
-    Content-ID logo. Never fetch remote branding assets at send time.
+    Any connection/TLS/auth/composition failure that occurs BEFORE calling
+    send_message is provably unsent. Once send_message starts, all failures
+    remain ambiguous to prevent unsafe duplicate mail.
     """
     if config.smtp is None:
-        raise OutboxError("SMTP 발신 서버 연결 설정이 필요합니다.")
-    from_addr=email_address(config.smtp.username)
-    email=EmailMessage()
-    email["From"]=from_addr
-    email["To"]=recipient
-    email["Subject"]=subject
-    msg_id=valid_message_id(message_id)
-    if msg_id:
-        email["In-Reply-To"]=msg_id
-        email["References"]=msg_id
-    email.set_content(body)
-    if html_body is not None:
-        from Quotation_KEKOREA.orchestration.workflows.email_signature_design import LOGO_CID
-        if not logo_bytes or not logo_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
-            raise OutboxError("KE KOREA 로고 파일을 확인할 수 없습니다.")
-        if "cid:" + LOGO_CID not in html_body:
-            raise OutboxError("서명의 회사 로고 연결이 올바르지 않습니다.")
-        email.add_alternative(html_body, subtype="html")
-        html_part=email.get_body(preferencelist=("html",))
-        html_part.add_related(logo_bytes,maintype="image",subtype="png",
-                              cid="<"+LOGO_CID+">",disposition="inline",
-                              filename="ke-korea-logo.png")
-    client=None
+        raise SMTPBeforeDataError(
+            "SMTP 발신 서버 연결 설정이 필요합니다. 메일을 전송하지 않았습니다.",
+            stage="configuration")
+    client = None
+    stage = "composition"
     try:
+        from_addr=email_address(config.smtp.username)
+        email=EmailMessage()
+        email["From"]=from_addr
+        email["To"]=recipient
+        email["Subject"]=subject
+        msg_id=valid_message_id(message_id)
+        if msg_id:
+            email["In-Reply-To"]=msg_id
+            email["References"]=msg_id
+        email.set_content(body)
+        if html_body is not None:
+            from Quotation_KEKOREA.orchestration.workflows.email_signature_design import LOGO_CID
+            if not logo_bytes or not logo_bytes.startswith(b"\\x89PNG\\r\\n\\x1a\\n"):
+                raise OutboxError("KE KOREA 로고 파일을 확인할 수 없습니다.")
+            if "cid:" + LOGO_CID not in html_body:
+                raise OutboxError("서명의 회사 로고 연결이 올바르지 않습니다.")
+            email.add_alternative(html_body, subtype="html")
+            html_part=email.get_body(preferencelist=("html",))
+            html_part.add_related(logo_bytes,maintype="image",subtype="png",
+                                  cid="<"+LOGO_CID+">",disposition="inline",
+                                  filename="ke-korea-logo.png")
         tls=ssl.create_default_context()
+        stage="connect"
         if config.smtp.security=="ssl":
             client=smtplib.SMTP_SSL(config.smtp.host,config.smtp.port,timeout=20,context=tls)
         elif config.smtp.security=="starttls":
             client=smtplib.SMTP(config.smtp.host,config.smtp.port,timeout=20)
+            stage="ehlo"
             client.ehlo()
+            stage="starttls"
             client.starttls(context=tls)
+            stage="ehlo_tls"
             client.ehlo()
         else:
             raise OutboxError("SMTP 암호화 연결만 허용합니다.")
+        stage="login"
         client.login(config.smtp.username,config.smtp.password)
-        client.send_message(email)
-    except Exception:
-        raise OutboxError("SMTP 결과를 확인할 수 없습니다. 보낸편지함에서 확인하세요.") from None
+        stage="send_message"
+        result=client.send_message(email)
+        if result:
+            # Some recipients might have been accepted. Never retry.
+            raise OutboxError("SMTP에서 일부 수신자가 거부됐습니다. 실제 전송 여부를 확인하세요.")
+    except Exception as exc:
+        if stage!="send_message":
+            raise SMTPBeforeDataError(_predata_message(stage,exc),stage=stage) from None
+        # After entering send_message, including DATA/timeout/disconnect,
+        # the server may already have accepted it.
+        raise OutboxError(
+            "SMTP 메일 전송 처리 후 결과가 불명확합니다. 중복 발송하지 말고 "
+            "실제 보낸편지함 또는 수신함을 확인하세요."
+        ) from None
     finally:
         if client is not None:
-            try:client.quit()
+            try:
+                client.quit()
             except Exception:
-                try:client.close()
-                except Exception:pass
+                try:
+                    client.close()
+                except Exception:
+                    pass
 
 def send_approved(env:dict,principal:str,ident:str,config_values:dict,
                   recipient:str,subject:str,body:str,*,confirmed:bool=False,
@@ -256,22 +315,47 @@ def send_approved(env:dict,principal:str,ident:str,config_values:dict,
     if not isinstance(claimed,list) or len(claimed)!=1:
         raise OutboxError("다른 창에서 발송이 시작됐습니다. 중복 발송하지 않습니다.")
     status="sent"
+    before_data_error = None
     try:
         if html_body is None:
             transport(config,recipient,subject,body,row.get("message_id") or "")
         else:
             transport(config,recipient,subject,body,row.get("message_id") or "",
                       html_body=html_body,logo_bytes=logo_bytes)
+    except SMTPBeforeDataError as error:
+        # No SMTP DATA was attempted. Restore the single draft atomically,
+        # clearing approval and send-start. An existing ambiguous attempt
+        # from an earlier run is NEVER restored or retried here.
+        before_data_error = error
+        status="draft"
     except Exception:
         status="send_unknown"
+    if before_data_error is not None:
+        try:
+            restored=repo.request("PATCH",TABLE,payload={
+                "status":"draft", "send_started_at":None, "sent_at":None,
+                "approved_sha256":None, "approved_subject":None,
+                "approved_body":None},
+                query=[("id","eq."+_safe_id(ident)),("owner_email","eq."+owner),
+                       ("status","eq.sending"),("approved_sha256","eq."+digest)],
+                headers={"Prefer":"return=representation"})
+        except Exception:
+            raise OutboxError("SMTP 발신 전 오류가 발생했고 DRAFT 복구를 확인하지 못했습니다. "
+                              "중복 발송하지 말고 운영 상태를 확인하세요.") from None
+        if not isinstance(restored,list) or len(restored)!=1:
+            raise OutboxError("SMTP 발신 전 오류가 발생했지만 DRAFT 상태를 확인하지 못했습니다. "
+                              "다시 발송하지 말고 관리자에게 확인하세요.")
+        raise before_data_error
     try:
-        repo.request("PATCH",TABLE,payload={
+        finished=repo.request("PATCH",TABLE,payload={
             "status":status,"sent_at":datetime.now(timezone.utc).isoformat() if status=="sent" else None},
             query=[("id","eq."+_safe_id(ident)),("owner_email","eq."+owner),
                    ("status","eq.sending"),("approved_sha256","eq."+digest)],
             headers={"Prefer":"return=representation"})
     except Exception:
         raise OutboxError("발송 상태 저장 실패: 전송 여부 불확실. 재발송하지 말고 보낸편지함을 확인하세요.") from None
+    if not isinstance(finished,list) or len(finished)!=1:
+        raise OutboxError("발송 상태 확인 실패: 전송 여부 불확실. 재발송하지 말고 보낸편지함을 확인하세요.")
     if status!="sent":
         raise OutboxError("발송 결과가 불확실합니다. 자동 재시도하지 않습니다. 보낸편지함을 확인하세요.")
     return {"status":"sent","id":_safe_id(ident)}
