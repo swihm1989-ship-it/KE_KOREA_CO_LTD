@@ -321,7 +321,29 @@ def generate_contract_draft(snapshot: Mapping[str, Any], env: Mapping[str, str],
     ):
         raise ValueError("AI 문서 생성 API 설정이 없습니다.")
     from Quotation_KEKOREA.contracts.models import validate_snapshot
-    from Quotation_KEKOREA.contracts.ai_graph import generate_contract_draft_graph
+    # In a long-lived Streamlit worker the service and drafting modules can
+    # remain CACHED from BEFORE the new one-retry contract draft recovery was
+    # deployed. A fresh UI alone is insufficient. Refresh the entire chain
+    # in dependency order ONLY when its revision/pointers are actually stale.
+    import importlib
+    service = importlib.import_module("Quotation_KEKOREA.contracts.service")
+    schema_revision = "master-contract-draft-recovery-20261118-v1"
+    if getattr(service, "CONTRACT_DRAFT_SCHEMA_REVISION", None) != schema_revision:
+        importlib.invalidate_caches()
+        service = importlib.reload(service)
+    if getattr(service, "CONTRACT_DRAFT_SCHEMA_REVISION", None) != schema_revision:
+        raise RuntimeError("계약서 AI 생성 엔진 버전이 이전 상태입니다. 서버 재시작이 필요합니다.")
+    drafting = importlib.import_module("Quotation_KEKOREA.contracts.drafting")
+    if getattr(drafting, "generate_draft", None) is not service.generate_draft:
+        drafting = importlib.reload(drafting)
+    graph = importlib.import_module("Quotation_KEKOREA.contracts.ai_graph")
+    if getattr(graph, "generate_reviewed_draft", None) is not drafting.generate_reviewed_draft:
+        graph = importlib.reload(graph)
+    if (getattr(drafting, "generate_draft", None) is not service.generate_draft
+            or getattr(graph, "generate_reviewed_draft", None)
+               is not drafting.generate_reviewed_draft):
+        raise RuntimeError("LangGraph 생성 모듈과 계약서 엔진 버전이 일치하지 않습니다.")
+    generate_contract_draft_graph = graph.generate_contract_draft_graph
     candidate = validate_snapshot(deepcopy(dict(snapshot)))
     if not str(candidate["contract_id"]).startswith("orchestration-"):
         raise ValueError("기존 계약서를 자동 재작성할 수 없습니다. 새 초안만 지원합니다.")
