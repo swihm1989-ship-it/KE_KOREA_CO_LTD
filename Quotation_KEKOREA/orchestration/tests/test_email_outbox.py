@@ -71,6 +71,40 @@ class EmailOutboxTests(unittest.TestCase):
                                      "Test message",confirmed=True,transport=sender)
             sender.assert_called_once()
 
+    def test_html_signature_is_only_built_after_explicit_send_approval(self):
+        from Quotation_KEKOREA.orchestration.workflows.email_reply_drafts import default_signature
+        db = MemoryRepo(dict(self.row))
+        transport = Mock()
+        signature = default_signature("ko")
+        complete = "안녕하세요. 확인하겠습니다.\n\n" + signature
+        with patch.object(outbox, "_repo", return_value=db), \
+             patch.object(outbox, "mail_config", return_value=self.config):
+            with self.assertRaises(outbox.OutboxError):
+                outbox.send_approved({}, self.owner, self.row["id"], {},
+                    "buyer@example.test", "Re: Hello", complete,
+                    confirmed=False, signature_text=signature, language="ko",
+                    transport=transport)
+            transport.assert_not_called()
+            with self.assertRaises(outbox.OutboxError):
+                outbox.send_approved({}, self.owner, self.row["id"], {},
+                    "buyer@example.test", "Re: Hello", "Other text",
+                    confirmed=True, signature_text=signature, language="ko",
+                    transport=transport)
+            transport.assert_not_called()
+            self.assertEqual(db.row["status"], "draft")
+            response = outbox.send_approved({}, self.owner, self.row["id"], {},
+                "buyer@example.test", "Re: Hello", complete,
+                confirmed=True, signature_text=signature, language="ko",
+                transport=transport)
+            self.assertEqual(response["status"], "sent")
+        transport.assert_called_once()
+        self.assertIn("html_body", transport.call_args.kwargs)
+        self.assertIn("cid:ke-korea-signature-logo",
+                      transport.call_args.kwargs["html_body"])
+        self.assertTrue(transport.call_args.kwargs["logo_bytes"].startswith(b"\x89PNG"))
+        self.assertIn("www.ke-korea.co.kr", transport.call_args.args[3])
+        self.assertEqual(db.row["approved_body"], complete)
+
     def test_tls_smtp_and_threading(self):
         client=Mock()
         with patch.object(outbox.smtplib,"SMTP",return_value=client):

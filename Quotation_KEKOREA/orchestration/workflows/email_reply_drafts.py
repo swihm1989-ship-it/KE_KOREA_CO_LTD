@@ -16,13 +16,15 @@ SIGNATURE_KO = (
     "임석원 (David Seokwon Ihm)\n"
     "대표이사 (Managing Director)\n"
     "(주)케이이코리아\n"
-    "서울특별시 영등포구 양평로 157, 1510호"
+    "서울특별시 영등포구 양평로 157, 1510호\n"
+    "www.ke-korea.co.kr"
 )
 SIGNATURE_EN = (
     "David Seokwon Ihm\n"
     "Managing Director\n"
     "KE Korea Co. Ltd\n"
-    "#1510, 157 Yangpyung Ro, Yeongdeung Po Gu, Seoul, South Korea"
+    "#1510, 157 Yangpyung Ro, Yeongdeung Po Gu, Seoul, South Korea\n"
+    "www.ke-korea.co.kr"
 )
 
 
