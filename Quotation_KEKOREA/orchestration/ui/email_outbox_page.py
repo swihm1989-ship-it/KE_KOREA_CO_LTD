@@ -492,17 +492,18 @@ def render_email_outbox(principal: str):
         st.warning("답장 본문을 작성해야 발송할 수 있습니다.")
     with st.expander("메일 HTML·로고 미리보기", expanded=False):
         st.markdown("**최종 발송 미리보기 · KE KOREA 기업형 서명**")
-        # The actual sent email includes this same escaped corporate HTML and an
-        # inline company logo. This is a no-network, no-send preview only.
-        try:
-            from Quotation_KEKOREA.orchestration.workflows.email_signature_design import (
-                preview_signature_html,
-            )
-            import streamlit.components.v1 as components
-            rendered = preview_signature_html(body, signature)
-            components.html(rendered, height=350, scrolling=True)
-        except (ValueError,OSError,ImportError,RuntimeError):
-            st.warning("회사 로고 미리보기를 표시할 수 없습니다. 발송 전 로고 파일을 확인하세요.")
+        if not body.strip():
+            st.info("회신 본문을 작성하면 로고가 포함된 미리보기를 확인할 수 있습니다.")
+        else:
+            try:
+                from Quotation_KEKOREA.orchestration.workflows.email_signature_design import (
+                    preview_signature_html,
+                )
+                import streamlit.components.v1 as components
+                rendered = preview_signature_html(body, signature)
+                components.html(rendered, height=350, scrolling=True)
+            except (ValueError,OSError,ImportError,RuntimeError):
+                st.warning("회사 로고 미리보기를 표시할 수 없습니다. 발송 전 로고 파일을 확인하세요.")
         with st.expander("일반 텍스트 메일 미리보기"):
             st.code(final_body, language=None)
 
