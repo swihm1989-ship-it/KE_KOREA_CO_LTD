@@ -30,12 +30,15 @@ STYLE = """
 
   /* Render MASTER only: eliminate Streamlit's white toolbar and overflow menu.
      Preserve the sidebar toggle for mobile navigation. */
-  header[data-testid="stHeader"] {
+  header[data-testid="stHeader"],
+  [data-testid="stHeader"],
+  .stAppHeader {
     background: transparent !important;
     background-color: transparent !important;
     box-shadow: none !important;
     border: 0 !important;
-    height: 3.25rem !important;
+    height: 0 !important;
+    min-height: 0 !important;
   }
   [data-testid="stToolbar"],
   [data-testid="stMainMenu"],
@@ -54,13 +57,13 @@ STYLE = """
   [data-testid="stMainBlockContainer"],
   .main .block-container,
   .block-container {
-    padding-top: 4.25rem !important;
+    padding-top: 1.4rem !important;
   }
   @media (max-width: 640px) {
     [data-testid="stMainBlockContainer"],
     .main .block-container,
     .block-container {
-      padding-top: 4rem !important;
+      padding-top: 1.5rem !important;
     }
   }
 
