@@ -220,6 +220,16 @@ def render_email_outbox(principal: str):
         st.text(str(row.get("source_subject") or ""))
         st.text(str(row.get("source_body") or "")[:12000])
 
+    use_https = os.environ.get("MAIL_DELIVERY_TRANSPORT", "smtp").strip().lower() == "resend"
+    https_ready = bool(os.environ.get("RESEND_API_KEY", "").strip() and
+                       os.environ.get("RESEND_FROM_EMAIL", "").strip())
+    if use_https:
+        if https_ready:
+            st.info("무료 Render HTTPS 메일 발송이 설정되어 있습니다. 메일은 최종 승인 후 발송 버튼을 눌렀을 때만 전송됩니다.")
+        else:
+            st.error("무료 Render HTTPS 발송 설정이 아직 완료되지 않았습니다. RESEND_API_KEY와 인증된 발신 도메인이 필요합니다.")
+    else:
+        st.warning("Render 무료 서버에서는 SMTP 587 포트 발신이 차단됩니다. SMTP 진단은 실제 발송 가능 여부를 뜻하지 않습니다.")
     # Explicit read-only SMTP diagnostics, available even after an ambiguous
     # send. This connects/authenticates over TLS but NEVER issues MAIL FROM,
     # RCPT TO, DATA, or any outbound email.
@@ -527,7 +537,7 @@ def render_email_outbox(principal: str):
         st.success("현재 받는 사람·제목·본문·서명이 확인되었습니다. 아래 발송 버튼을 누를 때만 전송됩니다.")
     else:
         st.caption("내용을 확인한 뒤 '이 내용으로 발송 전 승인'을 누르면 발송 버튼이 활성화됩니다.")
-    if st.button("발송",type="primary",disabled=not approved or not body.strip(),
+    if st.button("발송",type="primary",disabled=not approved or not body.strip() or (use_https and not https_ready),
                  key="master_reply_send_"+chosen_id):
         try:
             from Quotation_KEKOREA.orchestration.ui.mailbox_page import _settings
