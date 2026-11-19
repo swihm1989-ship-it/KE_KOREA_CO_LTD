@@ -543,7 +543,7 @@ def render_email_outbox(principal: str):
                  key="master_reply_send_"+chosen_id):
         try:
             from Quotation_KEKOREA.orchestration.ui.mailbox_page import _settings
-            with st.spinner("승인된 메일을 SMTP로 전송합니다."):
+            with st.spinner("승인된 메일을 HTTPS로 전송합니다." if use_https else "승인된 메일을 SMTP로 전송합니다."):
                 current_send=_resolve_send_approved()
                 result=current_send(env,principal,chosen_id,_settings(),
                                     recipient,subject,final_body,confirmed=True,
