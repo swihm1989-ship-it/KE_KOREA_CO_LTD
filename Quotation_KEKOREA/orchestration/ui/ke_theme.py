@@ -39,7 +39,7 @@ STYLE = """
     border: 0 !important;
     height: 3rem !important;
     min-height: 3rem !important;
-    pointer-events: none !important;
+    pointer-events: auto !important;
   }
   [data-testid="stToolbar"],
   [data-testid="stMainMenu"],
