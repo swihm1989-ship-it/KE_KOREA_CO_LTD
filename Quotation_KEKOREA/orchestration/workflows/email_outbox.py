@@ -371,6 +371,118 @@ def send_smtp(config,recipient:str,subject:str,body:str,message_id:str="",*,
                 except Exception:
                     pass
 
+
+def send_resend_https(config, recipient: str, subject: str, body: str,
+                      message_id: str = "", *, html_body: str | None = None,
+                      logo_bytes: bytes | None = None,
+                      attachments: list[dict] | None = None,
+                      allow_legacy_dh: bool = False, opener=None) -> None:
+    """Send only via Resend HTTPS after an explicit owner-approved send click.
+
+    Never sends unless RESEND_API_KEY and RESEND_FROM_EMAIL are both configured.
+    Network/response ambiguity is never considered safely retryable.
+    """
+    import base64
+    import json
+    import os
+    import urllib.error
+    import urllib.request
+
+    api_key = os.environ.get("RESEND_API_KEY", "").strip()
+    sender = os.environ.get("RESEND_FROM_EMAIL", "").strip()
+    if not api_key or not sender:
+        raise SMTPBeforeDataError(
+            "무료 Render HTTPS 발송 설정(RESEND_API_KEY, RESEND_FROM_EMAIL)이 필요합니다. 메일은 보내지 않았습니다.",
+            stage="configuration",
+        )
+    try:
+        sender_address = email_address(sender)
+    except ValueError:
+        raise SMTPBeforeDataError(
+            "HTTPS 발신자 주소 설정이 올바르지 않습니다. 메일은 보내지 않았습니다.",
+            stage="configuration",
+        ) from None
+    if sender_address != "david.ihm@ke-korea.com":
+        raise SMTPBeforeDataError(
+            "승인된 KE KOREA 발신 주소가 아닙니다. 메일은 보내지 않았습니다.",
+            stage="configuration",
+        )
+    if html_body is not None:
+        from Quotation_KEKOREA.orchestration.workflows.email_signature_design import LOGO_CID
+        if (not logo_bytes or not logo_bytes.startswith(b"\x89PNG\r\n\x1a\n")
+                or "cid:" + LOGO_CID not in html_body):
+            raise SMTPBeforeDataError(
+                "이메일 회사 로고를 확인할 수 없습니다. 메일은 보내지 않았습니다.",
+                stage="composition",
+            )
+    files = []
+    if html_body is not None:
+        files.append({
+            "filename": "ke-korea-logo.png",
+            "content": base64.b64encode(logo_bytes).decode("ascii"),
+            "content_type": "image/png",
+            "content_id": LOGO_CID,
+        })
+    for item in attachments or []:
+        filename = str(item.get("filename") or "").replace("\\", "/").split("/")[-1]
+        data = item.get("data")
+        if not filename.lower().endswith(".pdf") or not isinstance(data, bytes) or not data.startswith(b"%PDF"):
+            raise SMTPBeforeDataError(
+                "승인된 PDF 첨부파일 형식이 올바르지 않습니다. 메일은 보내지 않았습니다.",
+                stage="composition",
+            )
+        files.append({
+            "filename": filename,
+            "content": base64.b64encode(data).decode("ascii"),
+            "content_type": "application/pdf",
+        })
+    payload = {
+        "from": sender_address,
+        "to": [recipient],
+        "subject": subject,
+        "text": body,
+    }
+    if html_body is not None:
+        payload["html"] = html_body
+    if files:
+        payload["attachments"] = files
+    threaded_id = valid_message_id(message_id)
+    if threaded_id:
+        payload["headers"] = {"In-Reply-To": threaded_id, "References": threaded_id}
+    # The API provider holds the sending-domain verification state. Never bypass it.
+    request = urllib.request.Request(
+        "https://api.resend.com/emails",
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers={
+            "Authorization": "Bearer " + api_key,
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with (opener or urllib.request.urlopen)(request, timeout=20) as response:
+            raw = response.read()
+            result = json.loads(raw.decode("utf-8"))
+            if not isinstance(result, dict) or not result.get("id"):
+                raise OutboxError("HTTPS 메일 서비스의 접수 확인이 불명확합니다. 중복 발송하지 마세요.")
+    except urllib.error.HTTPError as error:
+        if error.code in (400, 401, 403, 404, 422):
+            raise OutboxError(
+                f"HTTPS 메일 서비스가 요청을 거부했습니다 (HTTP {error.code}). "
+                "발신 도메인 인증 및 API 키를 확인하세요. 중복 발송하지 마세요."
+            ) from None
+        raise OutboxError(
+            f"HTTPS 메일 서비스 응답 오류 (HTTP {error.code}). 접수 여부가 불명확합니다. 중복 발송하지 마세요."
+        ) from None
+    except (urllib.error.URLError, TimeoutError, OSError):
+        raise OutboxError(
+            "HTTPS 메일 서비스 연결 결과가 불명확합니다. 중복 발송하지 마세요."
+        ) from None
+    except (UnicodeError, json.JSONDecodeError):
+        raise OutboxError(
+            "HTTPS 메일 서비스 응답을 확인할 수 없습니다. 중복 발송하지 마세요."
+        ) from None
+
 def send_approved(env:dict,principal:str,ident:str,config_values:dict,
                   recipient:str,subject:str,body:str,*,confirmed:bool=False,
                   signature_text:str|None=None,language:str|None=None,
@@ -382,8 +494,14 @@ def send_approved(env:dict,principal:str,ident:str,config_values:dict,
         raise OutboxError("발송 전 최종 확인 체크가 필요합니다.")
     owner=_owner(principal)
     config=mail_config(config_values,owner)
-    if config.pop is None or config.smtp is None:
+    import os
+    send_transport = os.environ.get("MAIL_DELIVERY_TRANSPORT", "smtp").strip().lower()
+    if send_transport not in ("smtp", "resend"):
+        raise OutboxError("지원하지 않는 메일 발송 방식입니다.")
+    if config.pop is None or (send_transport == "smtp" and config.smtp is None):
         raise OutboxError("메일 수신·발신 설정을 확인하세요.")
+    if send_transport == "resend" and transport is send_smtp:
+        transport = send_resend_https
     row=get_reply(env,owner,ident)
     if row["mailbox_hash"]!=config.pop.account_id:
         raise OutboxError("메일함 계정이 변경됐습니다. 발송하지 않았습니다.")
