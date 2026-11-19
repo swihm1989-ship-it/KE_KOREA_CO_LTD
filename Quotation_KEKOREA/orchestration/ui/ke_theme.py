@@ -37,8 +37,9 @@ STYLE = """
     background-color: transparent !important;
     box-shadow: none !important;
     border: 0 !important;
-    height: 0 !important;
-    min-height: 0 !important;
+    height: 3rem !important;
+    min-height: 3rem !important;
+    pointer-events: none !important;
   }
   [data-testid="stToolbar"],
   [data-testid="stMainMenu"],
@@ -48,22 +49,29 @@ STYLE = """
   [data-testid="stStatusWidget"] {
     display: none !important;
   }
+  /* Sidebar controls live inside the header in Streamlit 1.67.
+     Restore their click target even while hiding the toolbar. */
   [data-testid="stSidebarCollapsedControl"],
-  [data-testid="stSidebarCollapseButton"] {
-    display: flex !important;
+  [data-testid="stSidebarCollapseButton"],
+  [data-testid="stSidebarNav"] {
     visibility: visible !important;
+    pointer-events: auto !important;
+  }
+  header[data-testid="stHeader"] button,
+  [data-testid="stHeader"] button {
+    pointer-events: auto !important;
   }
   /* Keep menu navigation accessible and prevent headings from being clipped. */
   [data-testid="stMainBlockContainer"],
   .main .block-container,
   .block-container {
-    padding-top: 1.4rem !important;
+    padding-top: 3.8rem !important;
   }
   @media (max-width: 640px) {
     [data-testid="stMainBlockContainer"],
     .main .block-container,
     .block-container {
-      padding-top: 1.5rem !important;
+      padding-top: 3.8rem !important;
     }
   }
 
