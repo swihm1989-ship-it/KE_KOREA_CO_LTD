@@ -21,7 +21,7 @@ from Quotation_KEKOREA.orchestration.workflows.mock_workflow import (
     edit_mock_document, is_mock_approval_current, start_mock_run, update_mock_email,
 )
 
-st.set_page_config(page_title="KE KOREA | Orchestration Demo", page_icon="📑", layout="wide")
+st.set_page_config(page_title="KE KOREA | MASTER", page_icon="📧", layout="wide", initial_sidebar_state="collapsed")
 
 # FAIL-CLOSED: protects every menu before session state, sidebar, or database access.
 from Quotation_KEKOREA.orchestration.security.auth_gate import require_authentication
@@ -63,7 +63,9 @@ if st.session_state.pop("master_reply_navigation_pending", False):
         st.session_state["master_email_outbox_selected"] = st.session_state["master_reply_selected"]
 # Operational sidebar only. Legacy unified-review and mock document-review
 # handlers below remain in source for developer regression tests.
-_master_menu = ["시장 뉴스", "메일함", "AI 업무 요청", "발송 대기", "저장된 계약서"]
+_master_menu = ["메일함", "AI 업무 요청", "발송 대기", "저장된 계약서", "시장 뉴스"]
+if "master_page" not in st.session_state:
+    st.session_state["master_page"] = "메일함"
 if st.session_state.get("master_page") not in (None, *_master_menu):
     st.session_state["master_page"] = "AI 업무 요청"
 page = st.sidebar.radio("업무 메뉴", _master_menu, label_visibility="collapsed", key="master_page")
@@ -88,22 +90,6 @@ def _start(message: MockMessage):
     st.session_state.mock_selected = message.id
     return run
 
-st.markdown(
-    header_html(
-        "MASTER GRAPH",
-        "KE KOREA 업무 자동화 · AI 업무 요청, 무역서류 및 계약서 검토",
-        eyebrow="KE KOREA · AI WORKSPACE",
-    ),
-    unsafe_allow_html=True,
-)
-st.caption("독립 업무 화면 · 기존 KE KOREA 계약서 시스템은 변경하지 않습니다.")
-col_a, col_b, col_c, col_d = st.columns(4)
-runs = list(st.session_state.mock_runs.values())
-col_a.metric("샘플 메일", len(SAMPLE_MESSAGES))
-col_b.metric("진행 중 작업", sum(r.status != "ready_for_future_integration" for r in runs))
-col_c.metric("문서 검토 대기", sum(r.status == "awaiting_document_approval" for r in runs))
-col_d.metric("발송 대기(모의)", sum(r.status == "ready_for_future_integration" for r in runs))
-st.divider()
 
 if page == "관리자 모니터링":
     from Quotation_KEKOREA.orchestration.ui.monitoring_page import render_monitoring
