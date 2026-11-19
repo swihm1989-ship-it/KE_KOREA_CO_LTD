@@ -456,6 +456,8 @@ def send_resend_https(config, recipient: str, subject: str, body: str,
         headers={
             "Authorization": "Bearer " + api_key,
             "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": "KE-KOREA-MASTER/1.0 (Resend email API client)",
         },
         method="POST",
     )
@@ -472,10 +474,13 @@ def send_resend_https(config, recipient: str, subject: str, body: str,
             provider_code = "unknown"
             response_kind = "unknown"
             request_id = "unavailable"
+            edge_provider = "unknown"
             try:
                 content_type = str(error.headers.get("Content-Type", "")).lower()
                 response_kind = ("json" if "json" in content_type else
                                  "html" if "html" in content_type else "other")
+                if error.headers.get("cf-ray"):
+                    edge_provider = "cloudflare"
                 raw_request_id = str(
                     error.headers.get("x-request-id")
                     or error.headers.get("cf-ray") or "")
@@ -491,8 +496,8 @@ def send_resend_https(config, recipient: str, subject: str, body: str,
                 pass
             import logging
             logging.getLogger(__name__).warning(
-                "resend_request_rejected http_status=%d provider_code=%s response_kind=%s request_id=%s",
-                error.code, provider_code, response_kind, request_id)
+                "resend_request_rejected http_status=%d provider_code=%s response_kind=%s edge_provider=%s request_id=%s",
+                error.code, provider_code, response_kind, edge_provider, request_id)
             raise SMTPBeforeDataError(
                 f"Resend 발송 요청 거부 (HTTP {error.code}, 코드: {provider_code}). "
                 "실제 발송되지 않았습니다. Resend 계정 발송 권한·발신 도메인·API 키를 확인하세요.",
