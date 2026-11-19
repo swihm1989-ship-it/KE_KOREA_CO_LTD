@@ -34,6 +34,8 @@ def _automatic_whois_tls(principal: str) -> bool:
     TLS certificate and hostname checks remain mandatory. Other hosts use
     the normal secure context. No checkbox is required.
     """
+    if os.environ.get("MAIL_DELIVERY_TRANSPORT", "smtp").strip().lower() == "resend":
+        return False
     try:
         from Quotation_KEKOREA.orchestration.adapters.whois_mail import mail_config
         from Quotation_KEKOREA.orchestration.ui.mailbox_page import _settings
