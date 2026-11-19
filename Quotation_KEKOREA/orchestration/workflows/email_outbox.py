@@ -397,7 +397,7 @@ def send_resend(config, recipient, subject, body, message_id, *,
             files.append({"filename":filename,"content":base64.b64encode(data).decode("ascii")})
         if logo_bytes and html_body is not None:
             from Quotation_KEKOREA.orchestration.workflows.email_signature_design import LOGO_CID
-            if not logo_bytes.startswith(b"\\x89PNG\\r\\n\\x1a\\n"):
+            if not logo_bytes.startswith(bytes([137,80,78,71,13,10,26,10])):
                 raise ValueError("Invalid logo")
             files.append({"filename":"ke-korea-logo.png",
                           "content":base64.b64encode(logo_bytes).decode("ascii"),
