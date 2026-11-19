@@ -367,6 +367,68 @@ def send_smtp(config,recipient:str,subject:str,body:str,message_id:str="",*,
                 except Exception:
                     pass
 
+def send_resend(config, recipient, subject, body, message_id, *,
+                html_body=None, logo_bytes=None, attachments=None, **_ignored):
+    """HTTPS transport for Render free instances; only invoked after approval."""
+    import os
+    import json
+    import base64
+    import urllib.request
+    import urllib.error
+    key=os.environ.get("RESEND_API_KEY","").strip()
+    sender=os.environ.get("RESEND_FROM_EMAIL","").strip() or "david.ihm@ke-korea.com"
+    if not key:
+        raise SMTPBeforeDataError(
+            "Resend API 키가 설정되지 않았습니다. 전송되지 않았습니다.",stage="configuration")
+    try:
+        sender=email_address(sender)
+        payload={"from":sender,"to":[recipient],"subject":subject,"text":body}
+        if html_body is not None:
+            payload["html"]=html_body
+        msg_id=valid_message_id(message_id)
+        if msg_id:
+            payload["headers"]={"In-Reply-To":msg_id,"References":msg_id}
+        files=[]
+        for item in attachments or []:
+            filename=str(item["filename"]).replace("\\","/").split("/")[-1]
+            data=item["data"]
+            if not filename.lower().endswith(".pdf") or not isinstance(data,bytes) or not data.startswith(b"%PDF"):
+                raise ValueError("Invalid PDF attachment")
+            files.append({"filename":filename,"content":base64.b64encode(data).decode("ascii")})
+        if logo_bytes and html_body is not None:
+            from Quotation_KEKOREA.orchestration.workflows.email_signature_design import LOGO_CID
+            if not logo_bytes.startswith(b"\\x89PNG\\r\\n\\x1a\\n"):
+                raise ValueError("Invalid logo")
+            files.append({"filename":"ke-korea-logo.png",
+                          "content":base64.b64encode(logo_bytes).decode("ascii"),
+                          "content_id":LOGO_CID})
+        if files:
+            payload["attachments"]=files
+    except (ValueError,KeyError,TypeError):
+        raise SMTPBeforeDataError(
+            "Resend 발송 데이터 검증 실패. 메일은 전송되지 않았습니다.",stage="composition") from None
+    request=urllib.request.Request(
+        "https://api.resend.com/emails",
+        data=json.dumps(payload,ensure_ascii=False).encode("utf-8"),
+        headers={"Authorization":"Bearer "+key,"Content-Type":"application/json",
+                 "Idempotency-Key":str(uuid4())},method="POST")
+    try:
+        with urllib.request.urlopen(request,timeout=25) as response:
+            data=json.loads(response.read().decode("utf-8"))
+            if not data.get("id"):
+                raise OutboxError("Resend 응답에서 전송 ID를 확인하지 못했습니다.")
+    except urllib.error.HTTPError as error:
+        # Explicit 4xx rejections mean the provider did not accept the message.
+        # 5xx and network errors remain ambiguous; never auto-retry.
+        if 400<=error.code<500:
+            raise SMTPBeforeDataError(
+                f"Resend API 요청 거부 (HTTP {error.code}). 전송되지 않았습니다. "
+                "발신 도메인 인증·API 키·발신 주소를 확인하세요.",stage="provider") from None
+        raise OutboxError("Resend 서버 응답 오류. 전송 여부를 확인할 수 없습니다.") from None
+    except (TimeoutError,ConnectionError,OSError,ValueError):
+        raise OutboxError("Resend HTTPS 연결 결과가 불확실합니다.") from None
+
+
 def send_approved(env:dict,principal:str,ident:str,config_values:dict,
                   recipient:str,subject:str,body:str,*,confirmed:bool=False,
                   signature_text:str|None=None,language:str|None=None,
@@ -439,6 +501,9 @@ def send_approved(env:dict,principal:str,ident:str,config_values:dict,
         raise OutboxError("다른 창에서 발송이 시작됐습니다. 중복 발송하지 않습니다.")
     status="sent"
     before_data_error = None
+    import os
+    if os.environ.get("RENDER") and os.environ.get("RESEND_API_KEY"):
+        transport=send_resend
     try:
         attachment_kw=({"attachments":verified_attachments} if verified_attachments else {})
         if allow_legacy_dh:
