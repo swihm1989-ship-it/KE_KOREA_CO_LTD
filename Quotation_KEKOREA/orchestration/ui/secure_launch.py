@@ -54,6 +54,14 @@ def main():
     if not configured:
         # No secret content emitted. UI login gate remains locked.
         print("OIDC configuration unavailable: private workspace remains locked.")
+    # Explicit user-approved, single-use real email probe. Disabled by default.
+    # Atomic DB claim prevents duplicate sends on deploy/restart.
+    if os.environ.get("KEKOREA_RESEND_ONE_SHOT_ID", "").strip():
+        from Quotation_KEKOREA.orchestration.tools.render_one_shot_mail_test import run
+        try:
+            run()
+        except Exception:
+            print("RESEND_SMOKE startup_probe_error_no_retry", flush=True)
     port = os.environ.get("PORT", "8501")
     if not port.isdigit():
         raise ValueError("Invalid server port")
