@@ -225,68 +225,6 @@ def render_email_outbox(principal: str):
     use_https = os.environ.get("MAIL_DELIVERY_TRANSPORT", "smtp").strip().lower() == "resend"
     https_ready = bool(os.environ.get("RESEND_API_KEY", "").strip() and
                        os.environ.get("RESEND_FROM_EMAIL", "").strip())
-    if use_https:
-        if https_ready:
-            st.info("무료 Render HTTPS 메일 발송이 설정되어 있습니다. 메일은 최종 승인 후 발송 버튼을 눌렀을 때만 전송됩니다.")
-        else:
-            st.error("무료 Render HTTPS 발송 설정이 아직 완료되지 않았습니다. RESEND_API_KEY와 인증된 발신 도메인이 필요합니다.")
-    else:
-        st.warning("Render 무료 서버에서는 SMTP 587 포트 발신이 차단됩니다. SMTP 진단은 실제 발송 가능 여부를 뜻하지 않습니다.")
-    if not use_https:
-        # Explicit read-only SMTP diagnostics, available even after an ambiguous
-        # send. This connects/authenticates over TLS but NEVER issues MAIL FROM,
-        # RCPT TO, DATA, or any outbound email.
-        with st.expander("SMTP 연결·로그인 진단 (메일 발송 없음)", expanded=False):
-            st.caption("서버 접속, TLS, 로그인만 확인합니다. 메일은 전송하지 않습니다. "
-                       "기존 'send_unknown' 발송 기록의 성공 여부를 확인하는 기능은 아닙니다.")
-            auto_legacy=_automatic_whois_tls(principal)
-            if auto_legacy:
-                st.warning(
-                    "후이즈 SMTP(587/STARTTLS)의 1024비트 DH 키를 위해 구형 TLS 호환 "
-                    "방식을 자동 사용합니다. 별도 동의는 필요하지 않지만 키 교환 보안 "
-                    "수준은 낮습니다. TLS 암호화·인증서 검증은 유지됩니다. "
-                    "후이즈 서버 업그레이드가 근본 해결책입니다."
-                )
-            if st.button("SMTP 접속·로그인 검사", key="master_reply_smtp_probe_"+chosen_id):
-                from Quotation_KEKOREA.orchestration.adapters.whois_mail import (
-                    mail_config, probe_smtp, MailConnectionError,
-                )
-                from Quotation_KEKOREA.orchestration.ui.mailbox_page import _settings
-                try:
-                    config=mail_config(_settings(),principal)
-                    if config.smtp is None:
-                        st.error("SMTP 호스트·계정 설정이 필요합니다. 전송된 메일은 없습니다.")
-                    else:
-                        endpoint=config.smtp
-                        # Host/port/mode are public connection metadata. Never
-                        # print username, SMTP password or raw TLS exceptions.
-                        st.caption("검사 대상 SMTP: "+str(endpoint.host)+" : "+
-                                   str(endpoint.port)+" · "+
-                                   ("STARTTLS" if endpoint.security=="starttls"
-                                    else "SSL/TLS")+" · 계정 암호 비공개")
-                        if (endpoint.port==465 and endpoint.security=="starttls") or (
-                                endpoint.port==587 and endpoint.security=="ssl"):
-                            st.warning("일반적인 SMTP 포트·암호화 방식 조합과 다릅니다. "
-                                       "현재 서비스의 공식 서버 설정을 확인하세요.")
-                        with st.spinner("SMTP 연결·인증을 검사합니다. 실제 메일은 전송하지 않습니다."):
-                            from Quotation_KEKOREA.orchestration.adapters import whois_mail as _mail
-                            if auto_legacy:
-                                if "allow_legacy_dh" not in inspect.signature(_mail.probe_smtp).parameters:
-                                    importlib.invalidate_caches()
-                                    _mail=importlib.reload(_mail)
-                            _mail.probe_smtp(
-                                config.smtp,
-                                allow_legacy_dh=auto_legacy,
-                            )
-                        st.success("SMTP TLS 연결과 로그인 성공. 메일은 보내지 않았습니다. "
-                                   "실제 발송 성공 여부는 별도 확인이 필요합니다.")
-                except (MailConnectionError, ValueError, PermissionError) as error:
-                    st.error(str(error)[:250])
-                except Exception:
-                    st.error("SMTP 접속·로그인 진단에 실패했습니다. 설정을 확인하세요.")
-
-    _render_delete_reply(env, principal, row)
-
     from Quotation_KEKOREA.orchestration.workflows.mail_pdf_attachments import (
         list_attachments, attachment_digest,
     )
@@ -300,13 +238,10 @@ def render_email_outbox(principal: str):
         return
     attached_stamp=attachment_digest(attached_pdfs)
     verified_pdf_details=[]
+    invalid_attachment=False
     if attached_pdfs:
         from Quotation_KEKOREA.orchestration.workflows import pdf_archive
-        st.markdown("#### 발송할 PDF 첨부파일")
-        st.caption("저장된 계약서에 보관된 실제 파일을 다시 불러와 확인합니다.")
-        invalid_attachment=False
         for pdf in attached_pdfs:
-            filename=str(pdf.get("filename") or "FINAL.pdf")
             try:
                 record,blob=pdf_archive.load_pdf(env,principal,pdf["id"])
                 if (record.get("status")!="final"
@@ -314,34 +249,11 @@ def render_email_outbox(principal: str):
                     raise ValueError("saved PDF metadata changed")
             except Exception:
                 invalid_attachment=True
-                st.error("첨부 검증 실패 · "+filename+" · PDF를 읽을 수 없습니다. "
-                         "보관 파일을 확인한 뒤 다시 승인해 주세요.")
                 continue
             verified_pdf_details.append((pdf,blob))
-            with st.container(border=True):
-                st.success("첨부 확인 완료 · "+filename)
-                st.caption(str(pdf.get("kind") or "PDF")+" · "+
-                           f"{len(blob)/1024:,.1f} KB · PDF 원본 무결성 검증 완료")
-                st.download_button("첨부 PDF 확인·다운로드",
-                    data=blob,file_name=filename,mime="application/pdf",
-                    key="master_reply_pdf_download_"+chosen_id+"_"+str(pdf["id"]))
-                with st.expander("첨부 PDF 미리보기 · "+filename,expanded=False):
-                    if hasattr(st,"pdf"):
-                        try:
-                            st.pdf(blob,height=620)
-                        except Exception:
-                            st.info("PDF 미리보기를 표시할 수 없습니다. 위 다운로드로 확인하세요.")
-                    else:
-                        st.info("이 환경에서는 PDF 미리보기가 지원되지 않습니다. 위 다운로드로 확인하세요.")
-        if invalid_attachment:
-            st.error("첨부파일 검증에 실패하여 이 메일의 발송을 진행할 수 없습니다.")
-            if row.get("status")=="draft":
-                return
-        else:
-            st.success(f"총 {len(attached_pdfs)}개 PDF 첨부 준비 완료 · 승인 후 발송 버튼을 누르면 함께 전송됩니다.")
-        st.caption("파일 삭제와 보관 관리는 기존 '저장된 계약서' 메뉴에서 가능합니다.")
-    elif row.get("status")=="draft":
-        st.info("연결된 최종 PDF가 없습니다. 문서가 필요한 메일이라면 최종 PDF 생성 후 연결 상태를 확인하세요.")
+    if invalid_attachment and row.get("status")=="draft":
+        st.error("연결된 PDF 원본을 검증하지 못했습니다. 보관된 문서를 확인해 주세요.")
+        return
 
     if row.get("status")!="draft":
         if row.get("status")=="sending":
@@ -507,24 +419,86 @@ def render_email_outbox(principal: str):
         with st.expander("일반 텍스트 메일 미리보기"):
             st.code(final_body, language=None)
 
-    # Repeat the attachment proof next to the actual editor and send approval.
-    # The archive-level preview above remains available; the sender no longer
-    # has to scroll away from the email to see whether the file is attached.
-    st.markdown("#### 최종 발송 첨부파일 확인")
+    st.markdown("#### 최종 PDF 첨부 확인")
     if verified_pdf_details:
-        st.success(f"PDF {len(verified_pdf_details)}개 첨부 확인 완료 · 발송 시 실제 PDF 파일이 포함됩니다.")
+        st.success(f"최종 PDF {len(verified_pdf_details)}개 연결 및 무결성 확인 완료")
         for attachment,verified_blob in verified_pdf_details:
             name=str(attachment.get("filename") or "FINAL.pdf")
-            st.markdown("📎 **"+name+"** · "+f"{len(verified_blob)/1024:,.1f} KB")
-            st.download_button("첨부 PDF 다운로드 · "+name,
+            st.download_button("📎 "+name+" · 다운로드",
                 data=verified_blob,file_name=name,mime="application/pdf",
                 key="master_reply_pdf_final_check_"+chosen_id+"_"+str(attachment["id"]))
-        st.caption("상단 '발송할 PDF 첨부파일' 영역에서도 원본 PDF를 미리 볼 수 있습니다.")
+        with st.expander("PDF 미리보기 · 선택 사항", expanded=False):
+            for attachment,verified_blob in verified_pdf_details:
+                st.caption(str(attachment.get("filename") or "FINAL.pdf"))
+                if hasattr(st,"pdf"):
+                    try:
+                        st.pdf(verified_blob,height=420)
+                    except Exception:
+                        st.info("PDF 미리보기를 지원하지 않습니다. 다운로드로 확인하세요.")
     elif attached_pdfs:
-        st.error("PDF 연결 기록은 있지만 검증된 첨부파일이 없습니다. 발송할 수 없습니다.")
+        st.error("PDF 연결은 있지만 검증된 파일이 없습니다. 발송할 수 없습니다.")
     else:
-        st.warning("첨부 PDF 0개 · 현재 메일에는 실제 PDF가 연결되지 않았습니다. "
-                   "최종 PDF 생성 화면에서 이 원본 메일의 첨부 연결을 확인하세요.")
+        st.caption("연결된 PDF 없음 · 문서가 필요한 경우 AI 업무 요청에서 최종 PDF를 생성하세요.")
+    if use_https and not https_ready:
+        st.warning("실제 발송을 위해 HTTPS 메일 서비스 인증이 필요합니다. 회신 작성·수정은 가능합니다.")
+    elif not use_https:
+        st.warning("SMTP 발송 연결을 확인하세요.")
+
+    with st.expander("고급 관리 · 기록 삭제 및 연결 진단", expanded=False):
+        _render_delete_reply(env, principal, row)
+        if not use_https:
+            # Explicit read-only SMTP diagnostics, available even after an ambiguous
+            # send. This connects/authenticates over TLS but NEVER issues MAIL FROM,
+            # RCPT TO, DATA, or any outbound email.
+            with st.expander("SMTP 연결·로그인 진단 (메일 발송 없음)", expanded=False):
+                st.caption("서버 접속, TLS, 로그인만 확인합니다. 메일은 전송하지 않습니다. "
+                           "기존 'send_unknown' 발송 기록의 성공 여부를 확인하는 기능은 아닙니다.")
+                auto_legacy=_automatic_whois_tls(principal)
+                if auto_legacy:
+                    st.warning(
+                        "후이즈 SMTP(587/STARTTLS)의 1024비트 DH 키를 위해 구형 TLS 호환 "
+                        "방식을 자동 사용합니다. 별도 동의는 필요하지 않지만 키 교환 보안 "
+                        "수준은 낮습니다. TLS 암호화·인증서 검증은 유지됩니다. "
+                        "후이즈 서버 업그레이드가 근본 해결책입니다."
+                    )
+                if st.button("SMTP 접속·로그인 검사", key="master_reply_smtp_probe_"+chosen_id):
+                    from Quotation_KEKOREA.orchestration.adapters.whois_mail import (
+                        mail_config, probe_smtp, MailConnectionError,
+                    )
+                    from Quotation_KEKOREA.orchestration.ui.mailbox_page import _settings
+                    try:
+                        config=mail_config(_settings(),principal)
+                        if config.smtp is None:
+                            st.error("SMTP 호스트·계정 설정이 필요합니다. 전송된 메일은 없습니다.")
+                        else:
+                            endpoint=config.smtp
+                            # Host/port/mode are public connection metadata. Never
+                            # print username, SMTP password or raw TLS exceptions.
+                            st.caption("검사 대상 SMTP: "+str(endpoint.host)+" : "+
+                                       str(endpoint.port)+" · "+
+                                       ("STARTTLS" if endpoint.security=="starttls"
+                                        else "SSL/TLS")+" · 계정 암호 비공개")
+                            if (endpoint.port==465 and endpoint.security=="starttls") or (
+                                    endpoint.port==587 and endpoint.security=="ssl"):
+                                st.warning("일반적인 SMTP 포트·암호화 방식 조합과 다릅니다. "
+                                           "현재 서비스의 공식 서버 설정을 확인하세요.")
+                            with st.spinner("SMTP 연결·인증을 검사합니다. 실제 메일은 전송하지 않습니다."):
+                                from Quotation_KEKOREA.orchestration.adapters import whois_mail as _mail
+                                if auto_legacy:
+                                    if "allow_legacy_dh" not in inspect.signature(_mail.probe_smtp).parameters:
+                                        importlib.invalidate_caches()
+                                        _mail=importlib.reload(_mail)
+                                _mail.probe_smtp(
+                                    config.smtp,
+                                    allow_legacy_dh=auto_legacy,
+                                )
+                            st.success("SMTP TLS 연결과 로그인 성공. 메일은 보내지 않았습니다. "
+                                       "실제 발송 성공 여부는 별도 확인이 필요합니다.")
+                    except (MailConnectionError, ValueError, PermissionError) as error:
+                        st.error(str(error)[:250])
+                    except Exception:
+                        st.error("SMTP 접속·로그인 진단에 실패했습니다. 설정을 확인하세요.")
+
 
     # Approval is a separate deliberate BUTTON click, not a checkbox whose
     # state can be lost when Streamlit batches a text edit + checkbox event.
