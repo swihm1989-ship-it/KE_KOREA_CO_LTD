@@ -28,8 +28,44 @@ STYLE = """
   div.stButton > button[kind="primary"]:hover { background:#065f9f; border-color:#065f9f; }
   [data-testid="stMetric"] { background:#fff; border:1px solid #dbe8f2; border-radius:11px; padding:14px; }
 
+  /* Render MASTER only: eliminate Streamlit's white toolbar and overflow menu.
+     Preserve the sidebar toggle for mobile navigation. */
+  header[data-testid="stHeader"] {
+    background: transparent !important;
+    background-color: transparent !important;
+    box-shadow: none !important;
+    border: 0 !important;
+    height: 3.25rem !important;
+  }
+  [data-testid="stToolbar"],
+  [data-testid="stMainMenu"],
+  #MainMenu,
+  [data-testid="stDecoration"],
+  footer,
+  [data-testid="stStatusWidget"] {
+    display: none !important;
+  }
+  [data-testid="stSidebarCollapsedControl"],
+  [data-testid="stSidebarCollapseButton"] {
+    display: flex !important;
+    visibility: visible !important;
+  }
+  /* Keep menu navigation accessible and prevent headings from being clipped. */
+  [data-testid="stMainBlockContainer"],
+  .main .block-container,
+  .block-container {
+    padding-top: 4.25rem !important;
+  }
+  @media (max-width: 640px) {
+    [data-testid="stMainBlockContainer"],
+    .main .block-container,
+    .block-container {
+      padding-top: 4rem !important;
+    }
+  }
+
   /* MASTER GRAPH page-width only; brand styles above match the original. */
-  .block-container { max-width:1460px; padding-top:1.6rem; }
+  .block-container { max-width:1460px; }
   h2,h3 { color:var(--ke-navy); }
   [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stVerticalBlockBorderWrapper"] {
     border-color:#dbe8f2;
@@ -38,7 +74,7 @@ STYLE = """
     border-color:var(--ke-blue);
   }
   @media (max-width: 640px) {
-    .block-container { padding-top:1rem; }
+
     .ke-header { padding:14px 16px; border-radius:12px; }
     .ke-header h1 { font-size:1.45rem; line-height:1.25; }
   }
