@@ -83,7 +83,7 @@ def _ensure_smtp_adapter_current():
     """
     global mail_config, probe_pop, probe_smtp, fetch_messages, MailConnectionError
     module = sys.modules.get(probe_smtp.__module__)
-    expected = "smtp-starttls-20261112-v3"
+    expected = "smtp-safe-ssl-reasons-20261118-v4"
     pop_expected = "pop-health-20261113-v4"
     fetch_expected = "pop-fetch-older-fallback-20261113-v1"
     if module is None:
@@ -251,9 +251,9 @@ def render_mailbox(principal):
             st.text("실제 사용 함수 SHA256(코드): " + fingerprint)
             st.text("모듈 함수 연결: " + ("일치" if current else "불일치 (캐시 모듈 점검 필요)"))
             st.text("SMTP 단계별 진단 코드: " +
-                    ("적용됨" if revision == "smtp-starttls-20261112-v3" else "이전/미확인"))
-            if revision != "smtp-starttls-20261112-v3":
-                st.warning("재로딩 후에도 이전 모듈입니다. Streamlit Cloud의 배포 커밋과 Python 프로세스를 점검하세요.")
+                    ("적용됨" if revision == "smtp-safe-ssl-reasons-20261118-v4" else "이전/미확인"))
+            if revision != "smtp-safe-ssl-reasons-20261118-v4":
+                st.warning("재로딩 후에도 이전 모듈입니다. 현재 Render 배포와 Python 프로세스를 점검하세요.")
             st.caption("진단값은 현재 실행 중인 Python 함수에서 계산합니다. "
                        "SMTP 비밀번호, 서버 응답 원문, 메일 내용은 표시하지 않습니다.")
         if b.button('발신 연결 테스트 · 발송 없음',key='whois_probe_smtp',disabled=config.smtp is None):
