@@ -21,7 +21,7 @@ from Quotation_KEKOREA.orchestration.workflows.mock_workflow import (
     edit_mock_document, is_mock_approval_current, start_mock_run, update_mock_email,
 )
 
-st.set_page_config(page_title="KE KOREA | MASTER", page_icon="📧", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="KE KOREA | MASTER", page_icon="📧", layout="wide", initial_sidebar_state="expanded")
 
 # FAIL-CLOSED: protects every menu before session state, sidebar, or database access.
 from Quotation_KEKOREA.orchestration.security.auth_gate import require_authentication
