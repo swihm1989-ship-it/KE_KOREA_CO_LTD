@@ -467,15 +467,24 @@ def send_resend_https(config, recipient: str, subject: str, body: str,
                 raise OutboxError("HTTPS 메일 서비스의 접수 확인이 불명확합니다. 중복 발송하지 마세요.")
     except urllib.error.HTTPError as error:
         if 400 <= error.code < 500:
-            # Resend explicitly rejected the request: no provider acceptance.
-            # Preserve the status code and safe error category for diagnosis,
-            # never the API key, recipient, or response body.
+            # Read only the provider's documented machine-readable error code.
+            # Never log or display the raw response, addresses or API key.
+            provider_code = "unknown"
+            try:
+                detail = json.loads(error.read(4096).decode("utf-8"))
+                if isinstance(detail, dict):
+                    raw_code = str(detail.get("name") or detail.get("code") or "")
+                    if re.fullmatch(r"[A-Za-z_]{1,64}", raw_code):
+                        provider_code = raw_code
+            except (ValueError, UnicodeError, OSError):
+                pass
             import logging
             logging.getLogger(__name__).warning(
-                "resend_request_rejected http_status=%d", error.code)
+                "resend_request_rejected http_status=%d provider_code=%s",
+                error.code, provider_code)
             raise SMTPBeforeDataError(
-                f"Resend 발송 요청 거부 (HTTP {error.code}). 실제 발송되지 않았습니다. "
-                "발신 도메인 인증·API 키·첨부파일 설정을 확인하세요.",
+                f"Resend 발송 요청 거부 (HTTP {error.code}, 코드: {provider_code}). "
+                "실제 발송되지 않았습니다. Resend 계정 발송 권한·발신 도메인·API 키를 확인하세요.",
                 stage="provider",
             ) from None
         raise OutboxError(
