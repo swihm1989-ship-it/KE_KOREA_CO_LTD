@@ -282,6 +282,8 @@ def render_email_outbox(principal: str):
                     st.session_state["master_reply_selected"]=str(fresh["id"])
                     st.session_state["master_reply_select_pending"]=str(fresh["id"])
                     st.rerun()
+        with st.expander("이 발송 기록 관리", expanded=False):
+            _render_delete_reply(env, principal, row)
         return
 
     with st.expander("AI 연결 상태 진단 · 가상 데이터만 사용", expanded=False):
@@ -444,6 +446,60 @@ def render_email_outbox(principal: str):
     elif not use_https:
         st.warning("SMTP 발송 연결을 확인하세요.")
 
+    # Approval is a separate deliberate BUTTON click, not a checkbox whose
+    # state can be lost when Streamlit batches a text edit + checkbox event.
+    # The exact current recipient/subject/body/signature is hashed and any
+    # subsequent edit invalidates the stored approval before sending.
+    legacy_enabled=_automatic_whois_tls(principal)
+    if legacy_enabled:
+        st.caption("후이즈 구형 TLS 자동 호환 적용 · 인증서 검증 유지 · "
+                   "보안 수준이 낮아져 서버 업데이트를 권장합니다.")
+    digest=sha256(("\0".join((recipient,subject,final_body,attached_stamp,
+                                "legacy-tls" if legacy_enabled else "standard-tls"))).encode()).hexdigest()[:20]
+    approved_key="master_reply_approved_digest_"+chosen_id
+    if st.button("이 내용으로 발송 전 승인",type="secondary",
+                 disabled=not body.strip() or not signature.strip(),
+                 key="master_reply_approve_"+chosen_id):
+        st.session_state[approved_key]=digest
+        # The button click already reruns Streamlit. A second forced rerun
+        # can restore a stale selected item and hide the approval controls.
+    approved=(st.session_state.get(approved_key)==digest)
+    if approved:
+        st.success("현재 받는 사람·제목·본문·서명이 확인되었습니다. 아래 발송 버튼을 누를 때만 전송됩니다.")
+    else:
+        st.caption("내용을 확인한 뒤 '이 내용으로 발송 전 승인'을 누르면 발송 버튼이 활성화됩니다.")
+    if st.button("발송",type="primary",disabled=not approved or not body.strip() or (use_https and not https_ready),
+                 key="master_reply_send_"+chosen_id):
+        try:
+            from Quotation_KEKOREA.orchestration.ui.mailbox_page import _settings
+            with st.spinner("승인된 메일을 HTTPS로 전송합니다." if use_https else "승인된 메일을 SMTP로 전송합니다."):
+                current_send=_resolve_send_approved()
+                result=current_send(env,principal,chosen_id,_settings(),
+                                    recipient,subject,final_body,confirmed=True,
+                                    signature_text=signature,language=lang,
+                                    expected_attachment_digest=attached_stamp,
+                                    allow_legacy_dh=legacy_enabled)
+        except (OutboxError,ValueError,PermissionError) as error:
+            _clear_send_approval(chosen_id)
+            st.error(str(error)[:350])
+            st.info(_safe_send_failure_status(env,principal,chosen_id,error))
+        except Exception as error:
+            _clear_send_approval(chosen_id)
+            # Streamlit hot-deploy can reload email_outbox and create a new
+            # OutboxError class object. The already-imported OutboxError above
+            # will not match its subclasses, including SMTPBeforeDataError.
+            # Recover only known safe domain errors from the CURRENT module.
+            from Quotation_KEKOREA.orchestration.workflows import email_outbox as _active_outbox
+            if isinstance(error, _active_outbox.OutboxError):
+                st.error(str(error)[:350])
+                st.info(_safe_send_failure_status(env,principal,chosen_id,error))
+            else:
+                st.error(_safe_send_failure_status(env,principal,chosen_id,error))
+        else:
+            if result["status"]=="sent":
+                st.success("발송 완료가 확인되었습니다.")
+                st.rerun()
+
     with st.expander("고급 관리 · 기록 삭제 및 연결 진단", expanded=False):
         _render_delete_reply(env, principal, row)
         if not use_https:
@@ -498,58 +554,3 @@ def render_email_outbox(principal: str):
                         st.error(str(error)[:250])
                     except Exception:
                         st.error("SMTP 접속·로그인 진단에 실패했습니다. 설정을 확인하세요.")
-
-
-    # Approval is a separate deliberate BUTTON click, not a checkbox whose
-    # state can be lost when Streamlit batches a text edit + checkbox event.
-    # The exact current recipient/subject/body/signature is hashed and any
-    # subsequent edit invalidates the stored approval before sending.
-    legacy_enabled=_automatic_whois_tls(principal)
-    if legacy_enabled:
-        st.caption("후이즈 구형 TLS 자동 호환 적용 · 인증서 검증 유지 · "
-                   "보안 수준이 낮아져 서버 업데이트를 권장합니다.")
-    digest=sha256(("\0".join((recipient,subject,final_body,attached_stamp,
-                                "legacy-tls" if legacy_enabled else "standard-tls"))).encode()).hexdigest()[:20]
-    approved_key="master_reply_approved_digest_"+chosen_id
-    if st.button("이 내용으로 발송 전 승인",type="secondary",
-                 disabled=not body.strip() or not signature.strip(),
-                 key="master_reply_approve_"+chosen_id):
-        st.session_state[approved_key]=digest
-        # The button click already reruns Streamlit. A second forced rerun
-        # can restore a stale selected item and hide the approval controls.
-    approved=(st.session_state.get(approved_key)==digest)
-    if approved:
-        st.success("현재 받는 사람·제목·본문·서명이 확인되었습니다. 아래 발송 버튼을 누를 때만 전송됩니다.")
-    else:
-        st.caption("내용을 확인한 뒤 '이 내용으로 발송 전 승인'을 누르면 발송 버튼이 활성화됩니다.")
-    if st.button("발송",type="primary",disabled=not approved or not body.strip() or (use_https and not https_ready),
-                 key="master_reply_send_"+chosen_id):
-        try:
-            from Quotation_KEKOREA.orchestration.ui.mailbox_page import _settings
-            with st.spinner("승인된 메일을 HTTPS로 전송합니다." if use_https else "승인된 메일을 SMTP로 전송합니다."):
-                current_send=_resolve_send_approved()
-                result=current_send(env,principal,chosen_id,_settings(),
-                                    recipient,subject,final_body,confirmed=True,
-                                    signature_text=signature,language=lang,
-                                    expected_attachment_digest=attached_stamp,
-                                    allow_legacy_dh=legacy_enabled)
-        except (OutboxError,ValueError,PermissionError) as error:
-            _clear_send_approval(chosen_id)
-            st.error(str(error)[:350])
-            st.info(_safe_send_failure_status(env,principal,chosen_id,error))
-        except Exception as error:
-            _clear_send_approval(chosen_id)
-            # Streamlit hot-deploy can reload email_outbox and create a new
-            # OutboxError class object. The already-imported OutboxError above
-            # will not match its subclasses, including SMTPBeforeDataError.
-            # Recover only known safe domain errors from the CURRENT module.
-            from Quotation_KEKOREA.orchestration.workflows import email_outbox as _active_outbox
-            if isinstance(error, _active_outbox.OutboxError):
-                st.error(str(error)[:350])
-                st.info(_safe_send_failure_status(env,principal,chosen_id,error))
-            else:
-                st.error(_safe_send_failure_status(env,principal,chosen_id,error))
-        else:
-            if result["status"]=="sent":
-                st.success("발송 완료가 확인되었습니다.")
-                st.rerun()
