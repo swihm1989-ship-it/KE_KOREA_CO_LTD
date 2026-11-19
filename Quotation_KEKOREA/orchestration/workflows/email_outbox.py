@@ -467,21 +467,32 @@ def send_resend_https(config, recipient: str, subject: str, body: str,
                 raise OutboxError("HTTPS 메일 서비스의 접수 확인이 불명확합니다. 중복 발송하지 마세요.")
     except urllib.error.HTTPError as error:
         if 400 <= error.code < 500:
-            # Read only the provider's documented machine-readable error code.
-            # Never log or display the raw response, addresses or API key.
+            # Record a safe, structured provider diagnosis without leaking
+            # addresses, API credentials, or raw response contents.
             provider_code = "unknown"
+            response_kind = "unknown"
+            request_id = "unavailable"
             try:
-                detail = json.loads(error.read(4096).decode("utf-8"))
-                if isinstance(detail, dict):
-                    raw_code = str(detail.get("name") or detail.get("code") or "")
-                    if re.fullmatch(r"[A-Za-z_]{1,64}", raw_code):
-                        provider_code = raw_code
-            except (ValueError, UnicodeError, OSError):
+                content_type = str(error.headers.get("Content-Type", "")).lower()
+                response_kind = ("json" if "json" in content_type else
+                                 "html" if "html" in content_type else "other")
+                raw_request_id = str(
+                    error.headers.get("x-request-id")
+                    or error.headers.get("cf-ray") or "")
+                if re.fullmatch(r"[A-Za-z0-9_-]{1,100}", raw_request_id):
+                    request_id = raw_request_id
+                if response_kind == "json":
+                    detail = json.loads(error.read(4096).decode("utf-8"))
+                    if isinstance(detail, dict):
+                        raw_code = str(detail.get("name") or detail.get("code") or "")
+                        if re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{0,63}", raw_code):
+                            provider_code = raw_code
+            except (ValueError, UnicodeError, OSError, TypeError):
                 pass
             import logging
             logging.getLogger(__name__).warning(
-                "resend_request_rejected http_status=%d provider_code=%s",
-                error.code, provider_code)
+                "resend_request_rejected http_status=%d provider_code=%s response_kind=%s request_id=%s",
+                error.code, provider_code, response_kind, request_id)
             raise SMTPBeforeDataError(
                 f"Resend 발송 요청 거부 (HTTP {error.code}, 코드: {provider_code}). "
                 "실제 발송되지 않았습니다. Resend 계정 발송 권한·발신 도메인·API 키를 확인하세요.",
