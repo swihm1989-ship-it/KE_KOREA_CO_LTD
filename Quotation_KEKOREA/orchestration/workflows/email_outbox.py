@@ -465,11 +465,15 @@ def send_resend_https(config, recipient: str, subject: str, body: str,
             result = json.loads(raw.decode("utf-8"))
             if not isinstance(result, dict) or not result.get("id"):
                 raise OutboxError("HTTPS 메일 서비스의 접수 확인이 불명확합니다. 중복 발송하지 마세요.")
+            return str(result["id"])  # Resend accepted; not proof of inbox delivery.
     except urllib.error.HTTPError as error:
-        if error.code in (400, 401, 403, 404, 422):
-            raise OutboxError(
+        if error.code in (400, 401, 403, 404, 422, 429):
+            # A definitive Resend HTTP rejection is NOT an ambiguous send.
+            # No email was accepted and the owner may safely correct settings.
+            raise SMTPBeforeDataError(
                 f"HTTPS 메일 서비스가 요청을 거부했습니다 (HTTP {error.code}). "
-                "발신 도메인 인증 및 API 키를 확인하세요. 중복 발송하지 마세요."
+                "발신 도메인·API 키·서비스 제한을 확인하세요. 메일은 접수되지 않았습니다.",
+                stage="https_rejected",
             ) from None
         raise OutboxError(
             f"HTTPS 메일 서비스 응답 오류 (HTTP {error.code}). 접수 여부가 불명확합니다. 중복 발송하지 마세요."

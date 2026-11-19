@@ -43,7 +43,7 @@ def click_and_check():
             # assert the visible sender caption rather than a hidden option.
             expect(page.get_by_text("받은 사람: Mock buyer",exact=False)).to_be_visible()
             expect(page.get_by_text("PI-FINAL-SYNTHETIC.pdf",exact=False).first).to_be_visible()
-            expect(page.get_by_text("총 1개 PDF 첨부 준비 완료",exact=False)).to_be_visible()
+            expect(page.get_by_text("최종 PDF 1개 연결 및 무결성 확인 완료",exact=False)).to_be_visible()
             expect(page.get_by_role("button",name="첨부 PDF 확인·다운로드")).to_be_visible()
             expect(page.get_by_role("textbox", name="메일 내용 (직접 수정 가능)")).to_contain_text("요청하신 PI 최종 PDF를 첨부합니다.")
             expect(page.get_by_text("최종 발송 첨부파일 확인",exact=True)).to_be_visible()
