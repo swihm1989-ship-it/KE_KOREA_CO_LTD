@@ -131,24 +131,7 @@ def render_mailbox(principal):
     if not principal: raise PermissionError('로그인이 필요합니다.')
     refreshed_smtp_module = _ensure_smtp_adapter_current()
     st.subheader('후이즈 회사 메일함')
-    if refreshed_smtp_module:
-        st.success("이전 메일 연결 모듈을 감지하여 최신 POP3/SMTP 코드로 다시 로딩했습니다.")
-    adapter_module = sys.modules.get(probe_pop.__module__)
-    running_pop_revision = getattr(adapter_module, "POP_DIAGNOSTIC_REVISION", "이전/미확인")
-    running_fetch_revision = getattr(adapter_module, "POP_FETCH_REVISION", "이전/미확인")
-    st.caption("실행 중 POP3 모듈: " + str(running_pop_revision) +
-               " · 수신 복구 코드: " + str(running_fetch_revision) +
-               " · 함수 연결: " +
-               ("일치" if getattr(adapter_module, "fetch_messages", None) is fetch_messages
-                else "불일치 · 앱 재시작 필요"))
-    st.caption('메일 동기화 버전: 2026-11-13-RECOVERY · 화면 열림 중 60초마다 자동 갱신')
-    st.caption('화면이 열려 있는 동안 60초마다 새 메일을 확인합니다. 최근 메일은 현재 로그인 세션에서만 보관하며 원본은 서버에 보존합니다.')
-    with st.expander('메일 연결 설정 안내'):
-        st.write('후이즈 웹메일 환경설정에서 POP/SMTP 사용을 활성화하고 상품별 실제 서버·보안 설정을 확인하세요.')
-        st.write('Master 앱 Settings → Secrets에서 [auth] 등 첫 섹션 위에 아래 최상위 항목을 추가하세요. 기존 인증·AI·DB 설정은 보존하세요. 메일 비밀번호를 채팅이나 GitHub에 넣지 마세요.')
-        st.code(SECRETS_TEMPLATE,language='toml')
-        st.caption('표시한 포트는 TLS 설정 예시입니다. 상품별 설정을 확인하세요. SECURITY는 ssl 또는 starttls이며 암호화 없는 접속은 지원하지 않습니다.')
-        st.link_button('후이즈 POP/SMTP 설정 안내','https://m.whois.co.kr/mail_wmail.php?act=process')
+    # The actual inbox is the first interactive content on mobile.
     try:
         config=mail_config(_settings(),principal)
     except PermissionError:
@@ -161,107 +144,127 @@ def render_mailbox(principal):
         st.session_state.pop('whois_mail_bundle',None)
         st.error(str(exc));return
     account=config.pop.account_id if config.pop else None
-    if config.pop:
-        # Owner-only view, after mail_config authorization. This is the
-        # configured POP3 login, not a claim that RETR succeeded.
-        st.caption('설정된 POP3 수신 계정: ' + config.pop.username)
-        if config.pop.username.strip().casefold() != 'david.ihm@ke-korea.com':
-            st.warning('현재 POP3 설정 계정은 david.ihm@ke-korea.com과 다릅니다. Streamlit Secrets의 WHOIS_POP_USERNAME을 확인하세요.')
-        else:
-            st.info('POP3 수신 계정 설정은 david.ihm@ke-korea.com입니다. 실제 본문 조회 가능 여부는 아래 POP3 상세 진단으로 확인하세요.')
-        if st.button('POP3 상세 진단 · 메일 발송/삭제 없음', key='whois_pop_diagnostics'):
-            # Streamlit hot deployment can keep an older adapter in sys.modules.
-            # Never let a missing diagnostic callable crash the owner's mailbox.
-            module = sys.modules.get(probe_pop.__module__)
-            diagnostic_callable = getattr(module, 'probe_pop_diagnostics', None)
-            try:
-                if not callable(diagnostic_callable):
-                    if _ensure_smtp_adapter_current():
-                        module = sys.modules.get(probe_pop.__module__)
-                        diagnostic_callable = getattr(module, 'probe_pop_diagnostics', None)
-                if not callable(diagnostic_callable):
-                    st.warning('POP3 진단 모듈이 이전 버전입니다. 앱 Manage app에서 Reboot 후 다시 시도하세요.')
-                else:
-                    report = diagnostic_callable(config.pop)
-                    st.session_state['whois_pop_diagnostic_result'] = (account, report)
-            except MailConnectionError as exc:
-                st.session_state['whois_pop_diagnostic_result'] = None
-                st.error(str(exc))
-        diagnostic = st.session_state.get('whois_pop_diagnostic_result')
-        if diagnostic and diagnostic[0] == account:
-            report = diagnostic[1]
-            st.caption('POP3 진단 · UIDL 메일 수: ' + str(report['message_count']) +
-                       ' · LIST 항목 수: ' + str(report['list_count']) +
-                       ' · 본문 RETR: ' + report['retr'] +
-                       ' · 크기 검사: ' + str(report['size']))
-            if report['stage'] == 'empty':
-                st.warning('POP3 서버가 현재 수신 계정의 메일을 0건으로 보고합니다. 웹메일의 실제 수신함과 POP3 제공 범위·설정을 비교하세요.')
-            elif report['retr'] != 'success':
-                st.warning('POP3 본문 조회가 정상 완료되지 않았습니다. UIDL/LIST와 RETR 단계를 구분해 확인하세요. 서버 원문은 출력하지 않습니다.')
+    _live_mailbox(config.pop, account)
+    with st.expander("고급 설정 · POP3/SMTP 진단", expanded=False):
+        if refreshed_smtp_module:
+            st.success("이전 메일 연결 모듈을 감지하여 최신 POP3/SMTP 코드로 다시 로딩했습니다.")
+        adapter_module = sys.modules.get(probe_pop.__module__)
+        running_pop_revision = getattr(adapter_module, "POP_DIAGNOSTIC_REVISION", "이전/미확인")
+        running_fetch_revision = getattr(adapter_module, "POP_FETCH_REVISION", "이전/미확인")
+        st.caption("실행 중 POP3 모듈: " + str(running_pop_revision) +
+                   " · 수신 복구 코드: " + str(running_fetch_revision) +
+                   " · 함수 연결: " +
+                   ("일치" if getattr(adapter_module, "fetch_messages", None) is fetch_messages
+                    else "불일치 · 앱 재시작 필요"))
+        st.caption('메일 동기화 버전: 2026-11-13-RECOVERY · 화면 열림 중 60초마다 자동 갱신')
+        st.caption('화면이 열려 있는 동안 60초마다 새 메일을 확인합니다. 최근 메일은 현재 로그인 세션에서만 보관하며 원본은 서버에 보존합니다.')
+        with st.expander('메일 연결 설정 안내'):
+            st.write('후이즈 웹메일 환경설정에서 POP/SMTP 사용을 활성화하고 상품별 실제 서버·보안 설정을 확인하세요.')
+            st.write('Master 앱 Settings → Secrets에서 [auth] 등 첫 섹션 위에 아래 최상위 항목을 추가하세요. 기존 인증·AI·DB 설정은 보존하세요. 메일 비밀번호를 채팅이나 GitHub에 넣지 마세요.')
+            st.code(SECRETS_TEMPLATE,language='toml')
+            st.caption('표시한 포트는 TLS 설정 예시입니다. 상품별 설정을 확인하세요. SECURITY는 ssl 또는 starttls이며 암호화 없는 접속은 지원하지 않습니다.')
+            st.link_button('후이즈 POP/SMTP 설정 안내','https://m.whois.co.kr/mail_wmail.php?act=process')
+        if config.pop:
+            # Owner-only view, after mail_config authorization. This is the
+            # configured POP3 login, not a claim that RETR succeeded.
+            st.caption('설정된 POP3 수신 계정: ' + config.pop.username)
+            if config.pop.username.strip().casefold() != 'david.ihm@ke-korea.com':
+                st.warning('현재 POP3 설정 계정은 david.ihm@ke-korea.com과 다릅니다. Streamlit Secrets의 WHOIS_POP_USERNAME을 확인하세요.')
             else:
-                st.success('POP3 UIDL/LIST와 최근 메일 1건의 RETR 조회에 성공했습니다. 본문 내용은 출력하거나 저장하지 않았습니다.')
-    if config.pop:
-        if st.button('POP3 교차 진단 (최신·중간·오래된 메일, 읽기 전용)',
-                     key='whois_pop_cross_diagnostics'):
-            adapter = sys.modules.get(probe_pop.__module__)
-            cross_diagnostic = getattr(adapter, 'probe_pop_cross_diagnostics', None)
-            if not callable(cross_diagnostic):
-                _ensure_smtp_adapter_current()
+                st.info('POP3 수신 계정 설정은 david.ihm@ke-korea.com입니다. 실제 본문 조회 가능 여부는 아래 POP3 상세 진단으로 확인하세요.')
+            if st.button('POP3 상세 진단 · 메일 발송/삭제 없음', key='whois_pop_diagnostics'):
+                # Streamlit hot deployment can keep an older adapter in sys.modules.
+                # Never let a missing diagnostic callable crash the owner's mailbox.
+                module = sys.modules.get(probe_pop.__module__)
+                diagnostic_callable = getattr(module, 'probe_pop_diagnostics', None)
+                try:
+                    if not callable(diagnostic_callable):
+                        if _ensure_smtp_adapter_current():
+                            module = sys.modules.get(probe_pop.__module__)
+                            diagnostic_callable = getattr(module, 'probe_pop_diagnostics', None)
+                    if not callable(diagnostic_callable):
+                        st.warning('POP3 진단 모듈이 이전 버전입니다. 앱 Manage app에서 Reboot 후 다시 시도하세요.')
+                    else:
+                        report = diagnostic_callable(config.pop)
+                        st.session_state['whois_pop_diagnostic_result'] = (account, report)
+                except MailConnectionError as exc:
+                    st.session_state['whois_pop_diagnostic_result'] = None
+                    st.error(str(exc))
+            diagnostic = st.session_state.get('whois_pop_diagnostic_result')
+            if diagnostic and diagnostic[0] == account:
+                report = diagnostic[1]
+                st.caption('POP3 진단 · UIDL 메일 수: ' + str(report['message_count']) +
+                           ' · LIST 항목 수: ' + str(report['list_count']) +
+                           ' · 본문 RETR: ' + report['retr'] +
+                           ' · 크기 검사: ' + str(report['size']))
+                if report['stage'] == 'empty':
+                    st.warning('POP3 서버가 현재 수신 계정의 메일을 0건으로 보고합니다. 웹메일의 실제 수신함과 POP3 제공 범위·설정을 비교하세요.')
+                elif report['retr'] != 'success':
+                    st.warning('POP3 본문 조회가 정상 완료되지 않았습니다. UIDL/LIST와 RETR 단계를 구분해 확인하세요. 서버 원문은 출력하지 않습니다.')
+                else:
+                    st.success('POP3 UIDL/LIST와 최근 메일 1건의 RETR 조회에 성공했습니다. 본문 내용은 출력하거나 저장하지 않았습니다.')
+        if config.pop:
+            if st.button('POP3 교차 진단 (최신·중간·오래된 메일, 읽기 전용)',
+                         key='whois_pop_cross_diagnostics'):
                 adapter = sys.modules.get(probe_pop.__module__)
                 cross_diagnostic = getattr(adapter, 'probe_pop_cross_diagnostics', None)
-            if not callable(cross_diagnostic):
-                st.warning('새 POP3 교차 진단 모듈을 아직 불러오지 못했습니다. Manage app에서 Reboot 후 다시 시도하세요.')
-            else:
-                try:
-                    report = cross_diagnostic(config.pop)
-                    st.session_state['whois_pop_cross_result'] = (account, report)
-                except MailConnectionError as exc:
-                    st.error(str(exc))
-        cross = st.session_state.get('whois_pop_cross_result')
-        if cross and cross[0] == account:
-            report = cross[1]
-            st.caption('POP3 교차 진단 · UIDL 총 ' + str(report['message_count']) +
-                       '건 · 최대 3건 검사 · 개인정보/메일 원문 표시 없음')
-            if report['samples']:
-                st.table([{'위치': {'newest':'최신', 'middle':'중간', 'oldest':'오래된'}[row['position']],
-                           '크기': row['size'], 'RETR 본문': row['retr'],
-                           'TOP 헤더': row['top']} for row in report['samples']])
-                st.caption('서버가 TOP 명령을 지원하지 않을 수도 있습니다. TOP 거부만으로 본문 조회 장애를 확정하지 않습니다.')
-            else:
-                st.warning('POP3 UIDL에서 메일이 0건으로 응답했습니다.')
-    bundle=st.session_state.get('whois_mail_bundle')
-    if bundle and bundle[0]!=account:
-        st.session_state.pop('whois_mail_bundle',None);bundle=None
-    a,b=st.columns(2)
-    a.caption('수신 서버: '+('설정 있음 · 연결 검사 가능' if config.pop else '설정 필요'))
-    b.caption('발신 서버: '+('설정 있음 · 인증 검사 가능' if config.smtp else '설정 필요'))
-    if a.button('수신 연결 테스트',key='whois_probe_pop',disabled=config.pop is None):
-        try:
-            count=probe_pop(config.pop)
-            st.success(f'수신 서버 인증 성공 · UIDL {count}건 확인. 메일 본문을 가져오거나 삭제하지 않았습니다.')
-        except MailConnectionError as exc: st.error(str(exc))
-    st.caption('후이즈 공식 SMTP: smtp.whoisworks.com · 587 · STARTTLS. '
-               '실패하면 DNS/TCP/TLS/인증 단계만 표시하고 비밀번호는 표시하지 않습니다.')
-    revision, fingerprint, current = _smtp_runtime_diagnostics()
-    with st.expander("실행 중 SMTP 모듈 진단", expanded=True):
-        st.text("실행 중 SMTP 모듈 버전: " + revision)
-        st.text("실제 사용 함수 SHA256(코드): " + fingerprint)
-        st.text("모듈 함수 연결: " + ("일치" if current else "불일치 (캐시 모듈 점검 필요)"))
-        st.text("SMTP 단계별 진단 코드: " +
-                ("적용됨" if revision == "smtp-starttls-20261112-v3" else "이전/미확인"))
-        if revision != "smtp-starttls-20261112-v3":
-            st.warning("재로딩 후에도 이전 모듈입니다. Streamlit Cloud의 배포 커밋과 Python 프로세스를 점검하세요.")
-        st.caption("진단값은 현재 실행 중인 Python 함수에서 계산합니다. "
-                   "SMTP 비밀번호, 서버 응답 원문, 메일 내용은 표시하지 않습니다.")
-    if b.button('발신 연결 테스트 · 발송 없음',key='whois_probe_smtp',disabled=config.smtp is None):
-        try:
-            probe_smtp(config.smtp)
-            st.success('발신 서버 TLS 인증 성공. 실제 메일은 발송하지 않았습니다.')
-        except MailConnectionError as exc: st.error(str(exc))
-    st.caption("이 메일함에서는 어떤 메일도 발송하지 않습니다. 실제 회신은 발송 대기에서 "
-               "사용자가 최종 내용을 확인하고 '발송' 버튼을 눌렀을 때만 이루어집니다. "
-               "앱을 닫은 상태의 상시 수신에는 별도 메일 작업자가 필요합니다.")
-    _live_mailbox(config.pop, account)
+                if not callable(cross_diagnostic):
+                    _ensure_smtp_adapter_current()
+                    adapter = sys.modules.get(probe_pop.__module__)
+                    cross_diagnostic = getattr(adapter, 'probe_pop_cross_diagnostics', None)
+                if not callable(cross_diagnostic):
+                    st.warning('새 POP3 교차 진단 모듈을 아직 불러오지 못했습니다. Manage app에서 Reboot 후 다시 시도하세요.')
+                else:
+                    try:
+                        report = cross_diagnostic(config.pop)
+                        st.session_state['whois_pop_cross_result'] = (account, report)
+                    except MailConnectionError as exc:
+                        st.error(str(exc))
+            cross = st.session_state.get('whois_pop_cross_result')
+            if cross and cross[0] == account:
+                report = cross[1]
+                st.caption('POP3 교차 진단 · UIDL 총 ' + str(report['message_count']) +
+                           '건 · 최대 3건 검사 · 개인정보/메일 원문 표시 없음')
+                if report['samples']:
+                    st.table([{'위치': {'newest':'최신', 'middle':'중간', 'oldest':'오래된'}[row['position']],
+                               '크기': row['size'], 'RETR 본문': row['retr'],
+                               'TOP 헤더': row['top']} for row in report['samples']])
+                    st.caption('서버가 TOP 명령을 지원하지 않을 수도 있습니다. TOP 거부만으로 본문 조회 장애를 확정하지 않습니다.')
+                else:
+                    st.warning('POP3 UIDL에서 메일이 0건으로 응답했습니다.')
+        bundle=st.session_state.get('whois_mail_bundle')
+        if bundle and bundle[0]!=account:
+            st.session_state.pop('whois_mail_bundle',None);bundle=None
+        a,b=st.columns(2)
+        a.caption('수신 서버: '+('설정 있음 · 연결 검사 가능' if config.pop else '설정 필요'))
+        b.caption('발신 서버: '+('설정 있음 · 인증 검사 가능' if config.smtp else '설정 필요'))
+        if a.button('수신 연결 테스트',key='whois_probe_pop',disabled=config.pop is None):
+            try:
+                count=probe_pop(config.pop)
+                st.success(f'수신 서버 인증 성공 · UIDL {count}건 확인. 메일 본문을 가져오거나 삭제하지 않았습니다.')
+            except MailConnectionError as exc: st.error(str(exc))
+        st.caption('후이즈 공식 SMTP: smtp.whoisworks.com · 587 · STARTTLS. '
+                   '실패하면 DNS/TCP/TLS/인증 단계만 표시하고 비밀번호는 표시하지 않습니다.')
+        revision, fingerprint, current = _smtp_runtime_diagnostics()
+        with st.expander("실행 중 SMTP 모듈 진단", expanded=True):
+            st.text("실행 중 SMTP 모듈 버전: " + revision)
+            st.text("실제 사용 함수 SHA256(코드): " + fingerprint)
+            st.text("모듈 함수 연결: " + ("일치" if current else "불일치 (캐시 모듈 점검 필요)"))
+            st.text("SMTP 단계별 진단 코드: " +
+                    ("적용됨" if revision == "smtp-starttls-20261112-v3" else "이전/미확인"))
+            if revision != "smtp-starttls-20261112-v3":
+                st.warning("재로딩 후에도 이전 모듈입니다. Streamlit Cloud의 배포 커밋과 Python 프로세스를 점검하세요.")
+            st.caption("진단값은 현재 실행 중인 Python 함수에서 계산합니다. "
+                       "SMTP 비밀번호, 서버 응답 원문, 메일 내용은 표시하지 않습니다.")
+        if b.button('발신 연결 테스트 · 발송 없음',key='whois_probe_smtp',disabled=config.smtp is None):
+            try:
+                probe_smtp(config.smtp)
+                st.success('발신 서버 TLS 인증 성공. 실제 메일은 발송하지 않았습니다.')
+            except MailConnectionError as exc: st.error(str(exc))
+        st.caption("이 메일함에서는 어떤 메일도 발송하지 않습니다. 실제 회신은 발송 대기에서 "
+                   "사용자가 최종 내용을 확인하고 '발송' 버튼을 눌렀을 때만 이루어집니다. "
+                   "앱을 닫은 상태의 상시 수신에는 별도 메일 작업자가 필요합니다.")
+
 
 
 def _merge_messages(previous, incoming, max_count=30):
