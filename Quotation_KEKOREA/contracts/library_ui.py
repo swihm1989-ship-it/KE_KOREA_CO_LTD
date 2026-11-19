@@ -95,6 +95,28 @@ def render_library_admin(repo, env):
                 f"공통 RAG 벡터 · 승인 문서 {stats['documents']}개 · "
                 f"임베딩 {stats['embedded']}/{stats['chunks']}개 · 미적용 {stats['missing']}개"
             )
+            # Once per authenticated admin session, repair approved missing vectors.
+            # Never run on public pages or on each Streamlit rerender: embedding
+            # requests incur cost and failures must not trigger retry loops.
+            recovery_key = '_library_embedding_auto_recovery_attempted'
+            if stats['missing'] and not st.session_state.get(recovery_key):
+                st.session_state[recovery_key] = True
+                if not env.get('OPENAI_API_KEY'):
+                    st.warning('자동 임베딩 복구 대기: OPENAI_API_KEY 서버 설정이 없습니다.')
+                else:
+                    try:
+                        with st.spinner('승인된 참고 조항의 누락 임베딩을 자동 복구합니다...'):
+                            recovery = backfill_library_embeddings(repo, env=env)
+                        st.info(
+                            f"자동 임베딩 복구: {recovery['chunks_updated']}개 생성 · "
+                            f"남은 미적용 {recovery['remaining']}개"
+                        )
+                        if recovery['failed_documents']:
+                            st.warning('동시 수정된 문서는 다음 관리자 세션에서 재시도합니다.')
+                    except (ValueError, RuntimeError, ContractRepositoryError) as exc:
+                        st.warning('자동 임베딩 복구 실패 (이번 세션 재시도 중단): ' + str(exc)[:180])
+            elif not stats['missing']:
+                st.session_state.pop(recovery_key, None)
             if stats['missing'] and st.button(
                 '승인 참고 조항의 누락 임베딩 생성',
                 key='library_embedding_backfill',
