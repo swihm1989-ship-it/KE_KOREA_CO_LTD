@@ -48,12 +48,41 @@ def configure_runtime(env: dict[str, str], root: Path):
     return True
 
 
+def probe_smtp_on_startup(env: dict[str, str]) -> None:
+    """One-shot, no-send SMTP handshake/auth probe; log only safe status."""
+    import logging
+    from Quotation_KEKOREA.orchestration.adapters.whois_mail import (
+        mail_config, probe_smtp, MailConnectionError,
+    )
+    logger = logging.getLogger("master.smtp.startup")
+    try:
+        owner = str(env.get("WHOIS_SMTP_USERNAME", "")).strip()
+        config = mail_config(env, owner)
+        if config.smtp is None:
+            logger.warning("smtp_startup_probe result=not_configured")
+            return
+        endpoint = config.smtp
+        allow_legacy = (
+            endpoint.host.lower() == "smtp.whoisworks.com"
+            and endpoint.port == 587 and endpoint.security == "starttls"
+        )
+        probe_smtp(endpoint, allow_legacy_dh=allow_legacy)
+        logger.warning("smtp_startup_probe result=success port=%d security=%s",
+                       endpoint.port, endpoint.security)
+    except MailConnectionError as exc:
+        # Only the adapter's sanitized error is safe to emit.
+        logger.warning("smtp_startup_probe result=failed reason=%s", str(exc))
+    except (ValueError, OSError, RuntimeError, KeyError, TypeError):
+        logger.warning("smtp_startup_probe result=configuration_or_network_error")
+
+
 def main():
     root = Path.cwd()
     configured = configure_runtime(dict(os.environ), root)
     if not configured:
         # No secret content emitted. UI login gate remains locked.
         print("OIDC configuration unavailable: private workspace remains locked.")
+    probe_smtp_on_startup(dict(os.environ))
     port = os.environ.get("PORT", "8501")
     if not port.isdigit():
         raise ValueError("Invalid server port")
