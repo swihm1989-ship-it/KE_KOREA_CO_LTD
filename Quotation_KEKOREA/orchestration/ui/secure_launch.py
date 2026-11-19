@@ -62,7 +62,8 @@ def main():
         [os.sys.executable, "-m", "streamlit", "run",
          "Quotation_KEKOREA/orchestration/ui/streamlit_page.py",
          "--server.address", "0.0.0.0", "--server.port", port,
-         "--server.headless", "true", "--browser.gatherUsageStats", "false"],
+         "--server.headless", "true", "--browser.gatherUsageStats", "false",
+         "--client.toolbarMode", "minimal", "--ui.hideTopBar", "true"],
     )
 
 
