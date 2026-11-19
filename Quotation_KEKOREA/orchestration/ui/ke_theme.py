@@ -28,52 +28,11 @@ STYLE = """
   div.stButton > button[kind="primary"]:hover { background:#065f9f; border-color:#065f9f; }
   [data-testid="stMetric"] { background:#fff; border:1px solid #dbe8f2; border-radius:11px; padding:14px; }
 
-  /* Render MASTER only: eliminate Streamlit's white toolbar and overflow menu.
-     Preserve the sidebar toggle for mobile navigation. */
-  header[data-testid="stHeader"],
-  [data-testid="stHeader"],
-  .stAppHeader {
-    background: transparent !important;
-    background-color: transparent !important;
-    box-shadow: none !important;
-    border: 0 !important;
-    height: 3rem !important;
-    min-height: 3rem !important;
-    pointer-events: auto !important;
-  }
-  [data-testid="stToolbar"],
-  [data-testid="stMainMenu"],
-  #MainMenu,
-  [data-testid="stDecoration"],
-  footer,
-  [data-testid="stStatusWidget"] {
-    display: none !important;
-  }
-  /* Sidebar controls live inside the header in Streamlit 1.67.
-     Restore their click target even while hiding the toolbar. */
-  [data-testid="stSidebarCollapsedControl"],
-  [data-testid="stSidebarCollapseButton"],
-  [data-testid="stSidebarNav"] {
-    visibility: visible !important;
-    pointer-events: auto !important;
-  }
-  header[data-testid="stHeader"] button,
-  [data-testid="stHeader"] button {
-    pointer-events: auto !important;
-  }
-  /* Keep menu navigation accessible and prevent headings from being clipped. */
+  /* Use Streamlit's native header and sidebar controls. Custom toolbar
+     suppression previously hid mobile navigation on some versions. */
   [data-testid="stMainBlockContainer"],
   .main .block-container,
-  .block-container {
-    padding-top: 3.8rem !important;
-  }
-  @media (max-width: 640px) {
-    [data-testid="stMainBlockContainer"],
-    .main .block-container,
-    .block-container {
-      padding-top: 3.8rem !important;
-    }
-  }
+  .block-container { padding-top: 3rem !important; }
 
   /* MASTER GRAPH page-width only; brand styles above match the original. */
   .block-container { max-width:1460px; }
