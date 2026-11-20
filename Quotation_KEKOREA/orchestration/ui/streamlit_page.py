@@ -47,9 +47,22 @@ lab_scenarios = {
         "Product: Solar Cell M10 PERC\nQuantity: 1,000 pcs\nUnit Price: USD 0.20/pc\n"
         "Deposit: 30%\nBalance: 60%",
     ),
-    "복수 품목 · 수동 확인 필요": (
+    "복수 품목 · 개별 금액 및 합계": (
+        "Please prepare PI and PO",
+        "Product: M10 PERC Solar Cell\nQuantity: 500,000 pcs\nUnit Price: USD 0.18/pc\n\n"
+        "Product: M6 Solar Cell\nQuantity: 300,000 pcs\nUnit Price: USD 0.12/pc\n"
+        "Payment: 30% deposit and 70% balance.\nDelivery: CIF Shanghai",
+    ),
+    "복수 품목 · 단가 누락 경고": (
         "Please prepare PO",
-        "Product: Solar Cell M10\nProduct: Wafer M10\nQuantity: 1,000 pcs\nUnit Price: USD 0.20/pc",
+        "Product: Solar Cell M10\nQuantity: 1,000 pcs\nUnit Price: USD 0.20/pc\n"
+        "Product: Wafer M10\nQuantity: 2,000 pcs",
+    ),
+    "복수 품목 · 합계 오류 경고": (
+        "Please prepare PI",
+        "Product: M10 PERC Solar Cell\nQuantity: 500,000 pcs\nUnit Price: USD 0.18/pc\n"
+        "Product: M6 Solar Cell\nQuantity: 300,000 pcs\nUnit Price: USD 0.12/pc\n"
+        "Total: USD 125,000",
     ),
 }
 scenario = st.selectbox("테스트 시나리오", list(lab_scenarios))
@@ -67,6 +80,29 @@ if run_clicked:
     result = analyze(subject, body)
     st.metric("분석 시간 (LLM 미사용)", str(result["total_ms"]) + " ms")
     st.caption("이 시간은 규칙 기반 프로토타입의 실행 시간이며, LLM 성능 수치는 아닙니다.")
+    from Quotation_KEKOREA.orchestration.workflows.trade_terms_staging import extract_trade
+    trade = extract_trade(subject, body)
+    if trade["items"]:
+        st.markdown("#### 품목별 거래조건")
+        rows = []
+        for item in trade["items"]:
+            rows.append({
+                "No.": item["number"],
+                "품목": item["product"],
+                "수량": (item["quantity"] or "미확정")
+                       + (" " + item["quantity_unit"] if item["quantity_unit"] else ""),
+                "단가": (item["currency"] or "?") + " " + (item["unit_price"] or "미확정"),
+                "품목금액": (
+                    (item["currency"] or "?") + " " + item["line_total"]
+                    if item["line_total"] else "검토 필요"
+                ),
+            })
+        st.dataframe(rows, use_container_width=True, hide_index=True)
+        if trade["calculated_total"]:
+            st.success("계산 합계: " + (trade["currency"] or "통화 미확정")
+                       + " " + trade["calculated_total"])
+        else:
+            st.warning("계산 합계 미확정: 누락·충돌한 품목 정보를 확인해야 합니다.")
     for item in result["results"]:
         with st.container(border=True):
             st.markdown("**" + item.name + "** · " + item.status + " · " + str(item.elapsed_ms) + " ms")
