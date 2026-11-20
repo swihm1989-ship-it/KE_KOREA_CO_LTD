@@ -63,7 +63,7 @@ if st.session_state.pop("master_reply_navigation_pending", False):
         st.session_state["master_email_outbox_selected"] = st.session_state["master_reply_selected"]
 # Operational sidebar only. Legacy unified-review and mock document-review
 # handlers below remain in source for developer regression tests.
-_master_menu = ["메일함", "AI 업무 요청", "발송 대기", "저장된 계약서", "시장 뉴스"]
+_master_menu = ["메일함", "AI 업무 요청", "멀티에이전트 실험실", "발송 대기", "저장된 계약서", "시장 뉴스"]
 if "master_page" not in st.session_state:
     st.session_state["master_page"] = "메일함"
 if st.session_state.get("master_page") not in (None, *_master_menu):
@@ -125,6 +125,21 @@ elif page == "업무 대시보드":
             st.info("아직 샘플 작업이 없습니다. 위 메일의 업무 시작 버튼을 눌러주세요.")
         for run in runs:
             st.write(f"**{run.subject}** · {run.status} · {', '.join(t.kind for t in run.tasks) or '분류 필요'}")
+
+elif page == "멀티에이전트 실험실":
+    st.subheader("멀티에이전트 실험실 · STAGING ONLY")
+    st.info("독립된 테스트용 분석입니다. 실제 메일 발송, DB 저장, 계약서 생성 및 외부 AI API 호출은 하지 않습니다.")
+    subject = st.text_input("가상 메일 제목", value="Please prepare PI")
+    body = st.text_area("가상 거래조건", value="Please prepare PI for 1000 pcs. Deposit 30%, balance 70%.", height=150)
+    if st.button("3개 전문 에이전트 병렬 분석", type="primary"):
+        from Quotation_KEKOREA.orchestration.workflows.multiagent_staging import analyze
+        result = analyze(subject, body)
+        st.caption("병렬 분석 완료 · " + str(result["total_ms"]) + " ms (규칙 기반 초기 프로토타입)")
+        for item in result["results"]:
+            with st.container(border=True):
+                st.markdown("**" + item.name + "** · " + item.status + " · " + str(item.elapsed_ms) + " ms")
+                for detail in item.details:
+                    st.write(detail)
 
 elif page == "AI 업무 요청":
     # Streamlit can reuse a previous ai_intake_page module while rerunning this
