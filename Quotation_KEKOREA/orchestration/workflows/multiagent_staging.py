@@ -12,6 +12,7 @@ import re
 import time
 
 from Quotation_KEKOREA.orchestration.workflows.mail_intake import prepare_mail_request
+from Quotation_KEKOREA.orchestration.workflows.trade_terms_staging import describe_trade, crosscheck
 
 
 @dataclass(frozen=True)
@@ -85,14 +86,24 @@ def integrity_agent(subject, body):
 
 
 def analyze(subject: str, body: str) -> dict:
-    """Parallel independent analysis; deterministic order and no side effects."""
+    """Four parallel specialists and one downstream deterministic cross-check.
+
+    No side effects, account access, model calls, database writes or sending.
+    """
     tasks = (("문서 라우팅", classify_agent),
              ("지급조건 검증", payment_agent),
+             ("상품·가격 추출", describe_trade),
              ("입력 무결성", integrity_agent))
     start = time.perf_counter()
-    with ThreadPoolExecutor(max_workers=3) as pool:
+    with ThreadPoolExecutor(max_workers=4) as pool:
         futures = [pool.submit(_run, name, fn, subject, body) for name, fn in tasks]
         results = [f.result() for f in futures]
+    payment_details = results[1].details
+    results.append(_run("교차 검증",
+                        lambda s, b: crosscheck(s, b, payment_details),
+                        subject, body))
     return {"results": results,
             "total_ms": round((time.perf_counter() - start) * 1000),
-            "mode": "staging_read_only"}
+            "mode": "staging_read_only_deterministic",
+            "parallel_agents": 4,
+            "verification_agents": 1}
