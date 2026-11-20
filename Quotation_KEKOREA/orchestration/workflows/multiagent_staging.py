@@ -39,24 +39,37 @@ def classify_agent(subject, body):
 
 
 def payment_agent(subject, body):
+    """Recognize local percentage-label pairs in either order.
+
+    Never search across another percentage or payment label: ambiguous cases
+    are explicitly flagged instead of silently assigning the wrong number.
+    """
     text = subject + "\n" + body
-    out = []
-    for label, pattern in (
-        ("선금/계약금", r"(?:deposit|down\s*payment|선금|계약금)[^\n.;]{0,55}?\b(\d{1,3}(?:\.\d+)?)\s*%"),
-        ("잔금", r"(?:balance|remaining\s*payment|잔금)[^\n.;]{0,55}?\b(\d{1,3}(?:\.\d+)?)\s*%"),
-        ("할인", r"(?:discount|할인율|할인)[^\n.;]{0,55}?\b(\d{1,3}(?:\.\d+)?)\s*%"),
-    ):
-        for match in re.finditer(pattern, text, re.I):
-            val = Decimal(match.group(1))
-            if val > 100:
-                out.append(label + ": 비정상 비율 - 확인 필요")
-            else:
-                out.append(label + ": " + str(val) + "%")
-    if not out:
-        out.append("지급·할인 비율: 명시적 패턴 없음")
-    if any(x.startswith("잔금:") for x in out) and not any(x.startswith("할인:") for x in out):
-        out.append("검증: 잔금 비율을 할인율로 사용하지 않음")
-    return out
+    labels = (
+        ("선금/계약금", r"(?:deposit|down\\s*payment|선금|계약금)"),
+        ("잔금", r"(?:balance|remaining\\s*payment|잔금)"),
+        ("할인", r"(?:discount|할인율|할인)"),
+    )
+    pct = r"(\\d{1,3}(?:\\.\\d+)?)\\s*%"
+    found = []
+    for name, label in labels:
+        # Label first: 'deposit: 30%' but never skip over another label.
+        after = re.compile(r"(?i)(?:" + label + r")\\s*(?:is|of|:|=|-)?\\s*" + pct)
+        # Percentage first: '30% deposit', '70% balance'.
+        before = re.compile(r"(?i)" + pct + r"\\s*(?:as|for|of)?\\s*(?:" + label + r")\\b")
+        values = [m.group(1) for m in after.finditer(text)]
+        values += [m.group(1) for m in before.finditer(text)]
+        if len(set(values)) > 1:
+            found.append(name + ": 상충하는 비율 - 확인 필요")
+        elif values:
+            val = Decimal(values[0])
+            found.append(name + ": " + str(val) + "%" if val <= 100
+                         else name + ": 비정상 비율 - 확인 필요")
+    if not found:
+        found.append("지급·할인 비율: 명시적 패턴 없음 - 확인 필요")
+    if any(x.startswith("잔금:") for x in found) and not any(x.startswith("할인:") for x in found):
+        found.append("검증: 잔금 비율을 할인율로 사용하지 않음")
+    return found
 
 
 def integrity_agent(subject, body):
