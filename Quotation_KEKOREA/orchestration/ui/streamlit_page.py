@@ -23,6 +23,25 @@ from Quotation_KEKOREA.orchestration.workflows.mock_workflow import (
 
 st.set_page_config(page_title="KE KOREA | MASTER", page_icon="📧", layout="wide", initial_sidebar_state="expanded")
 
+# STAGING BRANCH ONLY: public, synthetic-data laboratory with no account,
+# production DB, mailbox, SMTP, document generation or external model access.
+# This short-circuit is intentionally BEFORE the normal authentication gate.
+st.title("KE KOREA · 멀티에이전트 테스트")
+st.caption("공개 테스트 환경 · 입력한 내용은 서버에 저장하거나 외부 AI로 전송하지 않습니다.")
+st.warning("공개 페이지입니다. 실제 고객정보, 이메일, 계약서, 비밀번호를 입력하지 마세요.")
+subject = st.text_input("가상 메일 제목", value="Please prepare PI")
+body = st.text_area("가상 거래조건", value="Please prepare PI for 1000 pcs. Deposit 30%, balance 70%.", height=160)
+if st.button("3개 전문 에이전트 병렬 분석", type="primary"):
+    from Quotation_KEKOREA.orchestration.workflows.multiagent_staging import analyze
+    result = analyze(subject, body)
+    st.caption("병렬 분석 · " + str(result["total_ms"]) + " ms · 규칙 기반 초기 버전")
+    for item in result["results"]:
+        with st.container(border=True):
+            st.markdown("**" + item.name + "** · " + item.status + " · " + str(item.elapsed_ms) + " ms")
+            for detail in item.details:
+                st.write(detail)
+st.stop()
+
 # FAIL-CLOSED: protects every menu before session state, sidebar, or database access.
 from Quotation_KEKOREA.orchestration.security.auth_gate import require_authentication
 _authenticated_principal = require_authentication(st)
