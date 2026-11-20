@@ -26,7 +26,13 @@ class AgentResult:
 def _run(name, fn, subject, body):
     start = time.perf_counter()
     try:
-        return AgentResult(name, "ok", tuple(fn(subject, body)),
+        details = tuple(fn(subject, body))
+        markers = ("확인 필요", "검토 필요", "상충하는", "불일치",
+                   "비정상", "초과", "미확정", "합계가 100%가 아님")
+        status = "needs_review" if any(
+            marker in detail for detail in details for marker in markers
+        ) else "ok"
+        return AgentResult(name, status, details,
                            round((time.perf_counter() - start) * 1000))
     except (ValueError, TypeError, RuntimeError) as exc:
         return AgentResult(name, "needs_review", (type(exc).__name__,),
@@ -40,24 +46,30 @@ def classify_agent(subject, body):
 
 
 def payment_agent(subject, body):
-    """Recognize local percentage-label pairs in either order.
+    """Extract percentages adjacent to each payment label without crossing lines.
 
-    Never search across another percentage or payment label: ambiguous cases
-    are explicitly flagged instead of silently assigning the wrong number.
+    Handles both "Deposit: 40%" and "40% deposit" and never attaches the
+    40% from "Deposit: 40%\nBalance: 60%" to the balance label.
+    Same-line "Deposit: 40% Balance: 60%" is also disambiguated.
     """
-    text = subject + "\n" + body
+    text = str(subject or "") + "\n" + str(body or "")
     labels = (
-        ("선금/계약금", r"(?:deposit|down\s*payment|선금|계약금)"),
-        ("잔금", r"(?:balance|remaining\s*payment|잔금)"),
+        ("선금/계약금", r"(?:deposit|down[ \t]+payment|선금|계약금)"),
+        ("잔금", r"(?:balance|remaining[ \t]+payment|잔금)"),
         ("할인", r"(?:discount|할인율|할인)"),
     )
-    pct = r"(\d{1,3}(?:\.\d+)?)\s*%"
+    pct = r"(\d{1,3}(?:\.\d+)?)[ \t]*%"
     found = []
     for name, label in labels:
-        # Label first: 'deposit: 30%' but never skip over another label.
-        after = re.compile(r"(?i)(?:" + label + r")\s*(?:is|of|:|=|-)?\s*" + pct)
-        # Percentage first: '30% deposit', '70% balance'.
-        before = re.compile(r"(?i)" + pct + r"\s*(?:as|for|of)?\s*(?:" + label + r")\b")
+        # Horizontal whitespace only; do not cross newline or a new field.
+        after = re.compile(
+            r"(?i)(?:" + label + r")[ \t]*(?:is|of|:|=|-)?[ \t]*" + pct
+        )
+        # Never interpret "40% Balance: 60%" as a 40% balance.
+        before = re.compile(
+            r"(?i)" + pct + r"[ \t]*(?:(?:as|for|of)[ \t]+)?(?:"
+            + label + r")\b(?![ \t]*[:=])"
+        )
         values = [m.group(1) for m in after.finditer(text)]
         values += [m.group(1) for m in before.finditer(text)]
         if len(set(values)) > 1:
@@ -143,9 +155,38 @@ def smoke_tests() -> tuple[tuple[str, bool], ...]:
     multi_flagged = multi["calculated_total"] is None and any(
         "복수 품목" in msg for msg in multi["warnings"])
 
+    # Regression: original customer-like email previously treated 40% deposit
+    # as a second conflicting balance percentage across a newline.
+    first_mail = ("Request for PI and PO – M10 Solar Cells",
+                  "Dear Sales Team,\nPlease prepare a PI and PO.\n"
+                  "Product: M10 P-Type PERC Solar Cell\nQuantity: 250,000 pcs\n"
+                  "Unit Price: USD 0.185/pc\nTotal: USD 46,250\n"
+                  "Payment Terms:\nDeposit: 40%\nBalance: 60%\n"
+                  "Delivery: CIF Shanghai\nLead Time: 15 days after deposit.")
+    first_result = analyze(*first_mail)
+    first_payment = first_result["results"][1]
+    first_correct = (
+        first_payment.status == "ok"
+        and "선금/계약금: 40%" in first_payment.details
+        and "잔금: 60%" in first_payment.details
+        and not any("상충" in d for d in first_payment.details)
+        and extract_trade(*first_mail)["calculated_total"] == "46,250"
+    )
+    inline = payment_agent("", "Deposit: 40% Balance: 60%")
+    inline_correct = ("선금/계약금: 40%" in inline
+                      and "잔금: 60%" in inline
+                      and not any("상충" in d for d in inline))
+    before = payment_agent("", "40% deposit and 60% balance")
+    before_correct = ("선금/계약금: 40%" in before
+                      and "잔금: 60%" in before
+                      and not any("상충" in d for d in before))
+
     return (
         ("선금 30% / 잔금 70% · PI/PO 분류 · 총액 계산", accurate),
         ("명시된 총액과 계산 총액 불일치 탐지", mismatch_found),
         ("선금과 잔금의 합계 100% 미달 탐지", bad_payment_found),
         ("복수 품목의 잘못된 총액 계산 방지", multi_flagged),
+        ("실제 메일 형식 선금 40% / 잔금 60% / 총액 정확성", first_correct),
+        ("동일 행 Deposit: 40% Balance: 60% 구별", inline_correct),
+        ("역순 표기 40% deposit and 60% balance 인식", before_correct),
     )
