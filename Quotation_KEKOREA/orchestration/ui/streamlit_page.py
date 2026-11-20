@@ -27,19 +27,58 @@ st.set_page_config(page_title="KE KOREA | MASTER", page_icon="📧", layout="wid
 # production DB, mailbox, SMTP, document generation or external model access.
 # This short-circuit is intentionally BEFORE the normal authentication gate.
 st.title("KE KOREA · 멀티에이전트 테스트")
-st.caption("공개 테스트 환경 · 입력한 내용은 서버에 저장하거나 외부 AI로 전송하지 않습니다.")
+st.caption("공개 테스트 환경 · 4개 분석기 병렬 실행 + 독립 교차 검증 (규칙 기반)")
 st.warning("공개 페이지입니다. 실제 고객정보, 이메일, 계약서, 비밀번호를 입력하지 마세요.")
-subject = st.text_input("가상 메일 제목", value="Please prepare PI")
-body = st.text_area("가상 거래조건", value="Please prepare PI for 1000 pcs. Deposit 30%, balance 70%.", height=160)
-if st.button("3개 전문 에이전트 병렬 분석", type="primary"):
+st.info("LLM 연결 전 구조·오류 탐지 검증 단계입니다. 입력 내용은 저장·발송·외부 API 전송하지 않습니다.")
+
+lab_scenarios = {
+    "정상 주문 · PI / PO": (
+        "Please prepare PI and PO",
+        "Product: Solar Cell M10 PERC\nQuantity: 100,000 pcs\nUnit Price: USD 0.20/pc\n"
+        "Total: USD 20,000\nPayment: 30% deposit and 70% balance.\nDelivery: CIF Shanghai",
+    ),
+    "총액 불일치 · 오류 탐지": (
+        "Please prepare PI",
+        "Product: Solar Cell M10 PERC\nQuantity: 100,000 pcs\nUnit Price: USD 0.20/pc\n"
+        "Total: USD 22,000\nPayment: 30% deposit and 70% balance.",
+    ),
+    "지급조건 합계 오류": (
+        "Please prepare PI",
+        "Product: Solar Cell M10 PERC\nQuantity: 1,000 pcs\nUnit Price: USD 0.20/pc\n"
+        "Deposit: 30%\nBalance: 60%",
+    ),
+    "복수 품목 · 수동 확인 필요": (
+        "Please prepare PO",
+        "Product: Solar Cell M10\nProduct: Wafer M10\nQuantity: 1,000 pcs\nUnit Price: USD 0.20/pc",
+    ),
+}
+scenario = st.selectbox("테스트 시나리오", list(lab_scenarios))
+if st.button("선택한 예시 불러오기"):
+    st.session_state["staging_lab_subject"], st.session_state["staging_lab_body"] = lab_scenarios[scenario]
+st.session_state.setdefault("staging_lab_subject", lab_scenarios["정상 주문 · PI / PO"][0])
+st.session_state.setdefault("staging_lab_body", lab_scenarios["정상 주문 · PI / PO"][1])
+subject = st.text_input("가상 메일 제목", key="staging_lab_subject")
+body = st.text_area("가상 거래조건", key="staging_lab_body", height=210, max_chars=12000)
+col_test, col_regression = st.columns([3, 2])
+run_clicked = col_test.button("4개 분석기 병렬 실행 + 교차 검증", type="primary")
+smoke_clicked = col_regression.button("기본 회귀 테스트 4개 실행")
+if run_clicked:
     from Quotation_KEKOREA.orchestration.workflows.multiagent_staging import analyze
     result = analyze(subject, body)
-    st.caption("병렬 분석 · " + str(result["total_ms"]) + " ms · 규칙 기반 초기 버전")
+    st.metric("분석 시간 (LLM 미사용)", str(result["total_ms"]) + " ms")
+    st.caption("이 시간은 규칙 기반 프로토타입의 실행 시간이며, LLM 성능 수치는 아닙니다.")
     for item in result["results"]:
         with st.container(border=True):
             st.markdown("**" + item.name + "** · " + item.status + " · " + str(item.elapsed_ms) + " ms")
             for detail in item.details:
                 st.write(detail)
+if smoke_clicked:
+    from Quotation_KEKOREA.orchestration.workflows.multiagent_staging import smoke_tests
+    tests = smoke_tests()
+    passed = sum(bool(ok) for _, ok in tests)
+    st.write("회귀 테스트: **" + str(passed) + " / " + str(len(tests)) + "** 통과")
+    for name, ok in tests:
+        (st.success if ok else st.error)(("통과 · " if ok else "실패 · ") + name)
 st.stop()
 
 # FAIL-CLOSED: protects every menu before session state, sidebar, or database access.
