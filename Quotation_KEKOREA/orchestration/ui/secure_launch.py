@@ -76,13 +76,30 @@ def probe_smtp_on_startup(env: dict[str, str]) -> None:
         logger.warning("smtp_startup_probe result=configuration_or_network_error")
 
 
+def verify_public_staging_lab() -> None:
+    """Run synthetic regression tests on the deployed Render instance.
+
+    A failed test prevents the new staging deployment from becoming live,
+    without affecting the separate production app. No real mail or API use.
+    """
+    from Quotation_KEKOREA.orchestration.workflows.multiagent_staging import smoke_tests
+
+    results = smoke_tests()
+    passed = sum(1 for _, ok in results if ok)
+    print(f"multiagent_staging_smoke passed={passed} total={len(results)}", flush=True)
+    if passed != len(results):
+        failed_names = [label for label, ok in results if not ok]
+        raise RuntimeError("Staging regressions failed: " + ", ".join(failed_names))
+
+
 def main():
     root = Path.cwd()
     configured = configure_runtime(dict(os.environ), root)
     if not configured:
         # No secret content emitted. UI login gate remains locked.
         print("OIDC configuration unavailable: private workspace remains locked.")
-    probe_smtp_on_startup(dict(os.environ))
+    verify_public_staging_lab()
+    # The public lab has no SMTP credentials or mail access; skip SMTP probe.
     port = os.environ.get("PORT", "8501")
     if not port.isdigit():
         raise ValueError("Invalid server port")
