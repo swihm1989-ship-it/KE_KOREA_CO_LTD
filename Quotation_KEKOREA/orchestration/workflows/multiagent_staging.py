@@ -107,3 +107,45 @@ def analyze(subject: str, body: str) -> dict:
             "mode": "staging_read_only_deterministic",
             "parallel_agents": 4,
             "verification_agents": 1}
+
+
+def smoke_tests() -> tuple[tuple[str, bool], ...]:
+    """In-process synthetic regression tests: no external services or fixtures."""
+    from Quotation_KEKOREA.orchestration.workflows.trade_terms_staging import extract_trade
+
+    good = ("Please prepare PI and PO",
+            "Product: Solar Cell M10 PERC\nQuantity: 100,000 pcs\n"
+            "Unit Price: USD 0.20/pc\nTotal: USD 20,000\n"
+            "Payment: 30% deposit and 70% balance.\nDelivery: CIF Shanghai")
+    first = analyze(*good)
+    pay = first["results"][1].details
+    trade = extract_trade(*good)
+    accurate = (first["results"][0].status == "ok"
+                and "선금/계약금: 30%" in pay and "잔금: 70%" in pay
+                and trade["calculated_total"] == "20,000"
+                and trade["currency"] == "USD"
+                and "CIF" in (trade["delivery"] or ""))
+
+    mismatch = extract_trade(
+        "Please prepare PI",
+        "Product: Solar Cell\nQuantity: 100,000 pcs\n"
+        "Unit Price: USD 0.20/pc\nTotal: USD 22,000")
+    mismatch_found = any("총액 불일치" in msg for msg in mismatch["warnings"])
+
+    bad_payment = analyze(
+        "Please prepare PI", "Deposit: 30%\nBalance: 60%")
+    bad_payment_found = any(
+        "합계가 100%" in msg for msg in bad_payment["results"][-1].details)
+
+    multi = extract_trade(
+        "Please prepare PI",
+        "Product: Cell A\nProduct: Cell B\nQuantity: 200 pcs\nUnit Price: USD 0.2")
+    multi_flagged = multi["calculated_total"] is None and any(
+        "복수 품목" in msg for msg in multi["warnings"])
+
+    return (
+        ("선금 30% / 잔금 70% · PI/PO 분류 · 총액 계산", accurate),
+        ("명시된 총액과 계산 총액 불일치 탐지", mismatch_found),
+        ("선금과 잔금의 합계 100% 미달 탐지", bad_payment_found),
+        ("복수 품목의 잘못된 총액 계산 방지", multi_flagged),
+    )
