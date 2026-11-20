@@ -61,7 +61,7 @@ subject = st.text_input("가상 메일 제목", key="staging_lab_subject")
 body = st.text_area("가상 거래조건", key="staging_lab_body", height=210, max_chars=12000)
 col_test, col_regression = st.columns([3, 2])
 run_clicked = col_test.button("4개 분석기 병렬 실행 + 교차 검증", type="primary")
-smoke_clicked = col_regression.button("기본 회귀 테스트 4개 실행")
+smoke_clicked = col_regression.button("자동 회귀 테스트 실행")
 if run_clicked:
     from Quotation_KEKOREA.orchestration.workflows.multiagent_staging import analyze
     result = analyze(subject, body)
