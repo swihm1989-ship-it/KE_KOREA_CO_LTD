@@ -46,17 +46,17 @@ def payment_agent(subject, body):
     """
     text = subject + "\n" + body
     labels = (
-        ("선금/계약금", r"(?:deposit|down\\s*payment|선금|계약금)"),
-        ("잔금", r"(?:balance|remaining\\s*payment|잔금)"),
+        ("선금/계약금", r"(?:deposit|down\s*payment|선금|계약금)"),
+        ("잔금", r"(?:balance|remaining\s*payment|잔금)"),
         ("할인", r"(?:discount|할인율|할인)"),
     )
-    pct = r"(\\d{1,3}(?:\\.\\d+)?)\\s*%"
+    pct = r"(\d{1,3}(?:\.\d+)?)\s*%"
     found = []
     for name, label in labels:
         # Label first: 'deposit: 30%' but never skip over another label.
-        after = re.compile(r"(?i)(?:" + label + r")\\s*(?:is|of|:|=|-)?\\s*" + pct)
+        after = re.compile(r"(?i)(?:" + label + r")\s*(?:is|of|:|=|-)?\s*" + pct)
         # Percentage first: '30% deposit', '70% balance'.
-        before = re.compile(r"(?i)" + pct + r"\\s*(?:as|for|of)?\\s*(?:" + label + r")\\b")
+        before = re.compile(r"(?i)" + pct + r"\s*(?:as|for|of)?\s*(?:" + label + r")\b")
         values = [m.group(1) for m in after.finditer(text)]
         values += [m.group(1) for m in before.finditer(text)]
         if len(set(values)) > 1:
