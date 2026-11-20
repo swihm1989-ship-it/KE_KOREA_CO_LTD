@@ -181,6 +181,54 @@ def smoke_tests() -> tuple[tuple[str, bool], ...]:
                       and "잔금: 60%" in before
                       and not any("상충" in d for d in before))
 
+    multi_complete_text = (
+        "Product: M10 PERC Solar Cell\nQuantity: 500,000 pcs\n"
+        "Unit Price: USD 0.18/pc\n\n"
+        "Product: M6 Solar Cell\nQuantity: 300,000 pcs\n"
+        "Unit Price: USD 0.12/pc\n\n"
+        "Payment Terms:\n30% deposit and 70% balance.\nDelivery: CIF Shanghai"
+    )
+    multi_complete = extract_trade("Request for PI and PO – Multiple Solar Products",
+                                   multi_complete_text)
+    multi_correct = (
+        len(multi_complete["items"]) == 2
+        and multi_complete["items"][0]["line_total"] == "90,000"
+        and multi_complete["items"][1]["line_total"] == "36,000"
+        and multi_complete["calculated_total"] == "126,000"
+        and not multi_complete["warnings"]
+    )
+    multi_bad_total = extract_trade(
+        "Request for PI", multi_complete_text + "\nTotal: USD 125,000"
+    )
+    multi_total_warning = any(
+        "총액 불일치" in warning for warning in multi_bad_total["warnings"])
+    multi_incomplete = extract_trade(
+        "Please prepare PI",
+        "Product: Cell A\nQuantity: 100 pcs\nUnit Price: USD 0.2/pc\n"
+        "Product: Cell B\nQuantity: 200 pcs"
+    )
+    multi_incomplete_flag = (
+        multi_incomplete["calculated_total"] is None and
+        any("미기재" in warning for warning in multi_incomplete["warnings"])
+    )
+    mixed_currency = extract_trade(
+        "Please prepare PI",
+        "Product: Cell A\nQuantity: 100 pcs\nUnit Price: USD 0.2/pc\n"
+        "Product: Cell B\nQuantity: 200 pcs\nUnit Price: EUR 0.3/pc"
+    )
+    mixed_currency_flag = (
+        mixed_currency["calculated_total"] is None and
+        any("통화가 서로 다름" in warning for warning in mixed_currency["warnings"])
+    )
+    unit_mismatch = extract_trade(
+        "Please prepare PI",
+        "Product: Cell A\nQuantity: 100 kg\nUnit Price: USD 0.2/pc"
+    )
+    unit_mismatch_flag = (
+        unit_mismatch["calculated_total"] is None and
+        any("단위 불일치" in warning for warning in unit_mismatch["warnings"])
+    )
+
     return (
         ("선금 30% / 잔금 70% · PI/PO 분류 · 총액 계산", accurate),
         ("명시된 총액과 계산 총액 불일치 탐지", mismatch_found),
@@ -189,4 +237,9 @@ def smoke_tests() -> tuple[tuple[str, bool], ...]:
         ("실제 메일 형식 선금 40% / 잔금 60% / 총액 정확성", first_correct),
         ("동일 행 Deposit: 40% Balance: 60% 구별", inline_correct),
         ("역순 표기 40% deposit and 60% balance 인식", before_correct),
+        ("복수 품목 M10/M6 개별 금액 및 총액 USD 126,000", multi_correct),
+        ("복수 품목의 입력 총액 불일치 탐지", multi_total_warning),
+        ("복수 품목의 단가 누락 시 합계 계산 중단", multi_incomplete_flag),
+        ("서로 다른 통화의 품목 합계 계산 중단", mixed_currency_flag),
+        ("수량 단위와 단가 기준 단위 불일치 차단", unit_mismatch_flag),
     )
