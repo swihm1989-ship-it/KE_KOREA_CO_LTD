@@ -11,6 +11,10 @@ from Quotation_KEKOREA.orchestration.workflows import (
 from Quotation_KEKOREA.orchestration.adapters.whois_mail import Endpoint, MailConfig
 
 
+@patch.dict("os.environ", {
+    "MASTER_EMAIL_SIGNATURE_MOBILE": "+82-10-1234-5678",
+    "MASTER_EMAIL_SIGNATURE_EMAIL": "owner@example.test",
+})
 class EmailSignatureDesignTests(unittest.TestCase):
     def test_korean_defaults_and_website(self):
         sig = drafts.default_signature("ko")
@@ -19,6 +23,8 @@ class EmailSignatureDesignTests(unittest.TestCase):
             "대표이사 (Managing Director)\n"
             "(주)케이이코리아\n"
             "서울특별시 영등포구 양평로 157, 1510호\n"
+            "Mobile: +82-10-1234-5678\n"
+            "Email: owner@example.test\n"
             "www.ke-korea.co.kr"
         ))
         html = design.signature_html("안녕하세요.\n확인하겠습니다.", sig,
@@ -29,6 +35,8 @@ class EmailSignatureDesignTests(unittest.TestCase):
         self.assertIn('src="cid:ke-korea-signature-logo"', html)
         self.assertIn('href="https://www.ke-korea.co.kr"', html)
         self.assertLess(html.index("(주)케이이코리아"), html.index("www.ke-korea.co.kr"))
+        self.assertRegex(html, r'align="right"[^>]*>Mobile: \+82-10-1234-5678<br>Email: owner@example\.test</td>')
+        self.assertLess(html.index("Email:"), html.index("(주)케이이코리아"))
 
     def test_english_signature_has_same_company_brand_and_site(self):
         sig = drafts.default_signature("en")
@@ -36,16 +44,32 @@ class EmailSignatureDesignTests(unittest.TestCase):
         self.assertIn("David Seokwon Ihm", html)
         self.assertIn("Managing Director", html)
         self.assertIn("#1510, 157 Yangpyung Ro", html)
+        self.assertIn("Mobile: +82-10-1234-5678<br>Email: owner@example.test", html)
         self.assertIn("www.ke-korea.co.kr", html)
         self.assertNotIn("(주)케이이코리아", html)
 
     def test_dynamic_html_is_escaped(self):
-        sig = "Test <b> person\nDirector\nCompany & Sons\nStreet <script>hack()</script>\nwww.ke-korea.co.kr"
+        sig = "Test <b> person\nDirector\nCompany & Sons\nStreet <script>hack()</script>\nEmail: <custom@example.test>\nwww.ke-korea.co.kr"
         html = design.signature_html("<script>attack()</script>", sig,
                                      logo_src="cid:" + design.LOGO_CID)
         self.assertNotIn("<script>", html)
         self.assertIn("&lt;script&gt;", html)
         self.assertIn("&amp; Sons", html)
+        self.assertIn("Email: &lt;custom@example.test&gt;", html)
+
+    def test_copied_legacy_default_gets_contacts_without_changing_custom_signature(self):
+        from Quotation_KEKOREA.orchestration.ui.email_outbox_page import _body_prefill_from_previous
+
+        legacy = (
+            "David Seokwon Ihm\nManaging Director\nKE Korea Co. Ltd\n"
+            "#1510, 157 Yangpyung Ro, Yeongdeung Po Gu, Seoul, South Korea\nwww.ke-korea.co.kr"
+        )
+        self.assertEqual(
+            _body_prefill_from_previous("Hello.\n\n" + legacy, "en"),
+            ("Hello.", drafts.default_signature("en")),
+        )
+        custom = legacy.replace("Managing Director", "Director")
+        self.assertEqual(_body_prefill_from_previous("Hello.\n\n" + custom, "en"), ("Hello.", custom))
 
     def test_packaged_logo_is_valid_compact_png(self):
         data = design.optimized_logo()

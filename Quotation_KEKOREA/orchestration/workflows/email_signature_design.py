@@ -10,7 +10,6 @@ import base64
 from html import escape
 from io import BytesIO
 from pathlib import Path
-import re
 from functools import lru_cache
 
 LOGO_CID = "ke-korea-signature-logo"
@@ -43,7 +42,7 @@ def optimized_logo() -> bytes:
 
 
 def signature_html(body_text: str, signature_text: str, *, logo_src: str) -> str:
-    """Corporate style #2: navy name/title, divider, logo + company, URL.
+    """Render the name and contact details above the company logo and address.
 
     Every dynamic string is escaped. Only the exact company site is linked.
     HTML email uses inline CSS and table layout for Outlook compatibility.
@@ -58,7 +57,13 @@ def signature_html(body_text: str, signature_text: str, *, logo_src: str) -> str
     name, title, company = lines[:3]
     rest = lines[3:]
     has_site = SITE_TEXT in rest
-    address = [line for line in rest if line != SITE_TEXT]
+    address = []
+    contacts = []
+    for line in rest:
+        if line.lower().startswith(("mobile:", "email:")):
+            contacts.append(line)
+        elif line != SITE_TEXT:
+            address.append(line)
     safe_src = str(logo_src)
     if not (safe_src == "cid:" + LOGO_CID or safe_src.startswith("data:image/png;base64,")):
         raise ValueError("서명 로고 경로가 유효하지 않습니다.")
@@ -67,6 +72,14 @@ def signature_html(body_text: str, signature_text: str, *, logo_src: str) -> str
         base64.b64decode(safe_src.split(",", 1)[1], validate=True)
     html_body = escape(content).replace("\n", "<br>")
     address_html = "<br>".join(escape(x) for x in address)
+    contact_html = ""
+    if contacts:
+        contact_html = (
+            '<td width="1%" valign="top" align="right" '
+            'style="padding-left:16px;color:#526a7e;font-size:12px;'
+            'line-height:1.55;white-space:nowrap;text-align:right;">'
+            + "<br>".join(escape(line) for line in contacts) + "</td>"
+        )
     site_html = (
         '<div style="margin-top:10px;font-family:Arial,sans-serif;font-size:12px;">'
         '<a href="' + SITE_URL + '" style="color:#0877c9;text-decoration:none;">'
@@ -79,10 +92,13 @@ def signature_html(body_text: str, signature_text: str, *, logo_src: str) -> str
         + html_body + '</div>'
         '<table role="presentation" cellpadding="0" cellspacing="0" '
         'style="border-collapse:collapse;margin-top:22px;max-width:500px;">'
-        '<tr><td colspan="2" style="font-size:15px;font-weight:700;color:#092b4c;'
-        'padding-bottom:3px;">' + escape(name) + '</td></tr>'
-        '<tr><td colspan="2" style="font-size:12px;color:#526a7e;padding-bottom:13px;">'
-        + escape(title) + '</td></tr>'
+        '<tr><td colspan="2" style="padding-bottom:13px;">'
+        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+        'style="border-collapse:collapse;"><tr><td valign="top">'
+        '<div style="font-size:15px;font-weight:700;color:#092b4c;padding-bottom:3px;">'
+        + escape(name) + '</div>'
+        '<div style="font-size:12px;color:#526a7e;">' + escape(title) + '</div>'
+        '</td>' + contact_html + '</tr></table></td></tr>'
         '<tr><td colspan="2" style="border-top:1px solid #ccdae6;height:12px;">&nbsp;</td></tr>'
         '<tr><td valign="middle" style="width:125px;padding:3px 17px 3px 0;">'
         '<img src="' + escape(safe_src, quote=True) + '" width="118" alt="KE KOREA" '

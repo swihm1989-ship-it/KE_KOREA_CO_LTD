@@ -381,7 +381,7 @@ Master 관리자 모니터링 메뉴에 JSON 실행 로그, 모델별 호출/응
 
 
 ### 2026-11-13 · POP3 수신계정 확인 및 0건 원인 진단
-- 로그인된 회사 메일함 소유자에게만 현재 `WHOIS_POP_USERNAME` 설정값을 표시하고, 요청한 `david.ihm@ke-korea.com`과 일치하는지 안내합니다. 실제 비밀번호와 서버 원문은 표시하지 않습니다.
+- 로그인된 회사 메일함 소유자에게만 현재 `WHOIS_POP_USERNAME` 설정값을 표시하고, 요청한 회사 메일 계정과 일치하는지 안내합니다. 실제 비밀번호와 서버 원문은 표시하지 않습니다.
 - 소유자가 누르는 읽기 전용 POP3 상세 진단은 UIDL 메일 건수, LIST 건수, 최신 메일 RETR 성공·거부·타임아웃 구분 및 크기 정책만 표시합니다. 실제 메일 본문/UID/첨부는 표시·저장·로그하지 않으며 발송·삭제하지 않습니다.
 - '마지막 조회 성공'의 모호한 문구를 동기화 완료 시간과 표시 가능한 메일 건수로 구분하고, 0건이면 상세 진단을 안내합니다. 로그인 인증 성공만으로 본문 수신 성공을 보증하지 않습니다.
 - 외부 후이즈 서버 원인과 실제 Secrets의 계정 설정값은 운영 인증 화면에서만 확인 가능합니다. 합성 테스트와 GitHub CI는 실제 운영 메일 수신 검증을 대신하지 않습니다.
@@ -390,7 +390,7 @@ Master 관리자 모니터링 메뉴에 JSON 실행 로그, 모델별 호출/응
 ### 2026-11-13 · POP3 상세 진단 ImportError / Streamlit Hot Reload 복구
 - Streamlit 프로세스가 오래된 후이즈 메일 어댑터를 캐시에 유지할 때 SMTP 버전뿐 아니라 POP3 진단 버전과 `probe_pop_diagnostics` 함수 존재 여부를 검증하고 필요할 때만 모듈을 다시 로딩합니다.
 - 진단 함수가 여전히 없다면 ImportError로 전체 메일함을 중단하지 않고 앱 재시작 안내를 표시합니다. 메일 계정·비밀번호·인증 정보는 변경하거나 출력하지 않습니다.
-- 수신계정 `david.ihm@ke-korea.com`은 운영 화면에서 설정 문자열이 확인되었으며 실제 POP3 RETR 성공은 진단 실행으로 별도 확인해야 합니다. 계약서·PI/PO/CI/PL/직인/승인 규칙은 변경하지 않습니다.
+- 수신계정 회사 메일 계정은 운영 화면에서 설정 문자열이 확인되었으며 실제 POP3 RETR 성공은 진단 실행으로 별도 확인해야 합니다. 계약서·PI/PO/CI/PL/직인/승인 규칙은 변경하지 않습니다.
 - 회귀 테스트는 오래된 POP3 버전 및 진단 함수 누락 상황의 모듈 재로딩을 검증합니다. 실제 운영 화면/후이즈 서버 연결은 별도로 확인해야 합니다.
 
 
@@ -539,6 +539,10 @@ Master 관리자 모니터링 메뉴에 JSON 실행 로그, 모델별 호출/응
 
 MASTER sidebar now shows: 시장 뉴스, 메일함, AI 업무 요청, 통합 업무 흐름, 문서 검토, 발송 대기, 저장된 계약서. The old sample dashboard, execution log, admin monitoring, draft preview, and engine preflight are hidden from the menu (underlying diagnostics and original engines remain untouched). Successful MASTER DRAFT PDF generation archives the exact PDF to the private Supabase bucket `kekorea-master-pdfs`, with owner-scoped metadata in `kekorea_master_pdf_archive`; FINAL PDFs are likewise archived. Saved lists show filenames, KST dates and times, click-to-preview and download. The 발송 대기 screen requires a new user approval (and the original seal authorization for contracts) before converting the immutable draft snapshot into a new PDF using the original KE KOREA rendering engine. Converted drafts leave the pending list, retaining the historical record. No automatic SMTP send. The original KE KOREA contracts database and document renderer are unchanged. New archive records require server-only Supabase credentials and a private bucket. GitHub merge is not by itself proof of live Streamlit deployment; verify the deployed menus and a fresh DRAFT -> FINAL workflow on the running app.
 
+
+### 2026-11-24 · Render MASTER 메일 서명 연락처
+
+한국어·영어 회신의 기본 서명은 이름과 직함 오른쪽에 휴대전화와 이메일을 표시한다. 발송 대기 미리보기와 발송되는 HTML은 같은 서명 양식을 사용한다.
 
 ### 2026-11-18 · MASTER 사용자 승인형 이메일 회신 (개발 PR, 미배포)
 후이즈 메일함 → AI 업무 요청에서 문서 종류를 확인한다. PI/PO/CI/PL/계약서 요청은 기존 원본 문서 엔진의 작성 화면으로, 문서가 필요 없는 메일은 사용자 선택으로 비공개 발송 대기함에 저장한다. 외부 AI 전송 동의 후 회신 후보 3개(간결/친근/상세)를 생성하고, 사용자가 편집할 제목·받는 사람·본문과 언어별 기본 서명을 제공한다. 영어 서명은 David Seokwon Ihm / Managing Director / KE Korea Co. Ltd / #1510, 157 Yangpyung Ro, Yeongdeung Po Gu, Seoul, South Korea, 한국어는 임석원·한글 주소를 기본으로 한다. 언어 판별은 본문/제목 기준이며 수동 전환 가능하다. **자동 발송 없음:** 사용자의 현재 본문과 수신자를 다시 확인하는 체크박스 및 **발송** 버튼을 누를 때만 SMTP 호출. 발송 승인 전 상태를 DB에 원자적으로 기록하고 결과가 불확실하면 재전송 차단. 기존 자동 접수 회신 제안 PR #128은 폐기하고 운영 DB 임시 자동발송 이력 테이블을 제거했다. 기존 계약서/무역문서 엔진과 팀 프로젝트는 수정하지 않았다. 실제 SMTP 발송·Streamlit 운영 배포는 아직 미검증.

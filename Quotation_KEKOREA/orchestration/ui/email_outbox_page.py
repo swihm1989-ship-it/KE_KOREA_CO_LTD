@@ -124,10 +124,9 @@ def _body_prefill_from_previous(full: str, language: str):
     unrecognized custom block requires human review, not silent deletion.
     """
     message = str(full or "").strip()
-    signature = default_signature(language)
-    if message.endswith("\n\n" + signature):
-        return message[:-(len(signature) + 2)].strip(), signature
     blocks = message.rsplit("\n\n", 1)
+    if len(blocks) == 2 and blocks[1] == default_signature(language, include_contact=False):
+        return blocks[0].strip(), default_signature(language)
     if len(blocks) == 2 and (
         "www.ke-korea.co.kr" in blocks[1] or
         "KE Korea Co. Ltd" in blocks[1] or

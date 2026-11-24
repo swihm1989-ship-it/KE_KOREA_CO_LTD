@@ -9,6 +9,7 @@ from hashlib import sha256
 from email.header import decode_header, make_header
 from email.utils import parseaddr
 import json
+import os
 import re
 import urllib.error
 import urllib.request
@@ -19,19 +20,18 @@ REPLY_RUNTIME_REVISION = "master-reply-20261118-personal-salutation-v3"
 REPLY_SOURCE_MTIME_NS = Path(__file__).stat().st_mtime_ns
 
 STYLES = ("간결한 비즈니스형", "친근한 협력형", "상세하고 정중한 형식")
+SIGNATURE_WEBSITE = "www.ke-korea.co.kr"
 SIGNATURE_KO = (
     "임석원 (David Seokwon Ihm)\n"
     "대표이사 (Managing Director)\n"
     "(주)케이이코리아\n"
     "서울특별시 영등포구 양평로 157, 1510호\n"
-    "www.ke-korea.co.kr"
 )
 SIGNATURE_EN = (
     "David Seokwon Ihm\n"
     "Managing Director\n"
     "KE Korea Co. Ltd\n"
     "#1510, 157 Yangpyung Ro, Yeongdeung Po Gu, Seoul, South Korea\n"
-    "www.ke-korea.co.kr"
 )
 
 
@@ -41,8 +41,16 @@ def preferred_language(subject: str, body: str) -> str:
     return "ko" if re.search(r"[가-힣]", (subject or "") + "\n" + (body or "")[:1000]) else "en"
 
 
-def default_signature(language: str) -> str:
-    return SIGNATURE_KO if language == "ko" else SIGNATURE_EN
+def default_signature(language: str, *, include_contact: bool = True) -> str:
+    identity = SIGNATURE_KO if language == "ko" else SIGNATURE_EN
+    if not include_contact:
+        return identity + SIGNATURE_WEBSITE
+    mobile = os.environ.get("MASTER_EMAIL_SIGNATURE_MOBILE", "").strip()
+    email = os.environ.get("MASTER_EMAIL_SIGNATURE_EMAIL", "").strip()
+    contact = "".join(f"{label}: {value}\n" for label, value in (
+        ("Mobile", mobile), ("Email", email),
+    ) if value)
+    return identity + contact + SIGNATURE_WEBSITE
 
 
 
