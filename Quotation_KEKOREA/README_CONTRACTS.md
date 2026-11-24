@@ -1,6 +1,6 @@
 # Contract workspace
 
-The Render MASTER email composer renders its corporate signature separately from the signature sections of attached contract PDFs.
+The Render MASTER email composer puts contact details below the office address in the email signature. Attached contract PDFs use the contract workspace's signature sections.
 
 > 최신 변경: 2026-11-13 MASTER 입력 상태 동기화 및 승인 후 공란 유지 FINAL 출력. 문서 끝의 동일 제목 항목과 저장소 루트 `docs/master-final-pdf-20261113.md`를 참고하세요. 이전 날짜의 기록은 당시 동작이며 현재 운영 확인을 뜻하지 않습니다.
 

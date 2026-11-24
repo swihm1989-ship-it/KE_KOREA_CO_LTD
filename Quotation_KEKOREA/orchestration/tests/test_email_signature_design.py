@@ -35,8 +35,11 @@ class EmailSignatureDesignTests(unittest.TestCase):
         self.assertIn('src="cid:ke-korea-signature-logo"', html)
         self.assertIn('href="https://www.ke-korea.co.kr"', html)
         self.assertLess(html.index("(주)케이이코리아"), html.index("www.ke-korea.co.kr"))
-        self.assertRegex(html, r'align="right"[^>]*>Mobile: \+82-10-1234-5678<br>Email: owner@example\.test</td>')
-        self.assertLess(html.index("Email:"), html.index("(주)케이이코리아"))
+        self.assertRegex(
+            html,
+            r'서울특별시 영등포구 양평로 157, 1510호</div><div[^>]*>'
+            r'Mobile: \+82-10-1234-5678<br>Email: owner@example\.test</div></td>',
+        )
 
     def test_english_signature_has_same_company_brand_and_site(self):
         sig = drafts.default_signature("en")
@@ -45,6 +48,7 @@ class EmailSignatureDesignTests(unittest.TestCase):
         self.assertIn("Managing Director", html)
         self.assertIn("#1510, 157 Yangpyung Ro", html)
         self.assertIn("Mobile: +82-10-1234-5678<br>Email: owner@example.test", html)
+        self.assertLess(html.index("Seoul, South Korea"), html.index("Mobile:"))
         self.assertIn("www.ke-korea.co.kr", html)
         self.assertNotIn("(주)케이이코리아", html)
 

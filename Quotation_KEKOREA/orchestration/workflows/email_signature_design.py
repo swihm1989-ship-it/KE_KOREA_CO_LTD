@@ -42,7 +42,7 @@ def optimized_logo() -> bytes:
 
 
 def signature_html(body_text: str, signature_text: str, *, logo_src: str) -> str:
-    """Render the name and contact details above the company logo and address.
+    """Render the name and title above the logo, address and contact details.
 
     Every dynamic string is escaped. Only the exact company site is linked.
     HTML email uses inline CSS and table layout for Outlook compatibility.
@@ -72,14 +72,10 @@ def signature_html(body_text: str, signature_text: str, *, logo_src: str) -> str
         base64.b64decode(safe_src.split(",", 1)[1], validate=True)
     html_body = escape(content).replace("\n", "<br>")
     address_html = "<br>".join(escape(x) for x in address)
-    contact_html = ""
-    if contacts:
-        contact_html = (
-            '<td width="1%" valign="top" align="right" '
-            'style="padding-left:16px;color:#526a7e;font-size:12px;'
-            'line-height:1.55;white-space:nowrap;text-align:right;">'
-            + "<br>".join(escape(line) for line in contacts) + "</td>"
-        )
+    contact_html = (
+        '<div style="margin-top:3px;color:#526a7e;overflow-wrap:anywhere;">'
+        + "<br>".join(escape(line) for line in contacts) + "</div>" if contacts else ""
+    )
     site_html = (
         '<div style="margin-top:10px;font-family:Arial,sans-serif;font-size:12px;">'
         '<a href="' + SITE_URL + '" style="color:#0877c9;text-decoration:none;">'
@@ -92,13 +88,10 @@ def signature_html(body_text: str, signature_text: str, *, logo_src: str) -> str
         + html_body + '</div>'
         '<table role="presentation" cellpadding="0" cellspacing="0" '
         'style="border-collapse:collapse;margin-top:22px;max-width:500px;">'
-        '<tr><td colspan="2" style="padding-bottom:13px;">'
-        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
-        'style="border-collapse:collapse;"><tr><td valign="top">'
-        '<div style="font-size:15px;font-weight:700;color:#092b4c;padding-bottom:3px;">'
-        + escape(name) + '</div>'
-        '<div style="font-size:12px;color:#526a7e;">' + escape(title) + '</div>'
-        '</td>' + contact_html + '</tr></table></td></tr>'
+        '<tr><td colspan="2" style="font-size:15px;font-weight:700;color:#092b4c;'
+        'padding-bottom:3px;">' + escape(name) + '</td></tr>'
+        '<tr><td colspan="2" style="font-size:12px;color:#526a7e;padding-bottom:13px;">'
+        + escape(title) + '</td></tr>'
         '<tr><td colspan="2" style="border-top:1px solid #ccdae6;height:12px;">&nbsp;</td></tr>'
         '<tr><td valign="middle" style="width:125px;padding:3px 17px 3px 0;">'
         '<img src="' + escape(safe_src, quote=True) + '" width="118" alt="KE KOREA" '
@@ -107,7 +100,7 @@ def signature_html(body_text: str, signature_text: str, *, logo_src: str) -> str
         'font-size:12px;line-height:1.65;color:#445e74;">'
         '<strong style="color:#092b4c;font-size:13px;">' + escape(company) + '</strong>'
         + ('<div style="margin-top:3px;">' + address_html + '</div>' if address_html else "")
-        + '</td></tr><tr><td colspan="2">' + site_html + '</td></tr>'
+        + contact_html + '</td></tr><tr><td colspan="2">' + site_html + '</td></tr>'
         '</table></body></html>'
     )
 
